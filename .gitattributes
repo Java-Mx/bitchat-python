@@ -1,0 +1,41 @@
+# Set default behavior to automatically handle line endings with LF normalization
+* text=auto eol=lf
+
+# Explicitly declare text files you want to always be normalized and converted to LF
+*.py text eol=lf diff=python
+*.pyi text eol=lf diff=python
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.rst text eol=lf
+*.txt text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.sh text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.editorconfig text eol=lf
+LICENSE text eol=lf
+
+# Windows batch and cmd files should use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=lf
+
+# Binary files - preserve exact byte representations
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.tar.gz binary
+*.zip binary
+*.whl binary
+*.pyc binary
+*.pyd binary
+*.so binary
+*.bin binary
+*.dat binary
