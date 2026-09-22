@@ -39,6 +39,17 @@ MAX_PADDING_SIZE: int = 255
 # Cover traffic prefix
 COVER_TRAFFIC_PREFIX: str = "☂DUMMY☂"
 
+# Fragmentation constants matching BitChat reference
+FRAGMENTATION_THRESHOLD: int = 500
+FRAGMENT_CHUNK_SIZE: int = 150
+FRAGMENT_HEADER_SIZE: int = 13
+FRAGMENT_ID_SIZE: int = 8
+
+# Resource and DoS hardening bounds
+MAX_FRAGMENTS_PER_ASSEMBLY: int = 1000
+MAX_ACTIVE_ASSEMBLIES: int = 100
+MAX_REASSEMBLED_BYTES: int = 150_000
+
 
 class MessageType(IntEnum):
     """BitChat protocol message types."""

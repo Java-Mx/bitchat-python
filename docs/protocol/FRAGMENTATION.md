@@ -51,17 +51,19 @@ When `send_packet_with_fragmentation` is invoked:
 
 ## 5. Reassembly Logic
 
-*   A `FragmentCollector` tracks fragments grouped by their 8-byte `fragment_id`.
+*   A `FragmentReassembler` tracks in-progress assemblies grouped by `(sender_id, fragment_id)`.
 *   Fragments are inserted into the collection based on their `index`.
-*   **Out-of-order handling**: Supported. Fragments are stored by index and will be concatenated in order once all are received.
-*   **Completion**: Reassembly is complete when all indices from `0` to `total - 1` have been received.
-*   Upon completion, the reassembled data is concatenated in index order. The complete payload is then parsed as a standard `BitchatPacket`.
+*   **Sender Isolation**: Fragments from different senders are isolated; an attacker cannot corrupt or hijack an in-progress assembly merely by reusing a `fragment_id`.
+*   **Out-of-order handling**: Fully supported. Fragments are stored by index and concatenated in strictly ascending index order once all fragments are present.
+*   **Completion**: Reassembly is complete only when all indices from `0` to `total - 1` have been received.
+*   Upon completion, the reassembled bytes reproduce the exact original encoded `BitchatPacket` bytes, which can then be parsed via `decode_packet`.
+*   **Duplicate handling**: Identical duplicate fragments are safely ignored without memory growth; conflicting data for the same index is rejected and drops the corrupted assembly.
+*   **Resource Bounds & Hardening**:
+    *   `MAX_FRAGMENTS_PER_ASSEMBLY = 1000`: Protects against malicious total declarations.
+    *   `MAX_ACTIVE_ASSEMBLIES = 100`: Bounds concurrent in-memory assemblies via LRU/FIFO eviction.
+    *   `MAX_REASSEMBLED_BYTES = 150_000`: Protects against memory exhaustion from oversized fragment payloads.
+    *   Stale assemblies can be pruned using `prune_stale(max_age_seconds)` without background timers.
 
-### Missing / Unknown Behavior
-
-*   **Timeout for incomplete fragment sets**: UNKNOWN — Requires runtime verification. Current Rust implementation does not appear to implement explicit cleanup or timeouts for stale/incomplete fragments.
-*   **Duplicate fragment handling**: UNKNOWN — Since fragments are inserted by index, duplicate indices would simply overwrite existing chunks.
-*   **Maximum fragments limit**: Limited by the `u16` `total` field (max 65535 fragments).
 
 ## 6. Relay of Fragments
 

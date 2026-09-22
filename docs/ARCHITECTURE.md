@@ -21,10 +21,12 @@ OS Bluetooth APIs
 - **`tui/`**: Terminal UI, display, user input (depends on `app`). Must NOT directly implement BLE or cryptography.
 - **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `ble`).
 - **`protocol/`**: Packet encoding/decoding, wire models, message types, fragmentation (independent). Must remain independent from presentation.
-  - `constants.py`: Wire format sizes, UUIDs, bitmask flags, block sizes, and `MessageType` enum.
+  - `constants.py`: Wire format sizes, UUIDs, bitmask flags, block sizes, fragmentation limits, and `MessageType` enum.
   - `packet.py`: Immutable `BitchatPacket` dataclass with normalized immutable `bytes` fields, property accessors, flags, and hex conversion.
   - `encoder.py`: Binary big-endian packet serialization (`encode_packet`) and BitChat random block padding (`pad_packet_data`).
   - `decoder.py`: Strict wire packet deserialization (`decode_packet`) and padding removal (`unpad_packet_data`) with defensive bounds validation.
+  - `fragmentation.py`: Packet fragmentation splitting wire-encoded packets exceeding 500 bytes into <=150-byte chunks with 13-byte headers (`FragmentStart`, `FragmentContinue`, `FragmentEnd`).
+  - `reassembly.py`: Out-of-order `FragmentReassembler` with sender isolation (`(sender_id, fragment_id)` key), LRU assembly eviction, bounded buffer limits, and strict full-range validation.
 - **`crypto/`**: Cryptographic primitives, Noise protocol, key management, and identity (independent). Must NOT depend on TUI or BLE.
   - `identity.py`: `LocalIdentity` dataclass managing Ed25519 & X25519 key pairs with safe string representation and 64-char hex fingerprint calculation.
   - `ed25519.py`: Ed25519 digital signature signing and verification with strict size checks.
@@ -52,18 +54,37 @@ Raw Unpadded Wire Bytes (Fixed Header 14B + Sender 8B [+ Recipient 8B] + Payload
   │
   ▼ [pad_packet_data]
 Padded Packet Buffer (Padded to 256 / 512 / 1024 / 2048 bytes with trailing padding count)
+  │
+  ▼ (If wire size > 500 bytes)
+[fragment_encoded_packet]
+  │
+  ▼
+N Fragment Packets (<=150B data chunks + 13B headers; Start/Continue/End)
+  │
+  ▼ [encode_packet + pad_packet_data per fragment]
+Serialized Wire Fragments for BLE transmission
 ```
 
-The reverse flow decodes wire bytes:
+The reverse flow decodes wire bytes, handling both single packets and fragmented packets:
 
 ```
 Wire Bytes Received
   │
-  ▼ [unpad_packet_data]
-Raw Unpadded Wire Bytes
+  ▼ [unpad_packet_data + decode_packet]
+Fragment Packet (0x05, 0x06, 0x07) or Regular BitchatPacket
   │
-  ▼ [decode_packet]
-BitchatPacket (Validated Data Model)
+  ├─► Regular Packet: Process directly
+  │
+  └─► Fragment Packet:
+        │
+        ▼ [reassembler.add_fragment(packet)]
+      Accumulate chunk by index under (sender_id, fragment_id)
+        │
+        ▼ (When all 0..total-1 indices present)
+      Reassembled Wire Bytes
+        │
+        ▼ [unpad_packet_data + decode_packet]
+      Original BitchatPacket (Validated Data Model)
 ```
 
 ## Dependency Rules

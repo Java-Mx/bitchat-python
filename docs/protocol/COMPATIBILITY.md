@@ -78,16 +78,16 @@ This document provides a concrete compatibility verification checklist and test 
 
 ## 4. Fragmentation and Reassembly Checklist
 
-- [ ] **Fragment Threshold:** Fragment only if packet wire size strictly > 500 bytes (`MAX_FRAGMENT_SIZE`)
-- [ ] **Chunk Size:** Maximum 150 bytes payload per fragment
-- [ ] **Inter-fragment Timing:** 20ms sleep between consecutive BLE packet transmissions
-- [ ] **13-Byte Header:**
-  - [ ] 8 bytes random `fragment_id`
-  - [ ] 2 bytes Big-Endian `u16` `index`
-  - [ ] 2 bytes Big-Endian `u16` `total`
-  - [ ] 1 byte `u8` `original_type`
-- [ ] **Reassembly:** Out-of-order index insertion into collector; reassemble when all `0..total-1` arrive
-- [ ] **Relay:** Relay individual fragments independently if `TTL > 1`
+- [x] **Fragment Threshold:** Fragment only if packet wire size strictly > 500 bytes (`MAX_FRAGMENT_SIZE` / `FRAGMENTATION_THRESHOLD`)
+- [x] **Chunk Size:** Maximum 150 bytes payload per fragment (`FRAGMENT_CHUNK_SIZE`)
+- [ ] **Inter-fragment Timing:** 20ms sleep between consecutive BLE packet transmissions (Phase 6 BLE transport)
+- [x] **13-Byte Header:**
+  - [x] 8 bytes random `fragment_id`
+  - [x] 2 bytes Big-Endian `u16` `index`
+  - [x] 2 bytes Big-Endian `u16` `total`
+  - [x] 1 byte `u8` `original_type`
+- [x] **Reassembly:** Out-of-order index insertion into collector; reassemble when all `0..total-1` arrive with sender isolation & bounds validation
+- [ ] **Relay:** Relay individual fragments independently if `TTL > 1` (Phase 7 mesh routing)
 
 ---
 

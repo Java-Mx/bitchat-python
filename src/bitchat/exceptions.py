@@ -50,6 +50,27 @@ class CorruptPaddingError(PacketDecodingError):
 
 
 # ---------------------------------------------------------------------------
+# Fragmentation error hierarchy
+# ---------------------------------------------------------------------------
+
+
+class FragmentationError(ProtocolError):
+    """Base exception for fragmentation and reassembly errors."""
+
+
+class InvalidFragmentError(FragmentationError):
+    """Raised when a fragment fails structural or metadata validation."""
+
+
+class FragmentPayloadError(InvalidFragmentError):
+    """Raised when a fragment payload cannot be parsed or is too short."""
+
+
+class FragmentLimitExceededError(FragmentationError):
+    """Raised when fragment counts or assembly sizes exceed resource limits."""
+
+
+# ---------------------------------------------------------------------------
 # Cryptographic error hierarchy
 # ---------------------------------------------------------------------------
 
