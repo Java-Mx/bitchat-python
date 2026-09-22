@@ -16,9 +16,10 @@ def test_cli_entry_point() -> None:
     """CLI entry point runs without error."""
     result = subprocess.run(
         [sys.executable, "-m", "bitchat"],
+        input="exit\n",
         capture_output=True,
         text=True,
         timeout=10,
     )
     assert result.returncode == 0
-    assert "BitChat Python" in result.stdout
+    assert "BitChat" in result.stdout

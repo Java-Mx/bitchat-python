@@ -1,16 +1,15 @@
-"""BitChat CLI entry point."""
+"""BitChat CLI entry point bootstrap."""
 
-from bitchat import __version__
+import sys
+
+from bitchat.app.application import Application
 
 
 def main() -> None:
-    """Entry point for the bitchat command."""
-    print(f"BitChat Python v{__version__}")
-    print("Status: development")
-    print("Phase: repository foundation")
-    print()
-    print("BitChat is not yet functional.")
-    print("See README.md for project status and roadmap.")
+    """Bootstrap and run the BitChat application."""
+    app = Application()
+    exit_code = app.run()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
