@@ -93,33 +93,33 @@ This document provides a concrete compatibility verification checklist and test 
 
 ## 5. Cryptography Checklist
 
-- [ ] **Ed25519 Signatures:** 64 bytes, signing raw payload bytes
-- [ ] **Ed25519 Keys:** 32-byte seed / private key, 32-byte verifying / public key
-- [ ] **X25519 DH:** 32-byte private key, 32-byte public key; scalar multiplication
-- [ ] **96-Byte KeyExchange Payload:**
-  - [ ] Bytes 0–31: Ephemeral X25519 public key
-  - [ ] Bytes 32–63: Ephemeral Ed25519 verifying key
-  - [ ] Bytes 64–95: Persistent Ed25519 identity verifying key
-- [ ] **Legacy Shared Key Derivation:** HKDF-SHA256 with salt `b"bitchat-v1"`, info empty, output 32 bytes
-- [ ] **Legacy Symmetric Encryption:** AES-256-GCM with 12-byte random nonce prefix: `[12B nonce][ciphertext + 16B tag]`
-- [ ] **Channel Key Derivation:** PBKDF2-HMAC-SHA256, 100,000 iterations, salt = channel name bytes, output 32 bytes
-- [ ] **Identity Fingerprint:** First 16 bytes of `SHA256(X25519_static_public_key)` formatted as 32 lowercase hex characters
-- [ ] **Local Password Encryption:** AES-256-GCM, key = `SHA256(b"bitchat-password-encryption" + identity_key_bytes)`
+- [x] **Ed25519 Signatures:** 64 bytes, signing raw payload bytes
+- [x] **Ed25519 Keys:** 32-byte seed / private key, 32-byte verifying / public key
+- [x] **X25519 DH:** 32-byte private key, 32-byte public key; scalar multiplication
+- [x] **96-Byte KeyExchange Payload:**
+  - [x] Bytes 0–31: Ephemeral X25519 public key
+  - [x] Bytes 32–63: Ephemeral Ed25519 verifying key
+  - [x] Bytes 64–95: Persistent Ed25519 identity verifying key
+- [x] **Legacy Shared Key Derivation:** HKDF-SHA256 with salt `b"bitchat-v1"`, info empty, output 32 bytes
+- [x] **Legacy Symmetric Encryption:** AES-256-GCM with 12-byte random nonce prefix: `[12B nonce][ciphertext + 16B tag]`
+- [x] **Channel Key Derivation:** PBKDF2-HMAC-SHA256, 100,000 iterations, salt = channel name bytes, output 32 bytes
+- [x] **Identity Fingerprint:** `SHA256(X25519_static_public_key)` full 64 lowercase hex characters (or 32 hex chars for compact UI display)
+- [ ] **Local Password Encryption:** AES-256-GCM, key = `SHA256(b"bitchat-password-encryption" + identity_key_bytes)` (Phase 6 persistence)
 
 ---
 
 ## 6. Noise Protocol Checklist
 
-- [ ] **Protocol Suite:** `Noise_XX_25519_ChaChaPoly_SHA256`
-- [ ] **Handshake Pattern:** XX (3-message mutual authentication)
-  - [ ] Message 1: `-> e`
-  - [ ] Message 2: `<- e, ee, s, es`
-  - [ ] Message 3: `-> s, se`
-- [ ] **Split:** Derive separate send and receive `CipherState` instances after Message 3
-- [ ] **Transport Nonce:** 4-byte little-endian counter placed at offset 0 of ciphertext payload
-- [ ] **ChaCha20-Poly1305 Nonce Padding:** 4-byte LE nonce copied to bytes 4–7 of 12-byte nonce array (bytes 0–3 and 8–11 are zero)
-- [ ] **Replay Window:** 1024-entry sliding window; reject nonces < `(highest_received - 1024)` or duplicate nonces in window
-- [ ] **Decrypted Inner Payload:** `[ 0x04 (Message) ] + [ Message Payload bytes ]`
+- [x] **Protocol Suite:** `Noise_XX_25519_ChaChaPoly_SHA256`
+- [x] **Handshake Pattern:** XX (3-message mutual authentication)
+  - [x] Message 1: `-> e`
+  - [x] Message 2: `<- e, ee, s, es`
+  - [x] Message 3: `-> s, se`
+- [x] **Split:** Derive separate send and receive `CipherState` instances after Message 3
+- [x] **Transport Nonce:** 4-byte little-endian counter placed at offset 0 of ciphertext payload
+- [x] **ChaCha20-Poly1305 Nonce Padding:** 4-byte LE nonce copied to bytes 4–7 of 12-byte nonce array (bytes 0–3 and 8–11 are zero)
+- [x] **Replay Window:** 1024-entry sliding window; reject nonces < `(highest_received - 1024)` or duplicate nonces in window
+- [ ] **Decrypted Inner Payload:** `[ 0x04 (Message) ] + [ Message Payload bytes ]` (Phase 5/6 payload handling)
 
 ---
 

@@ -146,7 +146,20 @@ When two peers attempt to initiate a private conversation simultaneously:
 
 ## 8. Identity Verification & Trust
 
-- **Fingerprint:** SHA-256 hash of the peer's static X25519 public key. The first 16 bytes are formatted as a 32-character lowercase hex string.
+- **Fingerprint:** SHA-256 hash of the peer's static X25519 public key. The canonical fingerprint format in `NoiseSessionManager` is the full 64-character lowercase hex string (or truncated to 16 bytes / 32 characters for compact UI display).
 - **Trust Levels:**
   - `NoiseSecured`: Handshake succeeded and session is encrypted, but the peer's fingerprint has not been manually verified by the user.
   - `NoiseVerified`: The user has explicitly marked the peer's fingerprint as verified.
+
+---
+
+## 9. Python Implementation & Security Deviations
+
+In `bitchat.crypto.noise`, the following security decisions have been made:
+
+1. **Fail-Closed on Payload Decryption Failure:** The reference implementation continues the handshake even if payload decryption fails (noted in comments as for debugging). The Python implementation treats this as a fatal `AuthenticationError`, failing closed to prevent forged payloads.
+2. **Replay Window Implementation:** A bounded `set[int]` with eviction is maintained, ensuring at most 1024 nonce counters are stored without memory growth.
+3. **Transport Cipher Direction:** Confirmed matching the reference fix (lines 1235–1240):
+   - Initiator: `send = c1`, `receive = c2`
+   - Responder: `send = c2`, `receive = c1`
+

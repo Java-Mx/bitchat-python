@@ -141,3 +141,23 @@ When broadcasting or responding to key exchanges (`MessageType::KeyExchange`), t
 
 ### 3.5 Android Compatibility Workaround
 In the reference implementation (`encryption.rs`), if the 32-byte persistent identity key (bytes 64–96) cannot be parsed as a valid Ed25519 point (a known bug in early Android BitChat clients), the parser automatically falls back to treating the ephemeral signing key (bytes 32–64) as the identity key.
+
+---
+
+## 4. Python Implementation Status (`bitchat.crypto`)
+
+All cryptographic primitives are fully implemented in pure Python using only `cryptography`:
+
+| Primitive | Python Module | Reference Equivalent | Status |
+|---|---|---|---|
+| **Identity & Fingerprints** | `bitchat.crypto.identity` | `NoiseSessionManager::calculate_fingerprint` | ✅ Implemented |
+| **Ed25519 Signatures** | `bitchat.crypto.ed25519` | `SigningKey` / `VerifyingKey` (`encryption.rs`) | ✅ Implemented |
+| **X25519 ECDH** | `bitchat.crypto.x25519` | `StaticSecret` / `PublicKey` (`encryption.rs`) | ✅ Implemented |
+| **AES-256-GCM** | `bitchat.crypto.aes_gcm` | `encrypt_legacy` / `decrypt_legacy` (`encryption.rs`) | ✅ Implemented |
+| **Noise HKDF** | `bitchat.crypto.hkdf` | `NoiseSymmetricState::hkdf` (`noise_protocol.rs`) | ✅ Implemented |
+| **Legacy HKDF** | `bitchat.crypto.hkdf` | `Hkdf::<Sha256>::new(b"bitchat-v1", ...)` | ✅ Implemented |
+| **PBKDF2** | `bitchat.crypto.pbkdf2` | `EncryptionService::derive_channel_key` | ✅ Implemented |
+| **Noise Protocol** | `bitchat.crypto.noise` | `NoiseHandshakeState` (`noise_protocol.rs`) | ✅ Implemented |
+| **Session Lifecycle** | `bitchat.crypto.sessions` | `NoiseSession` (`noise_session.rs`) | ✅ Implemented |
+| **Role Tie-Breaking** | `determine_handshake_role` | `notification_handlers.rs` line 1771 | ✅ Implemented |
+

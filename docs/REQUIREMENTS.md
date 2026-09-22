@@ -7,9 +7,9 @@ All functional and non-functional requirements below are currently marked as **�
 - **FR-02**: 🚧 Planned - BLE connection management
 - **FR-03**: ✅ Implemented - Packet encoding/decoding (`bitchat.protocol`)
 - **FR-04**: 🚧 Planned - Fragmentation/reassembly
-- **FR-05**: 🚧 Planned - Encryption (Noise Protocol Framework)
-- **FR-06**: 🚧 Planned - Identity and authentication
-- **FR-07**: 🚧 Planned - Noise session management
+- **FR-05**: ✅ Implemented - Encryption (`bitchat.crypto`, Noise Protocol XX ChaChaPoly SHA256, AES-256-GCM)
+- **FR-06**: ✅ Implemented - Identity and authentication (`LocalIdentity`, Ed25519 signatures, X25519 key verification)
+- **FR-07**: ✅ Implemented - Noise session management (`NoiseSession`, extracted nonces, 1024 replay window, tie-breaking)
 - **FR-08**: 🚧 Planned - Public channels
 - **FR-09**: 🚧 Planned - Private messages
 - **FR-10**: 🚧 Planned - Mesh routing
@@ -23,9 +23,9 @@ All functional and non-functional requirements below are currently marked as **�
 - **FR-18**: 🚧 Planned - macOS support
 
 ## Non-functional Requirements
-- **NFR-01**: 🟡 In Progress - Protocol compatibility with reference implementation (Binary packet format & message types verified)
+- **NFR-01**: 🟡 In Progress - Protocol compatibility with reference implementation (Binary packet format, message types, and Noise XX crypto verified)
 - **NFR-02**: ✅ Implemented - Separation of concerns (Layered package architecture enforced)
-- **NFR-03**: 🚧 Planned - No cryptographic improvisation
+- **NFR-03**: ✅ Implemented - No cryptographic improvisation (standard `cryptography` primitives, reference-matched parameters, explicit boundaries)
 - **NFR-04**: 🚧 Planned - Cross-platform BLE abstraction
-- **NFR-05**: ✅ Implemented - Testability (186 unit and security invariant tests passing, strict type checking and linting)
+- **NFR-05**: ✅ Implemented - Testability (374 unit, crypto, and security invariant tests passing, strict type checking and linting)
 - **NFR-06**: ✅ Implemented - Human-readable code (Documented modules, typed dataclasses)

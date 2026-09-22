@@ -39,3 +39,64 @@ class UnknownMessageTypeError(PacketDecodingError):
 
 class InvalidPacketError(ProtocolError):
     """Raised when a packet model fails field validation constraints."""
+
+
+class InsufficientPacketBytesError(PacketDecodingError):
+    """Raised when the byte buffer is too short to decode a complete packet."""
+
+
+class CorruptPaddingError(PacketDecodingError):
+    """Raised when padding length delimiter is inconsistent with packet size."""
+
+
+# ---------------------------------------------------------------------------
+# Cryptographic error hierarchy
+# ---------------------------------------------------------------------------
+
+
+class CryptoError(BitChatError):
+    """Base exception for all cryptographic errors in BitChat."""
+
+
+class InvalidKeyError(CryptoError):
+    """Raised when a cryptographic key is malformed, wrong size, or invalid."""
+
+
+class InvalidSignatureError(CryptoError):
+    """Raised when a signature value is malformed or wrong size."""
+
+
+class SignatureVerificationError(CryptoError):
+    """Raised when Ed25519 signature verification fails."""
+
+
+class KeyExchangeError(CryptoError):
+    """Raised when an X25519 Diffie-Hellman exchange fails."""
+
+
+class EncryptionError(CryptoError):
+    """Raised when AEAD encryption fails."""
+
+
+class DecryptionError(CryptoError):
+    """Raised when AEAD decryption or authentication fails."""
+
+
+class InvalidNonceError(CryptoError):
+    """Raised when a nonce is invalid, reused, or out of bounds."""
+
+
+class NoiseError(CryptoError):
+    """Base exception for Noise protocol errors."""
+
+
+class NoiseStateError(NoiseError):
+    """Raised on an invalid Noise session state transition or illegal operation."""
+
+
+class ReplayError(NoiseError):
+    """Raised when a replayed or duplicate Noise transport message is detected."""
+
+
+class AuthenticationError(NoiseError):
+    """Raised when Noise handshake authentication fails."""

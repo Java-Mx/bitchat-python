@@ -25,7 +25,15 @@ OS Bluetooth APIs
   - `packet.py`: Immutable `BitchatPacket` dataclass with normalized immutable `bytes` fields, property accessors, flags, and hex conversion.
   - `encoder.py`: Binary big-endian packet serialization (`encode_packet`) and BitChat random block padding (`pad_packet_data`).
   - `decoder.py`: Strict wire packet deserialization (`decode_packet`) and padding removal (`unpad_packet_data`) with defensive bounds validation.
-- **`crypto/`**: Encryption, Noise protocol, key management (independent). Must NOT depend on TUI.
+- **`crypto/`**: Cryptographic primitives, Noise protocol, key management, and identity (independent). Must NOT depend on TUI or BLE.
+  - `identity.py`: `LocalIdentity` dataclass managing Ed25519 & X25519 key pairs with safe string representation and 64-char hex fingerprint calculation.
+  - `ed25519.py`: Ed25519 digital signature signing and verification with strict size checks.
+  - `x25519.py`: X25519 Diffie-Hellman key exchange with Curve25519 low-order point validation.
+  - `aes_gcm.py`: AES-256-GCM encryption with 96-bit OS CSPRNG nonces matching the Rust legacy wire layout (`nonce || ciphertext+tag`).
+  - `hkdf.py`: Noise custom HMAC-SHA256 multi-output expansion and standard HKDF-SHA256 for legacy exchange.
+  - `pbkdf2.py`: PBKDF2-HMAC-SHA256 (100k iterations) for channel password key derivation.
+  - `noise.py`: `Noise_XX_25519_ChaChaPoly_SHA256` handshake state machine, symmetric transcript hashing, extracted wire nonces, and 1024-entry replay window.
+  - `sessions.py`: `NoiseSession` orchestrating per-peer handshake progression, role assignment, and transport encryption.
 - **`storage/`**: Message persistence, identity storage (independent).
 - **`ble/`**: BLE scanning, connections, GATT operations (depends on `protocol`). Must NOT depend on TUI.
 - **`models/`**: Shared data types (independent, leaf dependency).

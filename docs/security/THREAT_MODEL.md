@@ -50,14 +50,16 @@ BitChat operates primarily over Bluetooth Low Energy (BLE) and ad-hoc wireless m
 
 ---
 
-## 3. Cryptographic Threat Vectors (Phase 4 Roadmap)
+## 3. Cryptographic Threat Vectors & Defenses (Phase 4 Implemented)
 
-The following threats are addressed at the cryptographic layer in Phase 4:
+The following threats are actively defended at the cryptographic layer (`bitchat.crypto`):
 
-| Threat Vector | Target Protocol Mechanism | Status |
-|---|---|---|
-| **Eavesdropping on Direct Messages** | Noise XX Handshake & ChaCha20-Poly1305 AEAD | Planned (Phase 4) |
-| **Sender Impersonation / Spoofing** | Ephemeral Ed25519 payload signatures (`FLAG_HAS_SIGNATURE`) | Planned (Phase 4) |
-| **Channel Message Eavesdropping** | PBKDF2-HMAC-SHA256 (100k iter) + AES-256-GCM | Planned (Phase 4) |
-| **Legacy Direct Message Decryption** | X25519 ECDH + HKDF-SHA256 + AES-256-GCM | Planned (Phase 4) |
-| **Key Compromise via State Storage** | Identity key-derived AES-256-GCM encryption of stored passwords | Planned (Phase 4) |
+| Threat Vector | Target Protocol Mechanism | Status | Defenses Implemented |
+|---|---|---|---|
+| **Eavesdropping on Direct Messages** | Noise XX Handshake & ChaCha20-Poly1305 AEAD | ✅ Implemented | Mutual static key authentication, ephemeral DH forward secrecy, AEAD encryption |
+| **Sender Impersonation / Spoofing** | Ephemeral Ed25519 payload signatures | ✅ Implemented | 64-byte Ed25519 digital signatures with strict verification |
+| **Channel Message Eavesdropping** | PBKDF2-HMAC-SHA256 (100k iter) + AES-256-GCM | ✅ Implemented | Key derivation with channel name salt and fresh 96-bit random nonces |
+| **Legacy Direct Message Decryption** | X25519 ECDH + HKDF-SHA256 + AES-256-GCM | ✅ Implemented | Legacy HKDF-SHA256 derivation with Curve25519 low-order point rejection |
+| **Replay Attacks on Encrypted Transport** | 1024-entry sliding replay window | ✅ Implemented | Replay rejection for duplicate/stale nonces, extracted 4-byte LE nonces |
+| **Tie-Breaking Race Conditions** | Lexicographic peer ID comparison | ✅ Implemented | Deterministic initiator/responder assignment preventing handshake deadlocks |
+| **Secret Exposure in Memory / Logs** | Immutable `LocalIdentity` & sanitized `repr` | ✅ Implemented | Private key bytes excluded from strings, representations, and exceptions |
