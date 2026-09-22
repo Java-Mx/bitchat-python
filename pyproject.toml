@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bitchat"
+version = "0.1.0"
+description = "Python terminal client for the BitChat protocol over Bluetooth Low Energy"
+readme = "README.md"
+license = "MIT"
+requires-python = ">= 3.12"
+authors = [
+    { name = "BitChat Contributors" },
+]
+keywords = ["bluetooth", "ble", "chat", "mesh", "p2p", "terminal"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+    "Typing :: Typed",
+]
+dependencies = [
+    "textual>=3.0.0",
+    "bleak>=0.22.0",
+    "cryptography>=44.0.0",
+]
+
+[project.scripts]
+bitchat = "bitchat.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/bitchat/bitchat-python"
+Repository = "https://github.com/bitchat/bitchat-python"
+Issues = "https://github.com/bitchat/bitchat-python/issues"
+Documentation = "https://github.com/bitchat/bitchat-python/tree/main/docs"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "ruff>=0.9.0",
+    "pyright>=1.1.390",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH", "RUF"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
