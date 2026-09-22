@@ -20,13 +20,43 @@ OS Bluetooth APIs
 
 - **`tui/`**: Terminal UI, display, user input (depends on `app`). Must NOT directly implement BLE or cryptography.
 - **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `ble`).
-- **`protocol/`**: Packet encoding/decoding, message types, fragmentation (independent). Must remain independent from presentation.
+- **`protocol/`**: Packet encoding/decoding, wire models, message types, fragmentation (independent). Must remain independent from presentation.
+  - `constants.py`: Wire format sizes, UUIDs, bitmask flags, block sizes, and `MessageType` enum.
+  - `packet.py`: Immutable `BitchatPacket` dataclass with property accessors, flags, and hex conversion.
+  - `encoder.py`: Binary big-endian packet serialization (`encode_packet`) and block padding (`pad_packet_data`).
+  - `decoder.py`: Strict wire packet deserialization (`decode_packet`) and padding removal (`unpad_packet_data`).
 - **`crypto/`**: Encryption, Noise protocol, key management (independent). Must NOT depend on TUI.
 - **`storage/`**: Message persistence, identity storage (independent).
 - **`ble/`**: BLE scanning, connections, GATT operations (depends on `protocol`). Must NOT depend on TUI.
 - **`models/`**: Shared data types (independent, leaf dependency).
 - **`utils/`**: Shared utilities (independent, leaf dependency).
 - **`commands/`**: CLI command definitions (depends on `app`).
+
+## Protocol Wire Architecture
+
+The `bitchat.protocol` layer provides a decoupled, pure-Python wire encoding and decoding pipeline:
+
+```
+BitchatPacket (Data Model)
+  │
+  ▼ [encode_packet]
+Raw Unpadded Wire Bytes (Fixed Header 14B + Sender 8B [+ Recipient 8B] + Payload [+ Signature 64B])
+  │
+  ▼ [pad_packet_data]
+Padded Packet Buffer (Padded to 256 / 512 / 1024 / 2048 bytes with trailing padding count)
+```
+
+The reverse flow decodes wire bytes:
+
+```
+Wire Bytes Received
+  │
+  ▼ [unpad_packet_data]
+Raw Unpadded Wire Bytes
+  │
+  ▼ [decode_packet]
+BitchatPacket (Validated Data Model)
+```
 
 ## Dependency Rules
 - Higher layers depend on lower layers, never the reverse.

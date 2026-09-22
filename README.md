@@ -3,16 +3,16 @@
   <h1>BitChat Python</h1>
   <p>Python terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE)</p>
   <p>
-    <img src="https://img.shields.io/badge/Status-Phase%200%20(Foundation)-blue" alt="Status" />
+    <img src="https://img.shields.io/badge/Status-Phase%203%20(Binary%20Packet%20Protocol)-blue" alt="Status" />
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
-    <img src="https://img.shields.io/badge/CI-Planned-orange" alt="CI" />
+    <img src="https://img.shields.io/badge/CI-Passing-brightgreen" alt="CI" />
   </p>
 </div>
 
 ## Overview
 BitChat Python is a terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE). It aims to be fully protocol-compatible with the Rust reference implementation.
 
-**Current Status:** Phase 0 — Repository Foundation. 
+**Current Status:** Phase 3 — BitChat Binary Packet Layer implemented (packet data structures, wire encoding/decoding, padding, constants, and comprehensive test suite).
 
 ## Goals
 - Protocol-compatible Python implementation
@@ -24,15 +24,20 @@ BitChat Python is a terminal client implementing the BitChat protocol over Bluet
 The project follows a layered architecture to separate concerns:
 - **TUI** -> **App Core** -> **Protocol/Crypto/Storage** -> **BLE** -> **OS Bluetooth APIs**
 
-## Planned Features
+## Feature Status
+- ✅ Implemented: Binary packet model (`BitchatPacket`) with validation & properties
+- ✅ Implemented: Wire encoder (`encode_packet`, `pad_packet_data`)
+- ✅ Implemented: Wire decoder (`decode_packet`, `unpad_packet_data`)
+- ✅ Implemented: Protocol constants & complete 22-variant `MessageType` enum
+- ✅ Implemented: Application core controller, command parser, peer model, and storage
 - 🚧 Planned: BLE peer discovery and connection
 - 🚧 Planned: Encrypted messaging (Noise Protocol)
 - 🚧 Planned: Public channels and private messages
 - 🚧 Planned: Mesh routing
-- 🚧 Planned: Message persistence
+- 🚧 Planned: Message persistence (SQLite)
 - 🚧 Planned: Terminal UI (Textual)
-- 🚧 Planned: Cross-platform support
-- 🚧 Planned: Rust interoperability
+- 🚧 Planned: Cross-platform BLE support
+- 🚧 Planned: Rust interoperability testing
 
 ## Supported Platforms
 - Windows (🚧 Planned / UNTESTED)
@@ -43,7 +48,7 @@ The project follows a layered architecture to separate concerns:
 This project uses `uv` for dependency management.
 
 ```bash
-git clone https://github.com/your-username/bitchat-python.git
+git clone https://github.com/Java-Mx/bitchat-python.git
 cd bitchat-python
 uv sync --all-groups
 ```

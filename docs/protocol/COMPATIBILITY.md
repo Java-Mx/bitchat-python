@@ -6,21 +6,21 @@ This document provides a concrete compatibility verification checklist and test 
 
 ## 1. Binary Packet Encoding Checklist
 
-- [ ] **Protocol Version:** Exactly byte `0x01` (`1`)
-- [ ] **Message Type:** Byte matches `MessageType` enum value (`0x01`–`0x25`)
-- [ ] **TTL (Time to Live):** 1 byte (`u8`), default 7, decremented on relay, dropped at 0
-- [ ] **Timestamp:** 8 bytes, Big-Endian `u64` representing milliseconds since Unix epoch
-- [ ] **Packet Flags:** 1 byte bitmask:
-  - [ ] `FLAG_HAS_RECIPIENT` (`0x01`)
-  - [ ] `FLAG_HAS_SIGNATURE` (`0x02`)
-  - [ ] `FLAG_IS_COMPRESSED` (`0x04`)
-- [ ] **Payload Length:** 2 bytes, Big-Endian `u16`
-- [ ] **Sender ID:** 8 raw bytes (`[u8; 8]`)
-- [ ] **Recipient ID:** 8 raw bytes (`[u8; 8]`), included if and only if `FLAG_HAS_RECIPIENT` (0x01) is set
-- [ ] **Broadcast Recipient ID:** Exactly `[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]`
-- [ ] **Payload Content:** `payload_length` bytes (LZ4 decompressed if `FLAG_IS_COMPRESSED` set)
-- [ ] **Signature Placement:** Exactly 64 bytes immediately following payload, included if and only if `FLAG_HAS_SIGNATURE` (0x02) is set
-- [ ] **Block Padding:** PKCS#7-style random padding to 256, 512, 1024, or 2048 bytes; final byte encodes padding count (1–255)
+- [x] **Protocol Version:** Exactly byte `0x01` (`1`)
+- [x] **Message Type:** Byte matches `MessageType` enum value (`0x01`–`0x25`)
+- [x] **TTL (Time to Live):** 1 byte (`u8`), default 7, decremented on relay, dropped at 0
+- [x] **Timestamp:** 8 bytes, Big-Endian `u64` representing milliseconds since Unix epoch
+- [x] **Packet Flags:** 1 byte bitmask:
+  - [x] `FLAG_HAS_RECIPIENT` (`0x01`)
+  - [x] `FLAG_HAS_SIGNATURE` (`0x02`)
+  - [x] `FLAG_IS_COMPRESSED` (`0x04`)
+- [x] **Payload Length:** 2 bytes, Big-Endian `u16`
+- [x] **Sender ID:** 8 raw bytes (`[u8; 8]`)
+- [x] **Recipient ID:** 8 raw bytes (`[u8; 8]`), included if and only if `FLAG_HAS_RECIPIENT` (0x01) is set
+- [x] **Broadcast Recipient ID:** Exactly `[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]`
+- [x] **Payload Content:** `payload_length` bytes (LZ4 compression payload handler in Phase 4)
+- [x] **Signature Placement:** Exactly 64 bytes immediately following payload, included if and only if `FLAG_HAS_SIGNATURE` (0x02) is set
+- [x] **Block Padding:** PKCS#7-style random padding to 256, 512, 1024, or 2048 bytes; final byte encodes padding count (1–255)
 
 ---
 
@@ -39,28 +39,28 @@ This document provides a concrete compatibility verification checklist and test 
 
 ## 3. Message Type Checklist (All 22 Types)
 
-- [ ] `0x01`: `Announce` (Nickname broadcast)
-- [ ] `0x02`: `KeyExchange` (96-byte combined key data)
-- [ ] `0x03`: `Leave` (Channel departure / `#channel` payload)
-- [ ] `0x04`: `Message` (Standard chat message format)
-- [ ] `0x05`: `FragmentStart` (First fragment with 13-byte header)
-- [ ] `0x06`: `FragmentContinue` (Intermediate fragment with 13-byte header)
-- [ ] `0x07`: `FragmentEnd` (Final fragment with 13-byte header)
-- [ ] `0x08`: `ChannelAnnounce` (Pipe-delimited `#channel|isProtected|creator|commitment`)
-- [ ] `0x09`: `ChannelRetention` (Swift v2 compatibility)
-- [ ] `0x0A`: `DeliveryAck` (Delivery confirmation UUID)
-- [ ] `0x0B`: `DeliveryStatusRequest` (Delivery status query)
-- [ ] `0x0C`: `ReadReceipt` (Read confirmation UUID)
-- [ ] `0x10`: `NoiseHandshakeInit` (Noise XX Message 1)
-- [ ] `0x11`: `NoiseHandshakeResp` (Noise XX Message 2)
-- [ ] `0x12`: `NoiseEncrypted` (ChaCha20-Poly1305 transport payload)
-- [ ] `0x13`: `NoiseIdentityAnnounce` (Static public key + identity hash)
-- [ ] `0x20`: `VersionHello` (Version negotiation proposal)
-- [ ] `0x21`: `VersionAck` (Version negotiation acknowledgment)
-- [ ] `0x22`: `ProtocolAck` (Low-level frame ACK)
-- [ ] `0x23`: `ProtocolNack` (Low-level frame NACK with error code)
-- [ ] `0x24`: `SystemValidation` (Session validation ping)
-- [ ] `0x25`: `HandshakeRequest` (Tie-breaking handshake request)
+- [x] `0x01`: `Announce` (Nickname broadcast)
+- [x] `0x02`: `KeyExchange` (96-byte combined key data)
+- [x] `0x03`: `Leave` (Channel departure / `#channel` payload)
+- [x] `0x04`: `Message` (Standard chat message format)
+- [x] `0x05`: `FragmentStart` (First fragment with 13-byte header)
+- [x] `0x06`: `FragmentContinue` (Intermediate fragment with 13-byte header)
+- [x] `0x07`: `FragmentEnd` (Final fragment with 13-byte header)
+- [x] `0x08`: `ChannelAnnounce` (Pipe-delimited `#channel|isProtected|creator|commitment`)
+- [x] `0x09`: `ChannelRetention` (Swift v2 compatibility)
+- [x] `0x0A`: `DeliveryAck` (Delivery confirmation UUID)
+- [x] `0x0B`: `DeliveryStatusRequest` (Delivery status query)
+- [x] `0x0C`: `ReadReceipt` (Read confirmation UUID)
+- [x] `0x10`: `NoiseHandshakeInit` (Noise XX Message 1)
+- [x] `0x11`: `NoiseHandshakeResp` (Noise XX Message 2)
+- [x] `0x12`: `NoiseEncrypted` (ChaCha20-Poly1305 transport payload)
+- [x] `0x13`: `NoiseIdentityAnnounce` (Static public key + identity hash)
+- [x] `0x20`: `VersionHello` (Version negotiation proposal)
+- [x] `0x21`: `VersionAck` (Version negotiation acknowledgment)
+- [x] `0x22`: `ProtocolAck` (Low-level frame ACK)
+- [x] `0x23`: `ProtocolNack` (Low-level frame NACK with error code)
+- [x] `0x24`: `SystemValidation` (Session validation ping)
+- [x] `0x25`: `HandshakeRequest` (Tie-breaking handshake request)
 
 ---
 

@@ -14,7 +14,8 @@ Run the test suite using pytest:
 ```bash
 uv run pytest
 uv run pytest -v
-uv run pytest tests/unit/
+uv run pytest tests/protocol/  # Protocol binary packet layer tests
+uv run pytest tests/unit/      # Application core unit tests
 ```
 
 ## Code Quality Tools

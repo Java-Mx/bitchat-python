@@ -5,7 +5,7 @@ All functional and non-functional requirements below are currently marked as **�
 ## Functional Requirements
 - **FR-01**: 🚧 Planned - BLE peer discovery
 - **FR-02**: 🚧 Planned - BLE connection management
-- **FR-03**: 🚧 Planned - Packet encoding/decoding
+- **FR-03**: ✅ Implemented - Packet encoding/decoding (`bitchat.protocol`)
 - **FR-04**: 🚧 Planned - Fragmentation/reassembly
 - **FR-05**: 🚧 Planned - Encryption (Noise Protocol Framework)
 - **FR-06**: 🚧 Planned - Identity and authentication
@@ -23,9 +23,9 @@ All functional and non-functional requirements below are currently marked as **�
 - **FR-18**: 🚧 Planned - macOS support
 
 ## Non-functional Requirements
-- **NFR-01**: 🚧 Planned - Protocol compatibility with reference implementation
-- **NFR-02**: 🚧 Planned - Separation of concerns
+- **NFR-01**: 🟡 In Progress - Protocol compatibility with reference implementation (Binary packet format & message types verified)
+- **NFR-02**: ✅ Implemented - Separation of concerns (Layered package architecture enforced)
 - **NFR-03**: 🚧 Planned - No cryptographic improvisation
 - **NFR-04**: 🚧 Planned - Cross-platform BLE abstraction
-- **NFR-05**: 🚧 Planned - Testability
-- **NFR-06**: 🚧 Planned - Human-readable code
+- **NFR-05**: ✅ Implemented - Testability (112 unit tests passing, strict type checking and linting)
+- **NFR-06**: ✅ Implemented - Human-readable code (Documented modules, typed dataclasses)

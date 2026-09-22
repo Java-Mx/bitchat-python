@@ -64,6 +64,11 @@ The `BitchatPacket` has the following binary layout, serialized in this exact or
 - **Without Recipient ID:** 22 bytes (`1 + 1 + 1 + 8 + 1 + 2 + 8`)
 - **With Recipient ID:** 30 bytes (`22 + 8`)
 
+> [!NOTE]
+> **Reference Implementation Discrepancy:**
+> In `packet_creation.rs` of the Rust reference implementation, comments casually state the header before Sender ID as "13 bytes" (`1 + 1 + 1 + 8 + 1 + 2`). However, the arithmetic sum of Version (1) + Type (1) + TTL (1) + Timestamp (8) + Flags (1) + PayloadLength (2) is mathematically **14 bytes**.
+> The reference implementation's actual runtime code serializes all 14 bytes into the buffer before pushing the 8-byte Sender ID, confirming the wire minimum unpadded packet size is 22 bytes (14 + 8). Both reference code execution and this Python implementation use 14 bytes for the fixed header preceding Sender ID.
+
 ---
 
 ## 3. Broadcast Recipient Representation
