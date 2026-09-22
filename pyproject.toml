@@ -35,10 +35,10 @@ dependencies = [
 bitchat = "bitchat.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/bitchat/bitchat-python"
-Repository = "https://github.com/bitchat/bitchat-python"
-Issues = "https://github.com/bitchat/bitchat-python/issues"
-Documentation = "https://github.com/bitchat/bitchat-python/tree/main/docs"
+Homepage = "https://github.com/Java-Mx/bitchat-python"
+Repository = "https://github.com/Java-Mx/bitchat-python"
+Issues = "https://github.com/Java-Mx/bitchat-python/issues"
+Documentation = "https://github.com/Java-Mx/bitchat-python/tree/main/docs"
 
 [dependency-groups]
 dev = [
