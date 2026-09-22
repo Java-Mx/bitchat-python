@@ -3,6 +3,7 @@
 import struct
 
 from bitchat.exceptions import (
+    InvalidPacketError,
     PacketDecodingError,
     UnknownMessageTypeError,
     UnsupportedProtocolVersionError,
@@ -23,13 +24,21 @@ from bitchat.protocol.packet import BitchatPacket
 
 
 def unpad_packet_data(data: bytes) -> bytes:
-    """Remove BitChat PKCS#7-style padding from a binary byte buffer.
+    """Remove BitChat random block padding (PKCS#7-style length delimiter).
 
     The final byte indicates the count of padding bytes to remove (1..255).
     If padding length is 0, exceeds data length, or exceeds 255, returns data unchanged.
+
+    Note:
+        Reference behavior parity: Like the Rust reference `unpad_message`, this helper
+        permissively strips trailing bytes based solely on the final delimiter byte.
+        In contrast, `decode_packet` performs strict padding-length consistency
+        validation.
     """
+    if not isinstance(data, (bytes, bytearray)):
+        raise PacketDecodingError(f"Expected bytes-like object, got {type(data)}")
     if not data:
-        return data
+        return b""
 
     padding_length = data[-1]
     if (
@@ -37,29 +46,41 @@ def unpad_packet_data(data: bytes) -> bytes:
         or padding_length > len(data)
         or padding_length > MAX_PADDING_SIZE
     ):
-        return data
+        return bytes(data)
 
-    return data[:-padding_length]
+    return bytes(data[:-padding_length])
 
 
 def decode_packet(data: bytes) -> BitchatPacket:
-    """Decode raw binary data into a typed BitchatPacket.
+    """Decode raw binary data into a BitchatPacket with defensive validation.
+
+    Defensive Parsing Architecture:
+    - Rust reference parser: permissive padding removal based solely on final byte.
+    - Python implementation: strict padding-length consistency validation.
+    - Reason: Reject malformed, truncated, corrupted, or ambiguous packets instead
+      of silently accepting corrupted data.
 
     Validation steps:
-    1. Validates minimum wire length (22 bytes: 14 header + 8 sender ID).
-    2. Parses the 14-byte fixed header BEFORE SenderID.
-    3. Validates protocol version equals CURRENT_PROTOCOL_VERSION (1).
-    4. Validates message type against known MessageType enum.
-    5. Computes exact expected unpadded packet length based on header flags.
-    6. Validates and removes trailing block padding if present.
-    7. Extracts SenderID, optional RecipientID, Payload, and optional Signature.
-    8. Returns the validated, immutable BitchatPacket instance.
+    1. Validates input type is bytes or bytearray (rejects non-bytes).
+    2. Validates minimum wire length (22 bytes: 14 header + 8 sender ID).
+    3. Parses the 14-byte fixed header BEFORE SenderID.
+    4. Validates protocol version equals CURRENT_PROTOCOL_VERSION (1).
+    5. Validates message type against known MessageType enum.
+    6. Computes exact expected unpadded packet length.
+    7. Validates and removes trailing block padding (verifying last_byte == needed).
+    8. Extracts SenderID, optional RecipientID, Payload, and Signature slices.
+    9. Returns the validated, immutable BitchatPacket instance.
 
     Raises:
         PacketDecodingError: If data is truncated, malformed, or has invalid padding.
         UnsupportedProtocolVersionError: If protocol version is unsupported.
         UnknownMessageTypeError: If message type is unrecognized.
     """
+    if not isinstance(data, (bytes, bytearray)):
+        raise PacketDecodingError(
+            f"Packet data must be a bytes-like object, got {type(data)}"
+        )
+
     if len(data) < MINIMUM_PACKET_SIZE:
         raise PacketDecodingError(
             f"Packet too small: {len(data)} bytes, "
@@ -113,7 +134,7 @@ def decode_packet(data: bytes) -> BitchatPacket:
 
     if len(data) == expected_unpadded_size:
         # Unpadded packet
-        unpadded = data
+        unpadded = bytes(data)
     else:
         # Padded packet: validate trailing padding
         padding_needed = len(data) - expected_unpadded_size
@@ -127,7 +148,7 @@ def decode_packet(data: bytes) -> BitchatPacket:
                 f"Malformed packet padding: packet has {padding_needed} extra bytes, "
                 f"but final padding byte indicates {last_byte}"
             )
-        unpadded = data[:expected_unpadded_size]
+        unpadded = bytes(data[:expected_unpadded_size])
 
     # 7. Extract variable fields
     offset = FIXED_HEADER_SIZE
@@ -153,14 +174,17 @@ def decode_packet(data: bytes) -> BitchatPacket:
         offset += SIGNATURE_SIZE
 
     # 8. Return constructed packet
-    return BitchatPacket(
-        version=version,
-        message_type=message_type,
-        ttl=ttl,
-        timestamp=timestamp,
-        flags=flags,
-        sender_id=sender_id,
-        recipient_id=recipient_id,
-        payload=payload,
-        signature=signature,
-    )
+    try:
+        return BitchatPacket(
+            version=version,
+            message_type=message_type,
+            ttl=ttl,
+            timestamp=timestamp,
+            flags=flags,
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            payload=payload,
+            signature=signature,
+        )
+    except InvalidPacketError as e:
+        raise PacketDecodingError(f"Decoded packet failed validation: {e}") from e

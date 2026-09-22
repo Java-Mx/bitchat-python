@@ -18,15 +18,23 @@ from bitchat.protocol.constants import (
 
 def peer_id_to_hex(peer_id: bytes) -> str:
     """Convert an 8-byte binary peer ID to a 16-character hexadecimal string."""
+    if not isinstance(peer_id, (bytes, bytearray)):
+        raise InvalidPacketError(
+            f"Peer ID must be a bytes-like object, got {type(peer_id)}"
+        )
     if len(peer_id) != SENDER_ID_SIZE:
         raise InvalidPacketError(
             f"Peer ID must be exactly {SENDER_ID_SIZE} bytes, got {len(peer_id)}"
         )
-    return peer_id.hex()
+    return bytes(peer_id).hex()
 
 
 def peer_id_from_hex(hex_str: str) -> bytes:
     """Convert a 16-character hexadecimal string to an 8-byte binary peer ID."""
+    if not isinstance(hex_str, str):
+        raise InvalidPacketError(
+            f"Hexadecimal peer ID must be a str, got {type(hex_str)}"
+        )
     try:
         raw = bytes.fromhex(hex_str)
     except ValueError as e:
@@ -45,6 +53,10 @@ class BitchatPacket:
 
     All multi-byte integer fields are logically represented as native integers;
     wire serialization is handled by encoder and decoder.
+
+    All binary fields (sender_id, recipient_id, payload, signature) are normalized
+    to immutable bytes upon construction. Mutable bytearrays passed into the constructor
+    are safely converted to independent immutable bytes.
     """
 
     version: int
@@ -58,57 +70,59 @@ class BitchatPacket:
     signature: bytes | None
 
     def __post_init__(self) -> None:
-        """Validate packet field constraints."""
-        if not (0 <= self.version <= 255):
+        """Validate packet field constraints and normalize byte fields."""
+        if type(self.version) is not int or not (0 <= self.version <= 255):
             raise InvalidPacketError(
-                f"Version must be an 8-bit unsigned integer, got {self.version}"
+                f"Version must be an 8-bit unsigned integer, got {self.version!r}"
             )
 
         if not isinstance(self.message_type, MessageType):
             raise InvalidPacketError(f"Invalid message type: {self.message_type!r}")
 
-        if not (0 <= self.ttl <= 255):
+        if type(self.ttl) is not int or not (0 <= self.ttl <= 255):
             raise InvalidPacketError(
-                f"TTL must be an 8-bit unsigned integer (0..255), got {self.ttl}"
+                f"TTL must be an 8-bit unsigned integer (0..255), got {self.ttl!r}"
             )
 
-        if not (0 <= self.timestamp <= 0xFFFFFFFFFFFFFFFF):
-            raise InvalidPacketError(
-                f"Timestamp must be an unsigned 64-bit integer, got {self.timestamp}"
-            )
-
-        if not (0 <= self.flags <= 255):
-            raise InvalidPacketError(
-                f"Flags must be an 8-bit unsigned integer (0..255), got {self.flags}"
-            )
-
-        if (
-            not isinstance(self.sender_id, (bytes, bytearray))
-            or len(self.sender_id) != SENDER_ID_SIZE
+        if type(self.timestamp) is not int or not (
+            0 <= self.timestamp <= 0xFFFFFFFFFFFFFFFF
         ):
-            length = (
-                len(self.sender_id)
-                if isinstance(self.sender_id, (bytes, bytearray))
-                else type(self.sender_id)
-            )
             raise InvalidPacketError(
-                f"Sender ID must be exactly {SENDER_ID_SIZE} bytes, got {length}"
+                f"Timestamp must be an unsigned 64-bit integer, got {self.timestamp!r}"
             )
 
+        if type(self.flags) is not int or not (0 <= self.flags <= 255):
+            raise InvalidPacketError(
+                f"Flags must be an 8-bit unsigned integer (0..255), got {self.flags!r}"
+            )
+
+        # 1. Normalize and validate sender_id to immutable bytes
+        if not isinstance(self.sender_id, (bytes, bytearray)):
+            raise InvalidPacketError(
+                f"Sender ID must be bytes, got {type(self.sender_id)}"
+            )
+        normalized_sender = bytes(self.sender_id)
+        if len(normalized_sender) != SENDER_ID_SIZE:
+            raise InvalidPacketError(
+                f"Sender ID must be exactly {SENDER_ID_SIZE} bytes, "
+                f"got {len(normalized_sender)}"
+            )
+        object.__setattr__(self, "sender_id", normalized_sender)
+
+        # 2. Normalize and validate recipient_id to immutable bytes or None
         if self.recipient_id is not None:
-            if (
-                not isinstance(self.recipient_id, (bytes, bytearray))
-                or len(self.recipient_id) != RECIPIENT_ID_SIZE
-            ):
-                length = (
-                    len(self.recipient_id)
-                    if isinstance(self.recipient_id, (bytes, bytearray))
-                    else type(self.recipient_id)
+            if not isinstance(self.recipient_id, (bytes, bytearray)):
+                raise InvalidPacketError(
+                    f"Recipient ID must be bytes when present, "
+                    f"got {type(self.recipient_id)}"
                 )
+            normalized_recipient = bytes(self.recipient_id)
+            if len(normalized_recipient) != RECIPIENT_ID_SIZE:
                 raise InvalidPacketError(
                     f"Recipient ID must be exactly {RECIPIENT_ID_SIZE} bytes "
-                    f"when present, got {length}"
+                    f"when present, got {len(normalized_recipient)}"
                 )
+            object.__setattr__(self, "recipient_id", normalized_recipient)
             if not (self.flags & FLAG_HAS_RECIPIENT):
                 raise InvalidPacketError(
                     "FLAG_HAS_RECIPIENT must be set when recipient_id is present"
@@ -119,29 +133,30 @@ class BitchatPacket:
                     "FLAG_HAS_RECIPIENT must not be set when recipient_id is None"
                 )
 
+        # 3. Normalize and validate payload to immutable bytes
         if not isinstance(self.payload, (bytes, bytearray)):
             raise InvalidPacketError(f"Payload must be bytes, got {type(self.payload)}")
-
-        if len(self.payload) > 65535:
+        normalized_payload = bytes(self.payload)
+        if len(normalized_payload) > 65535:
             raise InvalidPacketError(
                 f"Payload length exceeds maximum 16-bit uint (65535), "
-                f"got {len(self.payload)}"
+                f"got {len(normalized_payload)}"
             )
+        object.__setattr__(self, "payload", normalized_payload)
 
+        # 4. Normalize and validate signature to immutable bytes or None
         if self.signature is not None:
-            if (
-                not isinstance(self.signature, (bytes, bytearray))
-                or len(self.signature) != SIGNATURE_SIZE
-            ):
-                length = (
-                    len(self.signature)
-                    if isinstance(self.signature, (bytes, bytearray))
-                    else type(self.signature)
+            if not isinstance(self.signature, (bytes, bytearray)):
+                raise InvalidPacketError(
+                    f"Signature must be bytes when present, got {type(self.signature)}"
                 )
+            normalized_signature = bytes(self.signature)
+            if len(normalized_signature) != SIGNATURE_SIZE:
                 raise InvalidPacketError(
                     f"Signature must be exactly {SIGNATURE_SIZE} bytes "
-                    f"when present, got {length}"
+                    f"when present, got {len(normalized_signature)}"
                 )
+            object.__setattr__(self, "signature", normalized_signature)
             if not (self.flags & FLAG_HAS_SIGNATURE):
                 raise InvalidPacketError(
                     "FLAG_HAS_SIGNATURE must be set when signature is present"
@@ -159,7 +174,11 @@ class BitchatPacket:
 
     @property
     def has_signature(self) -> bool:
-        """Return True if the packet carries an Ed25519 signature."""
+        """Return True if the packet carries an optional wire signature.
+
+        Note: Signature wire placement is implemented; cryptographic signing semantics
+        are verified during the cryptographic interoperability phase.
+        """
         return bool(self.flags & FLAG_HAS_SIGNATURE)
 
     @property

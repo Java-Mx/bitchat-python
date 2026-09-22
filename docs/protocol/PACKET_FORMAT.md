@@ -88,8 +88,12 @@ The outer packet `Flags` field (byte offset 11) is a 1-byte bitmask:
 | Flag Name | Mask | Description |
 |---|---|---|
 | `FLAG_HAS_RECIPIENT` | `0x01` | When set, the 8-byte Recipient ID field is present at offset 22. |
-| `FLAG_HAS_SIGNATURE` | `0x02` | When set, a 64-byte Ed25519 signature follows immediately after the payload. |
+| `FLAG_HAS_SIGNATURE` | `0x02` | When set, a 64-byte signature follows immediately after the payload. |
 | `FLAG_IS_COMPRESSED` | `0x04` | When set, the payload bytes are compressed using LZ4. |
+
+> [!NOTE]
+> **Forward Compatibility of Reserved Flag Bits:**
+> Reserved flag bits (`0x08`, `0x10`, `0x20`, `0x40`, `0x80`) are preserved across encoding and decoding to ensure forward compatibility with future protocol revisions without dropping valid packets.
 
 ---
 
@@ -110,11 +114,11 @@ When the outer packet type is `MessageType::Message` (`0x04`), the inner payload
 
 ---
 
-## 6. Signature Placement and Generation
+## 6. Signature Placement and Verification Status
 
-- **Placement:** The 64-byte Ed25519 signature immediately follows the `Payload` bytes. It precedes any block padding.
-- **Scope:** The signature is generated over the raw `Payload` bytes.
-- **Conditional:** Only present when `FLAG_HAS_SIGNATURE` (`0x02`) is set.
+- **Placement:** The optional 64-byte signature immediately follows the `Payload` bytes. It precedes any block padding.
+- **Conditional:** Present iff `FLAG_HAS_SIGNATURE` (`0x02`) is set.
+- **Cryptographic Verification Status:** Signature wire placement is implemented; cryptographic signing semantics are verified during the cryptographic interoperability phase.
 
 ---
 
@@ -134,12 +138,16 @@ When the outer packet type is `MessageType::Message` (`0x04`), the inner payload
 
 ---
 
-## 9. Block Padding and Sizing Strategy
+## 9. Block Padding Strategy (BitChat Random Block Padding)
 
 To obscure actual message lengths against traffic analysis:
 - **Valid Block Sizes:** `256`, `512`, `1024`, `2048` bytes.
-- **Block Selection:** The smallest block size that satisfies `target_size >= header_size + payload_length + signature_size + 16` (reserving 16 bytes for tag overhead).
-- **Padding Format:** PKCS#7-style random bytes fill the remainder of the chosen block. The final byte in the block encodes the count of padding bytes added (value range `1`–`255`).
+- **Block Selection:** Smallest block size satisfying `target_size >= header_size + payload_length + signature_size + 16` (reserving 16 bytes for tag overhead).
+- **Padding Format:** BitChat random block padding (PKCS#7-style length delimiter). Random bytes fill the remainder of the chosen block, with the final byte encoding the total count of padding bytes added (value range `1`–`255`). Unlike standard PKCS#7 (which repeats the padding length byte across all pad bytes), BitChat uses pseudo-random filler bytes with only the final byte acting as the length delimiter.
+- **Defensive Parsing Parity:**
+  - Rust reference parser: permissive padding removal based solely on final byte.
+  - Python implementation: strict padding-length consistency validation verifying `len(data) - expected_unpadded_size == data[-1]`.
+  - Reason: Reject malformed, truncated, or ambiguous packets instead of silently accepting corrupted data.
 
 ---
 
@@ -167,3 +175,12 @@ A packet is considered malformed and rejected if any of the following occur:
 5. `FLAG_HAS_SIGNATURE` is set, but fewer than 64 bytes remain after the payload for the signature.
 6. The padding length (read from the final byte of the packet) is `0` or exceeds the remaining available padding space.
 7. `FLAG_IS_COMPRESSED` is set, but LZ4 decompression fails or returns malformed data.
+
+---
+
+## 12. Packet Model Immutability & Normalization
+
+The Python `BitchatPacket` model enforces true immutability:
+- Binary fields (`sender_id`, `recipient_id`, `payload`, `signature`) are normalized to immutable `bytes` upon construction.
+- Passing a mutable `bytearray` safely converts to an independent `bytes` object, preventing subsequent mutations from altering packet state.
+- Integer fields strictly reject `bool` values.

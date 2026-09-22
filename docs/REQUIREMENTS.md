@@ -27,5 +27,5 @@ All functional and non-functional requirements below are currently marked as **�
 - **NFR-02**: ✅ Implemented - Separation of concerns (Layered package architecture enforced)
 - **NFR-03**: 🚧 Planned - No cryptographic improvisation
 - **NFR-04**: 🚧 Planned - Cross-platform BLE abstraction
-- **NFR-05**: ✅ Implemented - Testability (112 unit tests passing, strict type checking and linting)
+- **NFR-05**: ✅ Implemented - Testability (186 unit and security invariant tests passing, strict type checking and linting)
 - **NFR-06**: ✅ Implemented - Human-readable code (Documented modules, typed dataclasses)

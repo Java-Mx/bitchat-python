@@ -22,9 +22,9 @@ OS Bluetooth APIs
 - **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `ble`).
 - **`protocol/`**: Packet encoding/decoding, wire models, message types, fragmentation (independent). Must remain independent from presentation.
   - `constants.py`: Wire format sizes, UUIDs, bitmask flags, block sizes, and `MessageType` enum.
-  - `packet.py`: Immutable `BitchatPacket` dataclass with property accessors, flags, and hex conversion.
-  - `encoder.py`: Binary big-endian packet serialization (`encode_packet`) and block padding (`pad_packet_data`).
-  - `decoder.py`: Strict wire packet deserialization (`decode_packet`) and padding removal (`unpad_packet_data`).
+  - `packet.py`: Immutable `BitchatPacket` dataclass with normalized immutable `bytes` fields, property accessors, flags, and hex conversion.
+  - `encoder.py`: Binary big-endian packet serialization (`encode_packet`) and BitChat random block padding (`pad_packet_data`).
+  - `decoder.py`: Strict wire packet deserialization (`decode_packet`) and padding removal (`unpad_packet_data`) with defensive bounds validation.
 - **`crypto/`**: Encryption, Noise protocol, key management (independent). Must NOT depend on TUI.
 - **`storage/`**: Message persistence, identity storage (independent).
 - **`ble/`**: BLE scanning, connections, GATT operations (depends on `protocol`). Must NOT depend on TUI.

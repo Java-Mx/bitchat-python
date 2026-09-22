@@ -19,8 +19,20 @@ This document provides a concrete compatibility verification checklist and test 
 - [x] **Recipient ID:** 8 raw bytes (`[u8; 8]`), included if and only if `FLAG_HAS_RECIPIENT` (0x01) is set
 - [x] **Broadcast Recipient ID:** Exactly `[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]`
 - [x] **Payload Content:** `payload_length` bytes (LZ4 compression payload handler in Phase 4)
-- [x] **Signature Placement:** Exactly 64 bytes immediately following payload, included if and only if `FLAG_HAS_SIGNATURE` (0x02) is set
-- [x] **Block Padding:** PKCS#7-style random padding to 256, 512, 1024, or 2048 bytes; final byte encodes padding count (1–255)
+- [x] **Signature Placement:** Exactly 64 bytes immediately following payload, included if and only if `FLAG_HAS_SIGNATURE` (0x02) is set (wire placement implemented; signing semantics verified in Phase 4)
+- [x] **Block Padding:** BitChat random block padding (PKCS#7-style length delimiter) to 256, 512, 1024, or 2048 bytes; final byte encodes padding count (1–255)
+
+---
+
+## Defensive Parsing & Reference Parity
+
+| Property | Rust Reference (`bitchat-tui`) | Python Implementation (`bitchat-python`) | Rationale |
+|---|---|---|---|
+| **Padding Removal** | Permissive: strips `data[-1]` bytes without verifying against expected packet length | Strict: verifies `len(data) - expected_unpadded_size == data[-1]` | Rejects corrupted, truncated, or ambiguous trailing bytes |
+| **Packet Immutability** | Rust move/borrow semantics | Python frozen dataclass with byte normalization | Prevents external `bytearray` modification of packet data |
+| **Reserved Flags** | Preserved | Preserved | Forward compatibility with future protocol revisions |
+| **Header Pre-Sender Size** | 14 bytes (arithmetic sum; code comment casually noted 13 bytes) | 14 bytes (`FIXED_HEADER_SIZE`) | Exact match with runtime wire bytes |
+| **Minimum Unpadded Packet** | 22 bytes (`14 + 8`) | 22 bytes (`MINIMUM_PACKET_SIZE`) | Fixed header + SenderID |
 
 ---
 

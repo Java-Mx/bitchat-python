@@ -228,3 +228,161 @@ class TestBitchatPacketModel:
                 payload=b"\x00" * 65536,
                 signature=None,
             )
+
+    def test_immutability_from_mutable_bytearray(self) -> None:
+        """Passing bytearray produces strictly immutable bytes attributes."""
+        sender_buf = bytearray(b"\x11" * 8)
+        recipient_buf = bytearray(b"\x22" * 8)
+        payload_buf = bytearray(b"mutable payload")
+        sig_buf = bytearray(b"\x33" * 64)
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Message,
+            ttl=7,
+            timestamp=1000,
+            flags=FLAG_HAS_RECIPIENT | FLAG_HAS_SIGNATURE,
+            sender_id=sender_buf,  # type: ignore[arg-type]
+            recipient_id=recipient_buf,  # type: ignore[arg-type]
+            payload=payload_buf,  # type: ignore[arg-type]
+            signature=sig_buf,  # type: ignore[arg-type]
+        )
+
+        assert type(pkt.sender_id) is bytes
+        assert type(pkt.recipient_id) is bytes
+        assert type(pkt.payload) is bytes
+        assert type(pkt.signature) is bytes
+
+    def test_mutation_of_original_bytearray_does_not_alter_packet(self) -> None:
+        """Mutating original bytearray after creation has zero effect on packet."""
+        sender_buf = bytearray(b"\x11" * 8)
+        recipient_buf = bytearray(b"\x22" * 8)
+        payload_buf = bytearray(b"original payload")
+        sig_buf = bytearray(b"\x33" * 64)
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Message,
+            ttl=7,
+            timestamp=1000,
+            flags=FLAG_HAS_RECIPIENT | FLAG_HAS_SIGNATURE,
+            sender_id=sender_buf,  # type: ignore[arg-type]
+            recipient_id=recipient_buf,  # type: ignore[arg-type]
+            payload=payload_buf,  # type: ignore[arg-type]
+            signature=sig_buf,  # type: ignore[arg-type]
+        )
+
+        # Mutate the source buffers
+        sender_buf[0] = 0xFF
+        recipient_buf[0] = 0xEE
+        payload_buf[:] = b"tampered payload!"
+        sig_buf[0] = 0xAA
+
+        # Verify packet values are unchanged
+        assert pkt.sender_id == b"\x11" * 8
+        assert pkt.recipient_id == b"\x22" * 8
+        assert pkt.payload == b"original payload"
+        assert pkt.signature == b"\x33" * 64
+
+    def test_packet_fields_cannot_be_reassigned(
+        self, valid_packet: BitchatPacket
+    ) -> None:
+        """Packet fields cannot be reassigned (FrozenInstanceError / AttributeError)."""
+        with pytest.raises((AttributeError, TypeError)):
+            valid_packet.sender_id = b"\x99" * 8  # type: ignore[misc]
+
+        with pytest.raises((AttributeError, TypeError)):
+            valid_packet.payload = b"new payload"  # type: ignore[misc]
+
+    def test_packet_byte_fields_cannot_be_mutated_in_place(
+        self, valid_packet: BitchatPacket
+    ) -> None:
+        """Packet byte attributes cannot be modified in-place."""
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            valid_packet.sender_id[0] = 0xFF  # type: ignore[index]
+
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            valid_packet.payload[0] = 0xFF  # type: ignore[index]
+
+    def test_integer_fields_reject_bool(self) -> None:
+        """Boolean values (subclass of int) are rejected for integer fields."""
+        with pytest.raises(InvalidPacketError, match="Version"):
+            BitchatPacket(
+                version=True,  # type: ignore[arg-type]
+                message_type=MessageType.Announce,
+                ttl=7,
+                timestamp=0,
+                flags=0,
+                sender_id=b"\x00" * 8,
+                recipient_id=None,
+                payload=b"",
+                signature=None,
+            )
+
+        with pytest.raises(InvalidPacketError, match="TTL"):
+            BitchatPacket(
+                version=1,
+                message_type=MessageType.Announce,
+                ttl=False,  # type: ignore[arg-type]
+                timestamp=0,
+                flags=0,
+                sender_id=b"\x00" * 8,
+                recipient_id=None,
+                payload=b"",
+                signature=None,
+            )
+
+        with pytest.raises(InvalidPacketError, match="Flags"):
+            BitchatPacket(
+                version=1,
+                message_type=MessageType.Announce,
+                ttl=7,
+                timestamp=0,
+                flags=True,  # type: ignore[arg-type]
+                sender_id=b"\x00" * 8,
+                recipient_id=None,
+                payload=b"",
+                signature=None,
+            )
+
+    def test_peer_id_helpers_reject_invalid_types(self) -> None:
+        """Peer ID conversion helpers strictly check types."""
+        with pytest.raises(InvalidPacketError, match="bytes-like object"):
+            peer_id_to_hex(12345)  # type: ignore[arg-type]
+
+        with pytest.raises(InvalidPacketError, match="must be a str"):
+            peer_id_from_hex(b"0102030405060708")  # type: ignore[arg-type]
+
+    def test_compressed_flag_preserves_payload_verbatim(self) -> None:
+        """In Phase 3, FLAG_IS_COMPRESSED preserves payload bytes unmodified."""
+        raw_payload = b"raw compressed bytes \x00\x01\x02\xff"
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Message,
+            ttl=7,
+            timestamp=12345,
+            flags=FLAG_IS_COMPRESSED,
+            sender_id=b"\xaa" * 8,
+            recipient_id=None,
+            payload=raw_payload,
+            signature=None,
+        )
+        assert pkt.is_compressed is True
+        assert pkt.payload == raw_payload
+
+    def test_unknown_reserved_flags_preserved(self) -> None:
+        """Reserved flag bits are preserved on the model for forward compatibility."""
+        flags_with_reserved = FLAG_HAS_RECIPIENT | 0x80 | 0x20
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Message,
+            ttl=7,
+            timestamp=12345,
+            flags=flags_with_reserved,
+            sender_id=b"\xaa" * 8,
+            recipient_id=b"\xbb" * 8,
+            payload=b"test",
+            signature=None,
+        )
+        assert pkt.flags == flags_with_reserved
+        assert pkt.has_recipient is True

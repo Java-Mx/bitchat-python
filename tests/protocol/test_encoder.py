@@ -209,3 +209,231 @@ class TestPacketEncoder:
         object.__setattr__(pkt, "flags", FLAG_HAS_RECIPIENT)
         with pytest.raises(PacketEncodingError):
             encode_packet(pkt)
+
+    def test_encode_packet_rejects_non_bitchat_packet(self) -> None:
+        """Passing non-BitchatPacket instance raises PacketEncodingError."""
+        with pytest.raises(PacketEncodingError, match="Expected BitchatPacket"):
+            encode_packet("invalid_object")  # type: ignore[arg-type]
+
+    def test_pad_packet_data_rejects_non_bytes(self) -> None:
+        """Passing non-bytes object to pad_packet_data raises PacketEncodingError."""
+        with pytest.raises(PacketEncodingError, match="Expected bytes-like object"):
+            pad_packet_data(12345)  # type: ignore[arg-type]
+
+    def test_deterministic_vector_directed_recipient(self) -> None:
+        """Vector: Directed recipient with payload and exact byte offsets."""
+        from bitchat.protocol.decoder import decode_packet
+
+        sender = b"\x10\x20\x30\x40\x50\x60\x70\x80"
+        recipient = b"\xa0\xb0\xc0\xd0\xe0\xf0\x01\x02"
+        payload = b"directed_msg"
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Message,
+            ttl=4,
+            timestamp=0x018C_1234_5678_ABCD,
+            flags=FLAG_HAS_RECIPIENT,
+            sender_id=sender,
+            recipient_id=recipient,
+            payload=payload,
+            signature=None,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        assert len(wire) == 14 + 8 + 8 + len(payload)  # 42 bytes
+
+        # Byte-level offset assertions
+        assert wire[0] == 1  # Version
+        assert wire[1] == 0x04  # MessageType.Message
+        assert wire[2] == 4  # TTL
+        assert wire[3:11] == (0x018C_1234_5678_ABCD).to_bytes(8, "big")  # Timestamp
+        assert wire[11] == FLAG_HAS_RECIPIENT  # Flags
+        assert wire[12:14] == len(payload).to_bytes(2, "big")  # PayloadLength
+        assert wire[14:22] == sender  # SenderID
+        assert wire[22:30] == recipient  # RecipientID
+        assert wire[30:42] == payload  # Payload
+
+        # Verify decoding produces identical fields
+        decoded = decode_packet(wire)
+        assert decoded.version == 1
+        assert decoded.message_type == MessageType.Message
+        assert decoded.ttl == 4
+        assert decoded.timestamp == 0x018C_1234_5678_ABCD
+        assert decoded.flags == FLAG_HAS_RECIPIENT
+        assert decoded.sender_id == sender
+        assert decoded.recipient_id == recipient
+        assert decoded.payload == payload
+        assert decoded.signature is None
+
+    def test_deterministic_vector_signature_without_recipient(self) -> None:
+        """Vector: Signature present without recipient ID."""
+        from bitchat.protocol.decoder import decode_packet
+
+        sender = b"\x01\x02\x03\x04\x05\x06\x07\x08"
+        payload = b"content_to_sign"
+        sig = b"\x44" * 64
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.KeyExchange,
+            ttl=7,
+            timestamp=500,
+            flags=FLAG_HAS_SIGNATURE,
+            sender_id=sender,
+            recipient_id=None,
+            payload=payload,
+            signature=sig,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        assert len(wire) == 14 + 8 + len(payload) + 64  # 101 bytes
+
+        # Exact offsets
+        assert wire[0] == 1
+        assert wire[1] == MessageType.KeyExchange.value
+        assert wire[2] == 7
+        assert wire[3:11] == (500).to_bytes(8, "big")
+        assert wire[11] == FLAG_HAS_SIGNATURE
+        assert wire[12:14] == len(payload).to_bytes(2, "big")
+        assert wire[14:22] == sender
+        assert wire[22 : 22 + len(payload)] == payload
+        assert wire[22 + len(payload) : 22 + len(payload) + 64] == sig
+
+        decoded = decode_packet(wire)
+        assert decoded.recipient_id is None
+        assert decoded.signature == sig
+        assert decoded.payload == payload
+
+    def test_deterministic_vector_recipient_and_signature(self) -> None:
+        """Vector: Both recipient ID and signature present."""
+        from bitchat.protocol.decoder import decode_packet
+
+        sender = b"\x11" * 8
+        recipient = b"\x22" * 8
+        payload = b"payload_bytes"
+        sig = b"\x33" * 64
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.NoiseEncrypted,
+            ttl=6,
+            timestamp=999999,
+            flags=FLAG_HAS_RECIPIENT | FLAG_HAS_SIGNATURE,
+            sender_id=sender,
+            recipient_id=recipient,
+            payload=payload,
+            signature=sig,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        expected_len = 14 + 8 + 8 + len(payload) + 64
+        assert len(wire) == expected_len
+
+        assert wire[14:22] == sender
+        assert wire[22:30] == recipient
+        assert wire[30 : 30 + len(payload)] == payload
+        assert wire[30 + len(payload) : 30 + len(payload) + 64] == sig
+
+        decoded = decode_packet(wire)
+        assert decoded.sender_id == sender
+        assert decoded.recipient_id == recipient
+        assert decoded.payload == payload
+        assert decoded.signature == sig
+
+    def test_deterministic_vector_zero_length_payload(self) -> None:
+        """Vector: Zero-length payload produces payload length 0 and exact wire size."""
+        from bitchat.protocol.decoder import decode_packet
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Leave,
+            ttl=3,
+            timestamp=123,
+            flags=0,
+            sender_id=b"\x99" * 8,
+            recipient_id=None,
+            payload=b"",
+            signature=None,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        assert len(wire) == 22
+        assert wire[12:14] == b"\x00\x00"
+
+        decoded = decode_packet(wire)
+        assert decoded.payload == b""
+        assert len(decoded.payload) == 0
+
+    @pytest.mark.parametrize("msg_type", list(MessageType))
+    def test_deterministic_vector_every_message_type(
+        self, msg_type: MessageType
+    ) -> None:
+        """Every MessageType variant serializes and decodes to exact value."""
+        from bitchat.protocol.decoder import decode_packet
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=msg_type,
+            ttl=7,
+            timestamp=100,
+            flags=0,
+            sender_id=b"\x55" * 8,
+            recipient_id=None,
+            payload=b"",
+            signature=None,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        assert wire[1] == msg_type.value
+
+        decoded = decode_packet(wire)
+        assert decoded.message_type == msg_type
+        assert decoded.message_type.value == msg_type.value
+
+    @pytest.mark.parametrize("ttl_val", [0, 1, 7, 255])
+    def test_ttl_boundary_values(self, ttl_val: int) -> None:
+        """TTL boundary values (0, 1, 7, 255) encode and decode with byte accuracy."""
+        from bitchat.protocol.decoder import decode_packet
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Announce,
+            ttl=ttl_val,
+            timestamp=100,
+            flags=0,
+            sender_id=b"\xaa" * 8,
+            recipient_id=None,
+            payload=b"",
+            signature=None,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        assert wire[2] == ttl_val
+
+        decoded = decode_packet(wire)
+        assert decoded.ttl == ttl_val
+
+    @pytest.mark.parametrize(
+        "ts_val",
+        [
+            0,
+            1,
+            1720000000000,
+            0xFFFFFFFFFFFFFFFF,
+        ],
+    )
+    def test_timestamp_boundary_values(self, ts_val: int) -> None:
+        """Timestamp boundaries (0, 1, epoch ms, max uint64) serialize correctly."""
+        from bitchat.protocol.decoder import decode_packet
+
+        pkt = BitchatPacket(
+            version=1,
+            message_type=MessageType.Announce,
+            ttl=7,
+            timestamp=ts_val,
+            flags=0,
+            sender_id=b"\xbb" * 8,
+            recipient_id=None,
+            payload=b"",
+            signature=None,
+        )
+        wire = encode_packet(pkt, add_padding=False)
+        assert struct.unpack(">Q", wire[3:11])[0] == ts_val
+
+        decoded = decode_packet(wire)
+        assert decoded.timestamp == ts_val

@@ -12,7 +12,7 @@
 ## Overview
 BitChat Python is a terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE). It aims to be fully protocol-compatible with the Rust reference implementation.
 
-**Current Status:** Phase 3 — BitChat Binary Packet Layer implemented (packet data structures, wire encoding/decoding, padding, constants, and comprehensive test suite).
+**Current Status:** Phase 3 — BitChat Binary Packet Layer implemented and hardened (immutable packet data structures with normalized bytes, defensive wire decoding, wire encoding, random block padding with PKCS#7-style length delimiter, protocol constants, and comprehensive security invariant test suite).
 
 ## Goals
 - Protocol-compatible Python implementation
@@ -25,13 +25,13 @@ The project follows a layered architecture to separate concerns:
 - **TUI** -> **App Core** -> **Protocol/Crypto/Storage** -> **BLE** -> **OS Bluetooth APIs**
 
 ## Feature Status
-- ✅ Implemented: Binary packet model (`BitchatPacket`) with validation & properties
-- ✅ Implemented: Wire encoder (`encode_packet`, `pad_packet_data`)
-- ✅ Implemented: Wire decoder (`decode_packet`, `unpad_packet_data`)
+- ✅ Implemented: Binary packet model (`BitchatPacket`) with true immutability & byte normalization
+- ✅ Implemented: Wire encoder (`encode_packet`, `pad_packet_data`) with BitChat random block padding
+- ✅ Implemented: Wire decoder (`decode_packet`, `unpad_packet_data`) with strict defensive validation
 - ✅ Implemented: Protocol constants & complete 22-variant `MessageType` enum
 - ✅ Implemented: Application core controller, command parser, peer model, and storage
-- 🚧 Planned: BLE peer discovery and connection
-- 🚧 Planned: Encrypted messaging (Noise Protocol)
+- 🚧 Planned: BLE peer discovery and connection (Phase 5)
+- 🚧 Planned: Cryptography and Noise Protocol (Phase 4)
 - 🚧 Planned: Public channels and private messages
 - 🚧 Planned: Mesh routing
 - 🚧 Planned: Message persistence (SQLite)
