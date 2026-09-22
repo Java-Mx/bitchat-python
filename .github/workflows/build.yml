@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build: uv build
+        run: uv build
+
+      - name: Verify wheel/sdist created
+        run: |
+          ls -la dist/
+          uv run python -c "
+          import glob, sys
+          wheels = glob.glob('dist/*.whl')
+          sdists = glob.glob('dist/*.tar.gz')
+          if not wheels:
+              sys.exit('Verification failed: No .whl wheel file found in dist/')
+          if not sdists:
+              sys.exit('Verification failed: No .tar.gz source distribution file found in dist/')
+          print(f'Build verification succeeded: found {len(wheels)} wheel(s) and {len(sdists)} sdist(s).')
+          for artifact in wheels + sdists:
+              print(f'  - {artifact}')
+          "
