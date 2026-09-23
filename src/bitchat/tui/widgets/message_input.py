@@ -103,6 +103,21 @@ class MessageInput(Input):
             event.stop()
             self.post_message(self.AutocompleteAction("accept"))
 
+        elif event.key == "f1":
+            event.prevent_default()
+            event.stop()
+            getattr(self.app, "action_show_help", lambda: None)()
+
+        elif event.key == "f2":
+            event.prevent_default()
+            event.stop()
+            getattr(self.app, "action_open_edit_theme", lambda: None)()
+
+        elif event.key == "f3":
+            event.prevent_default()
+            event.stop()
+            getattr(self.app, "action_open_settings", lambda: None)()
+
     def _navigate_history_prev(self) -> None:
         """Recall older history entry."""
         if not self._history:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
-from textual.widgets import RichLog, Static
+from textual.widgets import Button, RichLog, Static
 
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.ble.manager import BLEManager
@@ -574,3 +576,184 @@ async def test_tui_ble_truthful_state_and_error_modal(
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, BLEErrorModal)
+
+
+@pytest.mark.asyncio
+async def test_tui_phase93_footer_2_2_2_structure_and_actions(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Action bar has 2:2:2 button layout and all 6 buttons perform actions."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        status_bar = app.query_one(StatusBar)
+        buttons = status_bar.query(Button)
+        assert len(buttons) == 6
+
+        btn_ids = [b.id for b in buttons]
+        assert "btn-action-edit" in btn_ids
+        assert "btn-action-settings" in btn_ids
+        assert "btn-action-peers" in btn_ids
+        assert "btn-action-commands" in btn_ids
+        assert "btn-action-help" in btn_ids
+        assert "btn-action-quit" in btn_ids
+
+        # 1. Edit button
+        await pilot.click("#btn-action-edit")
+        await pilot.pause()
+        assert isinstance(app.screen, EditThemeModal)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # 2. Settings button
+        await pilot.click("#btn-action-settings")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # 3. Help button
+        await pilot.click("#btn-action-help")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # 4. Commands button
+        await pilot.click("#btn-action-commands")
+        await pilot.pause()
+        inp = app.query_one(MessageInput)
+        assert inp.value == "/"
+        assert inp.has_focus is True
+
+        # 5. Peers button
+        await pilot.click("#btn-action-peers")
+        await pilot.pause()
+        sidebar = app.query_one(PeerSidebar)
+        assert sidebar.has_focus is True
+
+
+@pytest.mark.asyncio
+async def test_tui_phase93_function_keys_with_input_focused(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """F1, F2, F3 work reliably even while MessageInput has focus."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        inp = app.query_one(MessageInput)
+        inp.focus()
+        assert inp.has_focus is True
+
+        # F2 -> EditThemeModal
+        await pilot.press("f2")
+        await pilot.pause()
+        assert isinstance(app.screen, EditThemeModal)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # F3 -> SettingsModal
+        inp.focus()
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # F1 -> HelpScreen
+        inp.focus()
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_tui_phase93_help_screen_centered_close(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Help screen has centered bottom close button and DataTable of commands."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+
+        help_screen = app.screen
+        close_btn = help_screen.query_one("#help-close-btn", Button)
+        assert "Close" in str(close_btn.label)
+
+        # Click close button dismisses modal
+        await pilot.click("#help-close-btn")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_tui_phase93_target_status_offline_awareness(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Target status reflects #public, @peer, and @peer • Offline truthfully."""
+    test_coordinator.peer_nicknames["0123456789abcdef"] = "Alice"
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        status_bar = app.query_one(StatusBar)
+
+        # Initial context is #public
+        assert status_bar.target_status == "Target: #public"
+
+        # Switch to Alice (not connected yet)
+        app.switch_conversation_context("@Alice")
+        await pilot.pause()
+        assert status_bar.target_status == "Target: @Alice • Offline"
+
+        # Connect Alice
+        mock_transport = MagicMock()
+        mock_transport.connection.is_ready = True
+        test_coordinator.ble_manager._transports["AA:BB:CC:DD:EE:FF"] = mock_transport
+        test_coordinator.address_to_peer_id["AA:BB:CC:DD:EE:FF"] = "0123456789abcdef"
+        app._refresh_peer_lists()
+        await pilot.pause()
+        assert status_bar.target_status == "Target: @Alice"
+
+        # Disconnect Alice
+        test_coordinator.ble_manager._transports.clear()
+        app._refresh_peer_lists()
+        await pilot.pause()
+        assert status_bar.target_status == "Target: @Alice • Offline"
+
+        # Switch back to public
+        app.switch_conversation_context("#public")
+        await pilot.pause()
+        assert status_bar.target_status == "Target: #public"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "width,height",
+    [(80, 24), (100, 30), (120, 40), (160, 50)],
+)
+async def test_tui_phase93_layout_alignment_responsive(
+    test_coordinator: SessionCoordinator, width: int, height: int
+) -> None:
+    """ChatView and MessageInput share identical horizontal boundaries across sizes."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(width, height)):
+        sidebar = app.query_one(PeerSidebar)
+        chat = app.query_one(ChatView)
+        inp = app.query_one(MessageInput)
+        status = app.query_one(StatusBar)
+        header = app.query_one(HeaderWidget)
+
+        # Horizontal alignment: chat and input must have identical x and width
+        assert chat.region.x == inp.region.x
+        assert chat.region.width == inp.region.width
+        assert chat.region.x == sidebar.region.width
+
+        # Full width span
+        assert status.region.x == 0
+        assert status.region.width == width
+        assert header.region.x == 0
+        assert header.region.width == width
+
+        # Vertical continuity: no gaps between sidebar and status bar
+        assert sidebar.region.y + sidebar.region.height == status.region.y

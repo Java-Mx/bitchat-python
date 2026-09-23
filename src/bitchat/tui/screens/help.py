@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from textual.containers import Vertical
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Label
 
@@ -19,8 +20,8 @@ class HelpScreen(ModalScreen[None]):
     """Modal screen displaying all available slash commands and keyboard shortcuts."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        ("escape", "dismiss_modal", "Close"),
-        ("q", "dismiss_modal", "Close"),
+        Binding("escape", "dismiss_modal", "Close", priority=True),
+        Binding("q", "dismiss_modal", "Close", priority=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -33,7 +34,8 @@ class HelpScreen(ModalScreen[None]):
             table.cursor_type = "row"
             table.zebra_stripes = True
             yield table
-            yield Button("Close (Esc)", id="help-close-btn")
+            with Horizontal(id="help-actions"):
+                yield Button("Close (Esc)", id="help-close-btn", classes="action-btn")
 
     def on_mount(self) -> None:
         table = self.query_one("#help-table", DataTable)

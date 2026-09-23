@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
+from bitchat.exceptions import InvalidPacketError
 from bitchat.mesh.dedup import PacketDeduplicator, compute_packet_id
 from bitchat.mesh.router import MeshRouter
 from bitchat.mesh.store_forward import StoreAndForwardQueue
@@ -291,3 +294,158 @@ class TestMeshRouter:
         assert decision.packet_to_relay is not None
         assert decision.packet_to_relay.ttl == 4
         assert decision.target_peer_id_hex == target_id.hex()
+
+
+class TestPhase93MeshHardening:
+    """Adversarial, boundary, and stress tests for Phase 9.3 mesh routing."""
+
+    def test_ttl_boundary_matrix(self) -> None:
+        """Verify strict TTL behavior for 0, 1, 3, 7, oversized, and negative."""
+        router = MeshRouter(local_peer_id=b"\xaa" * 8, max_relay_ttl=7)
+
+        # TTL = 0 (valid wire byte, but expired -> drop)
+        d0 = router.evaluate_incoming(_make_packet(ttl=0))
+        assert d0.should_process_locally is False
+        assert d0.packet_to_relay is None
+        assert "TTL" in (d0.drop_reason or "")
+
+        # TTL = -1 or > 255 (rejected by packet validation)
+        with pytest.raises(InvalidPacketError):
+            _make_packet(ttl=-1)
+        with pytest.raises(InvalidPacketError):
+            _make_packet(ttl=256)
+
+        # TTL = 1 (process locally if broadcast, do not relay)
+        d1 = router.evaluate_incoming(_make_packet(ttl=1, timestamp=101))
+        assert d1.should_process_locally is True
+        assert d1.packet_to_relay is None
+
+        # TTL = 3 (normal, decrements to 2)
+        d3 = router.evaluate_incoming(_make_packet(ttl=3, timestamp=102))
+        assert d3.should_process_locally is True
+        assert d3.packet_to_relay is not None
+        assert d3.packet_to_relay.ttl == 2
+
+        # TTL = 7 (max valid, decrements to 6)
+        d7 = router.evaluate_incoming(_make_packet(ttl=7, timestamp=103))
+        assert d7.should_process_locally is True
+        assert d7.packet_to_relay is not None
+        assert d7.packet_to_relay.ttl == 6
+
+        # TTL = 50 (oversized, clamped to max_relay_ttl=7 -> decrements to 6)
+        d50 = router.evaluate_incoming(_make_packet(ttl=50, timestamp=104))
+        assert d50.should_process_locally is True
+        assert d50.packet_to_relay is not None
+        assert d50.packet_to_relay.ttl == 6
+
+    def test_ttl_never_increases(self) -> None:
+        """Relaying must strictly decrement and never increase TTL."""
+        router = MeshRouter(local_peer_id=b"\xaa" * 8, max_relay_ttl=10)
+        for incoming_ttl in range(2, 20):
+            pkt = _make_packet(ttl=incoming_ttl, timestamp=1000 + incoming_ttl)
+            decision = router.evaluate_incoming(pkt)
+            assert decision.packet_to_relay is not None
+            assert decision.packet_to_relay.ttl < incoming_ttl
+            assert decision.packet_to_relay.ttl >= 1
+
+    def test_deduplication_flooding_stress(self) -> None:
+        """Ingesting 10,000 packets must strictly respect max_entries bound."""
+        max_entries = 1000
+        dedup = PacketDeduplicator(max_entries=max_entries, entry_ttl_seconds=300.0)
+
+        # Flood with 10,000 unique packets
+        for i in range(10000):
+            pkt = _make_packet(
+                sender_id=(i % 256).to_bytes(8, byteorder="big"),
+                timestamp=i,
+                payload=f"payload-{i}".encode(),
+            )
+            assert dedup.check_and_record(pkt) is False
+
+        # Strictly bounded at max_entries
+        assert len(dedup) == max_entries
+
+        # Repeated identical packets detected as duplicates
+        last_pkt = _make_packet(
+            sender_id=(9999 % 256).to_bytes(8, byteorder="big"),
+            timestamp=9999,
+            payload=b"payload-9999",
+        )
+        assert dedup.is_duplicate(last_pkt) is True
+        assert dedup.check_and_record(last_pkt) is True
+
+    def test_deduplicator_single_field_divergence(self) -> None:
+        """Packets differing by exactly one field must have distinct IDs."""
+        base = _make_packet(
+            sender_id=b"\x01" * 8,
+            timestamp=1000,
+            message_type=MessageType.Message,
+            recipient_id=b"\x02" * 8,
+            payload=b"same-payload",
+        )
+        base_id = compute_packet_id(base)
+
+        diffs = [
+            replace(base, sender_id=b"\x99" * 8),
+            replace(base, timestamp=9999),
+            replace(base, message_type=MessageType.Announce),
+            replace(base, recipient_id=b"\x99" * 8),
+            replace(base, payload=b"diff-payload"),
+        ]
+
+        for d in diffs:
+            assert compute_packet_id(d) != base_id
+
+    def test_store_forward_flooding_bounds(self) -> None:
+        """Enqueueing 1,000 packets respects global packet, per-peer, and byte caps."""
+        queue = StoreAndForwardQueue(
+            max_total_packets=50,
+            max_per_peer=10,
+            max_total_bytes=10 * 1024,
+            packet_ttl_seconds=60.0,
+        )
+
+        # Enqueue across 10 distinct peers (100 packets each)
+        for peer_idx in range(10):
+            peer_id = f"peer_{peer_idx:02d}"
+            for pkt_idx in range(100):
+                pkt = _make_packet(
+                    payload=f"msg-{peer_idx}-{pkt_idx}".encode(),
+                    timestamp=peer_idx * 1000 + pkt_idx,
+                )
+                queue.enqueue(peer_id, pkt)
+
+        # Invariants strictly enforced
+        assert queue.total_packets <= 50
+        assert queue.total_bytes <= 10 * 1024
+        for peer_idx in range(10):
+            peer_id = f"peer_{peer_idx:02d}"
+            peer_queue = queue._queues.get(peer_id)
+            if peer_queue:
+                assert len(peer_queue) <= 10
+
+    def test_store_forward_eviction_and_dequeue(self) -> None:
+        """Stored packets can be dequeued, while expired packets are discarded."""
+        queue = StoreAndForwardQueue(
+            max_total_packets=10,
+            max_per_peer=5,
+            packet_ttl_seconds=5.0,
+        )
+        peer = "alice"
+        pkt1 = _make_packet(payload=b"msg1", timestamp=1)
+        pkt2 = _make_packet(payload=b"msg2", timestamp=2)
+
+        queue.enqueue(peer, pkt1, now=100.0)
+        queue.enqueue(peer, pkt2, now=101.0)
+        assert queue.total_packets == 2
+
+        # Dequeue within TTL window returns both
+        pkts = queue.dequeue_for_peer(peer, now=102.0)
+        assert len(pkts) == 2
+        assert queue.total_packets == 0
+
+        # Enqueue and let expire
+        queue.enqueue(peer, pkt1, now=100.0)
+        pkts_expired = queue.dequeue_for_peer(peer, now=110.0)
+        assert len(pkts_expired) == 0
+        assert queue.total_packets == 0

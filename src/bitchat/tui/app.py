@@ -43,15 +43,17 @@ class BitChatApp(App[None]):
     CSS = TCSS_STYLES
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("ctrl+c", "quit", "Quit", show=False),
-        Binding("ctrl+q", "quit", "Quit", show=False),
-        Binding("ctrl+l", "clear_log", "Clear", show=False),
-        Binding("f1", "show_help", "Help", show=False),
-        Binding("?", "show_help", "Help", show=False),
-        Binding("f2", "open_edit_theme", "Edit", show=False),
-        Binding("f3", "open_settings", "Settings", show=False),
-        Binding("pageup", "scroll_chat_up", "Scroll Up", show=False),
-        Binding("pagedown", "scroll_chat_down", "Scroll Down", show=False),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+        Binding("ctrl+q", "quit", "Quit", show=False, priority=True),
+        Binding("ctrl+l", "clear_log", "Clear", show=False, priority=True),
+        Binding("f1", "show_help", "Help", show=False, priority=True),
+        Binding("?", "show_help", "Help", show=False, priority=True),
+        Binding("f2", "open_edit_theme", "Edit", show=False, priority=True),
+        Binding("f3", "open_settings", "Settings", show=False, priority=True),
+        Binding("pageup", "scroll_chat_up", "Scroll Up", show=False, priority=True),
+        Binding(
+            "pagedown", "scroll_chat_down", "Scroll Down", show=False, priority=True
+        ),
     ]
 
     def __init__(
@@ -140,19 +142,43 @@ class BitChatApp(App[None]):
 
         # Truthful Bluetooth state reporting
         if connected_addrs:
-            status_bar.status_message = (
-                f"● Connected ({len(connected_addrs)} peers) • BLE Mesh Active"
+            status_bar.mesh_status = (
+                f"● Connected ({len(connected_addrs)} peers) • Local Mesh"
             )
         elif self.coordinator.ble_status == "scanning":
-            status_bar.status_message = "○ Scanning for BitChat peers • BLE Mesh Active"
+            status_bar.mesh_status = "◌ Mesh Initializing"
         elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
-            status_bar.status_message = (
-                "✕ BLE Offline: Bluetooth unavailable • Mesh Inactive"
-            )
+            status_bar.mesh_status = "✕ BLE Offline"
         else:
-            status_bar.status_message = "○ BitChat Ready • Local Mesh"
+            status_bar.mesh_status = "● BitChat Ready • Local Mesh"
 
-        status_bar.channel_message = f"Target: {self.active_context}"
+        self._update_target_status()
+
+    def _update_target_status(self) -> None:
+        """Update status bar target line reflecting active context and connectivity."""
+        status_bar = self.query_one(StatusBar)
+        if self.active_context == "#public":
+            status_bar.target_status = "Target: #public"
+        elif self.active_context.startswith("@"):
+            peer_nick = self.active_context[1:].strip()
+            is_connected = False
+            if self.coordinator:
+                for addr in self.coordinator.ble_manager.connected_peers:
+                    pid = self.coordinator.address_to_peer_id.get(addr, "")
+                    nick = self.coordinator.peer_nicknames.get(
+                        pid, pid[:8] if pid else addr
+                    )
+                    if nick.lower() == peer_nick.lower() or (
+                        pid and pid.lower().startswith(peer_nick.lower())
+                    ):
+                        is_connected = True
+                        break
+            if is_connected:
+                status_bar.target_status = f"Target: @{peer_nick}"
+            else:
+                status_bar.target_status = f"Target: @{peer_nick} • Offline"
+        else:
+            status_bar.target_status = f"Target: {self.active_context}"
 
     def _on_coordinator_ble_error(self, err_msg: str) -> None:
         """Handle Bluetooth hardware or scan failure from coordinator."""
@@ -222,8 +248,7 @@ class BitChatApp(App[None]):
 
         chat = self.query_one(ChatView)
         chat.channel_name = self.active_context
-        status_bar = self.query_one(StatusBar)
-        status_bar.channel_message = f"Target: {self.active_context}"
+        self._update_target_status()
         msg_input = self.query_one(MessageInput)
         msg_input.focus()
 

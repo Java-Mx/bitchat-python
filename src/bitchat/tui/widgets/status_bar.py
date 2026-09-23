@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-from textual.containers import Horizontal
+from textual.containers import Grid, Horizontal, Vertical
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 class StatusBar(Widget):
     """Interactive bottom action bar providing click shortcuts and live telemetry."""
 
-    status_message: reactive[str] = reactive("● Secure • BLE Mesh Active")
-    channel_message: reactive[str] = reactive("Target: #public")
-    hint_message: reactive[str] = reactive("Noise XX • Forward Secrecy")
+    mesh_status: reactive[str] = reactive("● BitChat Ready • Local Mesh")
+    security_status: reactive[str] = reactive("Noise XX • Forward Secrecy")
+    target_status: reactive[str] = reactive("Target: #public")
 
     class ActionTriggered(Message):
         """Emitted when user activates an action bar command."""
@@ -32,21 +32,47 @@ class StatusBar(Widget):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(id="status-bar", **kwargs)
 
-    def compose(self) -> ComposeResult:
-        with Horizontal(id="status-action-row"):
-            yield Button("Edit (F2)", id="btn-action-edit", classes="action-btn")
-            yield Button(
-                "Settings (F3)", id="btn-action-settings", classes="action-btn"
-            )
-            yield Button("Peers", id="btn-action-peers", classes="action-btn")
-            yield Button("Commands (/)", id="btn-action-commands", classes="action-btn")
-            yield Button("Help (?)", id="btn-action-help", classes="action-btn")
-            yield Button("Quit", id="btn-action-quit", classes="action-btn")
+    @property
+    def status_message(self) -> str:
+        """Backward-compatible alias for mesh_status."""
+        return self.mesh_status
 
-        with Horizontal(id="status-telemetry-row"):
-            yield Label(self.status_message, id="status-left")
-            yield Label(self.channel_message, id="status-center")
-            yield Label(self.hint_message, id="status-right")
+    @status_message.setter
+    def status_message(self, val: str) -> None:
+        self.mesh_status = val
+
+    @property
+    def channel_message(self) -> str:
+        """Backward-compatible alias for target_status."""
+        return self.target_status
+
+    @channel_message.setter
+    def channel_message(self, val: str) -> None:
+        self.target_status = val
+
+    @property
+    def hint_message(self) -> str:
+        """Backward-compatible alias for security_status."""
+        return self.security_status
+
+    @hint_message.setter
+    def hint_message(self, val: str) -> None:
+        self.security_status = val
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="status-container"):
+            with Vertical(id="status-telemetry-col"):
+                yield Label(self.mesh_status, id="status-line-mesh")
+                yield Label(self.security_status, id="status-line-crypto")
+                yield Label(self.target_status, id="status-line-target")
+
+            with Grid(id="status-actions-grid"):
+                yield Button("Edit", id="btn-action-edit", classes="action-btn")
+                yield Button("Settings", id="btn-action-settings", classes="action-btn")
+                yield Button("Peers", id="btn-action-peers", classes="action-btn")
+                yield Button("Commands", id="btn-action-commands", classes="action-btn")
+                yield Button("Help", id="btn-action-help", classes="action-btn")
+                yield Button("Quit", id="btn-action-quit", classes="action-btn")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Forward action button clicks to parent application."""
@@ -65,14 +91,14 @@ class StatusBar(Widget):
             case "btn-action-quit":
                 self.post_message(self.ActionTriggered("quit"))
 
-    def watch_status_message(self, new_val: str) -> None:
+    def watch_mesh_status(self, new_val: str) -> None:
         with contextlib.suppress(Exception):
-            self.query_one("#status-left", Label).update(new_val)
+            self.query_one("#status-line-mesh", Label).update(new_val)
 
-    def watch_channel_message(self, new_val: str) -> None:
+    def watch_security_status(self, new_val: str) -> None:
         with contextlib.suppress(Exception):
-            self.query_one("#status-center", Label).update(new_val)
+            self.query_one("#status-line-crypto", Label).update(new_val)
 
-    def watch_hint_message(self, new_val: str) -> None:
+    def watch_target_status(self, new_val: str) -> None:
         with contextlib.suppress(Exception):
-            self.query_one("#status-right", Label).update(new_val)
+            self.query_one("#status-line-target", Label).update(new_val)

@@ -28,16 +28,16 @@ OS Bluetooth APIs
   - `widgets/chat_view.py`: `ChatView` with `border-title: "Conversation [#public]"`, two-tier message typography (sender anchor + timestamp, body), status tags (`[Public]`, `[🔒 DM]`, `[System]`, `[Security]`, `[Error]`), and scroll controls (`PageUp`/`PageDown`).
   - `widgets/message_input.py`: `MessageInput` prompt with sharp borders, focused blue accent, command history navigation ($\uparrow/\downarrow$), and autocomplete event delegation.
   - `widgets/autocomplete.py`: `AutocompletePalette` IDE-style floating menu anchored above input with synchronous `OptionList`, real-time prefix filtering, and contextual peer suggestions for `/dm ` and `/connect `.
-  - `widgets/status_bar.py`: Action bar with clickable action buttons (`Edit (F2)`, `Settings (F3)`, `Peers`, `Commands (/)`, `Help (?)`, `Quit`) and operational telemetry footer.
-  - `screens/help.py`: `HelpScreen` modal dialog displaying complete command table and shortcut keys.
+  - `widgets/status_bar.py`: Action bar with stacked operational telemetry (Mesh readiness, Noise XX encryption, and truthful target status with offline awareness) alongside a balanced 2:2:2 button grid (Row 1: `Edit`, `Settings`, `Peers`; Row 2: `Commands`, `Help`, `Quit`).
+  - `screens/help.py`: Responsive `HelpScreen` modal dialog (90% width, up to 120 columns) displaying a full-width `DataTable` of commands and shortcuts, with a centered bottom `[ Close (Esc) ]` button.
   - `screens/peer_info.py`: `PeerInfoModal` presenting full 64-char public fingerprint, 64-char peer ID, transport diagnostics, and Noise XX security state, while strictly protecting private secrets.
   - `screens/settings.py`: `SettingsModal` for live configuration of nickname, max mesh relay hops (TTL), and inter-fragment transmission delay.
   - `screens/edit_theme.py`: `EditThemeModal` for toggling display density (comfortable vs compact) and timestamp visibility.
   - `screens/ble_error.py`: `BLEErrorModal` for hardware diagnostic guidance and automated `[Retry Adapter]` recovery.
 - **`mesh/`**: Multi-hop mesh routing, deduplication, and store-and-forward (depends on `protocol`).
-  - `dedup.py`: `PacketDeduplicator` utilizing TTL-invariant SHA-256 hashing `[:16]` over `(sender_id + timestamp + message_type + recipient_id + payload)`, bounded LRU cache (2,000 entries), and 300s TTL cache.
+  - `dedup.py`: `PacketDeduplicator` utilizing TTL-invariant SHA-256 hashing `[:16]` over `(sender_id + timestamp + message_type + recipient_id + payload)`, bounded LRU cache (capped at 1,000 entries), and 300s TTL cache.
   - `store_forward.py`: `StoreAndForwardQueue` with per-peer limits (20 packets), global cap (100 packets), aggregate byte budget (256 KB), and automatic flushing upon peer announce/connect.
-  - `router.py`: `MeshRouter` handling origin loop prevention, peer rate-limiting (50 pkts/s), deduplication, TTL validation/clamping/decrementing, 10–50ms randomized collision-mitigation jitter, and destination evaluation.
+  - `router.py`: `MeshRouter` handling origin loop prevention, peer rate-limiting (50 pkts/s), deduplication, strict TTL boundary verification (drop TTL <= 0, clamp oversized TTL to `max_relay_ttl`, enforce monotonic decrement with forward >= 1), 10–50ms randomized collision-mitigation jitter, and destination evaluation.
 - **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `mesh`, `ble`).
   - `session_coordinator.py`: `SessionCoordinator` orchestrating `dict[str, NoiseSession]`, peer address resolution, deterministic Noise XX handshake progression, encrypted direct messages, presence announcements, mesh routing/relaying with collision jitter, store-and-forward queueing/flushing, and fragmentation pacing.
   - `application.py`: `Application` core controller managing startup/shutdown, command dispatching, and background task lifecycle.

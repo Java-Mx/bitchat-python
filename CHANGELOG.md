@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 9.3: Mesh / Store-and-Forward Hardening & Final TUI Layout Refinement (`bitchat.mesh`, `bitchat.tui`):
+  - Enforced strict TTL boundary invariants in `MeshRouter`: drops incoming packets with TTL <= 0, clamps oversized TTL to `max_relay_ttl` to prevent amplification attacks, and ensures decremented TTL is strictly monotonically decreasing and >= 1 prior to relay.
+  - Bounded TTL-invariant SHA-256 deduplication cache (LRU capped at 1,000 entries) preventing unbounded memory growth under flooding while guaranteeing duplicate packet rejection.
+  - Bounded store-and-forward queue (`StoreAndForwardQueue`) with strict per-peer limits (20 packets), total queue capacity (100 packets), and aggregate byte limit (256 KB) with FIFO eviction on overflow.
+  - Hardened concurrent packet relaying in `SessionCoordinator._relay_packet_async` checking running state before/after jitter sleep and safely handling cancellation and peer disconnects.
+  - Redesigned bottom Action Bar in `StatusBar`: left column stacked operational telemetry (Mesh status, Noise XX encryption, and truthful active target), right column balanced 2:2:2 button grid (Row 1: `Edit`, `Settings`, `Peers`; Row 2: `Commands`, `Help`, `Quit`) with strictly equal column widths.
+  - Truthful target status detection: dynamically renders `Target: #public`, `Target: @<peer>`, and `Target: @<peer> • Offline` based on real peer connection state.
+  - Responsive Help modal (`HelpScreen`): expanded width to 90% (max 120 cols), full-width `DataTable` displaying all commands and shortcuts without truncation, and dedicated bottom action bar with centered `[ Close (Esc) ]` button.
+  - Guaranteed keyboard shortcut reliability: `priority=True` on global app bindings (`f1`, `?`, `f2`, `f3`, `ctrl+q`, `ctrl+l`, `pageup`, `pagedown`) and explicit forwarding in `MessageInput.on_key` ensuring function keys trigger reliably regardless of input focus.
+  - Edge-to-edge spatial alignment verified across multiple terminal resolutions (`80x24`, `100x30`, `120x40`, `160x50`): `ChatView` and `MessageInput` share identical horizontal boundaries, and `PeerSidebar` spans 100% of `#main-body` height down to the footer with zero gaps.
+  - Unit and integration test suite expanded to 545 tests with 100% pass rate.
 - Phase 9.2: TUI UX Polish, Interaction Model & Terminal Reliability (`bitchat.tui`, `bitchat.commands`):
   - Subtle dark midnight focus borders (`#28334e` / `#22283a`) and restrained surface highlights (`#121624`), eliminating aggressive neon outlines.
   - Edge-to-edge horizontal panel alignment with zero offset discrepancies across chat view, input bar, and sidebar.

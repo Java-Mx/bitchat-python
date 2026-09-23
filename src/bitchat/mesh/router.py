@@ -149,10 +149,10 @@ class MeshRouter:
             # Clamp TTL to safety ceiling and decrement by 1
             clamped_ttl = min(packet.ttl, self.max_relay_ttl)
             decremented_ttl = clamped_ttl - 1
-
-            packet_to_relay = replace(packet, ttl=decremented_ttl)
-            # Record the decremented packet in dedup cache as well
-            self.deduplicator.record(packet_to_relay, now=current_time)
+            if decremented_ttl >= 1:
+                packet_to_relay = replace(packet, ttl=decremented_ttl)
+                # Record the decremented packet in dedup cache as well
+                self.deduplicator.record(packet_to_relay, now=current_time)
 
         return RoutingDecision(
             should_process_locally=is_for_us,

@@ -372,29 +372,45 @@ class SessionCoordinator:
         exclude_ingress: str | None = None,
     ) -> None:
         """Relay packet across mesh with collision-mitigation jitter."""
+        if not self._is_running:
+            return
+
         jitter = self.mesh_router.get_relay_jitter()
-        await asyncio.sleep(jitter)
+        try:
+            await asyncio.sleep(jitter)
+        except asyncio.CancelledError:
+            return
 
-        if target_peer_id_hex:
-            target_addr = self.peer_addresses.get(target_peer_id_hex)
-            if (
-                target_addr
-                and target_addr in self.ble_manager.connected_peers
-                and target_addr != exclude_ingress
-            ):
-                try:
-                    await self.ble_manager.send_to_peer(target_addr, packet)
-                    return
-                except Exception as e:
-                    logger.warning("Failed relaying packet to %s: %s", target_addr, e)
+        if not self._is_running:
+            return
 
-            # Target is not a direct neighbor: broadcast relay across mesh or store
-            if target_peer_id_hex not in self.peer_addresses:
-                await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
+        try:
+            if target_peer_id_hex:
+                target_addr = self.peer_addresses.get(target_peer_id_hex)
+                if (
+                    target_addr
+                    and target_addr in self.ble_manager.connected_peers
+                    and target_addr != exclude_ingress
+                ):
+                    try:
+                        await self.ble_manager.send_to_peer(target_addr, packet)
+                        return
+                    except Exception as e:
+                        logger.warning(
+                            "Failed relaying packet to %s: %s", target_addr, e
+                        )
+
+                # Target is not a direct neighbor: broadcast relay across mesh or store
+                if target_peer_id_hex not in self.peer_addresses:
+                    await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
+                else:
+                    self.mesh_router.store_forward_queue.enqueue(
+                        target_peer_id_hex, packet
+                    )
             else:
-                self.mesh_router.store_forward_queue.enqueue(target_peer_id_hex, packet)
-        else:
-            await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
+                await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
+        except Exception as e:
+            logger.warning("Relaying failed safely: %s", e)
 
     async def _process_packet_async(
         self, packet: BitchatPacket, peer_address: str | None = None

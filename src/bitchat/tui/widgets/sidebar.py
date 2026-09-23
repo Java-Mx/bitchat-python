@@ -38,6 +38,8 @@ class PeerListItem(ListItem):
 class PeerSidebar(Widget):
     """Sidebar displaying local identity card and real-time peer lists."""
 
+    can_focus = True
+
     nickname: reactive[str] = reactive("Anonymous")
     peer_id_hex: reactive[str] = reactive("")
     fingerprint: reactive[str] = reactive("")
