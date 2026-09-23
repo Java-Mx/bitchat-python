@@ -37,10 +37,51 @@ OS Bluetooth APIs
   - `noise.py`: `Noise_XX_25519_ChaChaPoly_SHA256` handshake state machine, symmetric transcript hashing, extracted wire nonces, and 1024-entry replay window.
   - `sessions.py`: `NoiseSession` orchestrating per-peer handshake progression, role assignment, and transport encryption.
 - **`storage/`**: Message persistence, identity storage (independent).
-- **`ble/`**: BLE scanning, connections, GATT operations (depends on `protocol`). Must NOT depend on TUI.
+- **`ble/`**: BLE scanning, connection lifecycle, GATT discovery, fragment pacing, and packet routing via Bleak (depends on `protocol`). Must NOT depend on TUI.
+  - `models.py`: `BLEConnectionState` lifecycle enum and `DiscoveredPeer` metadata dataclass.
+  - `scanner.py`: `BLEScanner` filtering for BitChat Service UUID (`F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C`), duplicate normalization, and peer tracking.
+  - `gatt.py`: `GATTManager` resolving service and characteristic (`A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`) with property validation (`write-without-response`, `notify`).
+  - `connection.py`: `BLEConnection` state machine managing peer connection, GATT discovery, notification subscription, and disconnect callbacks.
+  - `transport.py`: `BLETransport` integrating packet serialization, conditional fragmentation (>500B), 20ms pacing, bounded reception queue, and fragment reassembly.
+  - `manager.py`: `BLEManager` high-level coordinator managing scanner lifecycle, multiple active peer connections, direct sending, and broadcast.
 - **`models/`**: Shared data types (independent, leaf dependency).
 - **`utils/`**: Shared utilities (independent, leaf dependency).
 - **`commands/`**: CLI command definitions (depends on `app`).
+
+## BLE Transport Architecture
+
+The `bitchat.ble` package bridges the high-level application and the underlying Bluetooth Low Energy hardware using Bleak:
+
+```
+Application Layer
+       │  ▲
+       ▼  │ (Packets / Events)
+   BLEManager
+   ├── BLEScanner (Filters BitChat UUID F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C)
+   └── dict[address, BLETransport]
+            │
+            ├── BLEConnection (Lifecycle: Disconnected -> Connecting -> Connected
+            │                  -> Discovering GATT -> Subscribing -> Ready)
+            ├── GATTManager (Characteristic A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D)
+            ├── Outbound Transmission:
+            │     - If wire size <= 500B: direct write (response=False)
+            │     - If wire size > 500B: fragment into 150B chunks, pace at 20ms interval
+            └── Inbound Reception:
+                  - Bounded asyncio.Queue (backpressure / drop-on-full protection)
+                  - Background worker pulls raw notification bytes
+                  - Decodes packet & routes fragments to FragmentReassembler
+                  - Delivers reassembled BitchatPacket to application callback
+```
+
+### Connection State Machine
+
+1. **`DISCONNECTED`**: No active BLE link.
+2. **`CONNECTING`**: Bleak client connecting to peer peripheral.
+3. **`CONNECTED`**: Link established; preparing for service discovery.
+4. **`DISCOVERING_GATT`**: Validating BitChat Service and Characteristic UUIDs with required properties.
+5. **`SUBSCRIBING`**: Subscribing to GATT notifications via `start_notify`.
+6. **`READY`**: Fully initialized and bidirectional packet transmission enabled.
+7. **`DISCONNECTING`**: Teardown in progress (unsubscribing and disconnecting client).
 
 ## Protocol Wire Architecture
 

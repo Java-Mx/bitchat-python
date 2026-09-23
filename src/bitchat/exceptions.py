@@ -121,3 +121,28 @@ class ReplayError(NoiseError):
 
 class AuthenticationError(NoiseError):
     """Raised when Noise handshake authentication fails."""
+
+
+# ---------------------------------------------------------------------------
+# BLE transport error hierarchy
+# ---------------------------------------------------------------------------
+
+
+class BLEError(BitChatError):
+    """Base exception for Bluetooth Low Energy transport errors."""
+
+
+class BLEScanError(BLEError):
+    """Raised when starting, stopping, or executing BLE scanning fails."""
+
+
+class BLEConnectionError(BLEError):
+    """Raised when establishing, maintaining, or closing a BLE connection fails."""
+
+
+class BLEGATTError(BLEError):
+    """Raised when BitChat GATT service or characteristic discovery fails."""
+
+
+class BLETransportError(BLEError):
+    """Raised when sending, receiving, or subscribing to BLE data fails."""

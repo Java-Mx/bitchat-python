@@ -3,7 +3,7 @@
   <h1>BitChat Python</h1>
   <p>Python terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE)</p>
   <p>
-    <img src="https://img.shields.io/badge/Status-Phase%205%20(Fragmentation%20%26%20Reassembly)-blue" alt="Status" />
+    <img src="https://img.shields.io/badge/Status-Phase%207%20(BLE%20Transport)-blue" alt="Status" />
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
     <img src="https://img.shields.io/badge/CI-Passing-brightgreen" alt="CI" />
   </p>
@@ -12,7 +12,7 @@
 ## Overview
 BitChat Python is a terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE). It aims to be fully protocol-compatible with the Rust reference implementation.
 
-**Current Status:** Phase 5 — BitChat Fragmentation & Reassembly implemented and verified (threshold 500 bytes, 150-byte payload chunks, 13-byte header encoding, out-of-order reassembly with sender isolation, resource limits, and Rust compatibility).
+**Current Status:** Phase 7 — BLE Transport implemented and verified using Bleak (service discovery `F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C`, characteristic `A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`, connection lifecycle state machine, write-without-response with 20ms fragment pacing, decoupled async queue reception & reassembly, and multi-peer coordination).
 
 ## Goals
 - Protocol-compatible Python implementation
@@ -38,12 +38,13 @@ The project follows a layered architecture to separate concerns:
 - ✅ Implemented: Lexicographic peer ID tie-breaking (`determine_handshake_role`)
 - ✅ Implemented: AES-256-GCM legacy encryption & PBKDF2-HMAC-SHA256 channel key derivation
 - ✅ Implemented: Application core controller, command parser, peer model, and storage
-- 🚧 Planned: BLE peer discovery and connection (Phase 6)
+- ✅ Implemented: BLE peer discovery and connection lifecycle (`bitchat.ble.scanner.BLEScanner`, `bitchat.ble.connection.BLEConnection`)
+- ✅ Implemented: BLE GATT characteristic discovery, 20ms pacing, and reassembly transport (`bitchat.ble.transport.BLETransport`)
 - 🚧 Planned: Public channels and private messages
 - 🚧 Planned: Mesh routing
 - 🚧 Planned: Message persistence (SQLite)
 - 🚧 Planned: Terminal UI (Textual)
-- 🚧 Planned: Cross-platform BLE support
+- 🚧 Planned: Cross-platform BLE hardware verification
 - 🚧 Planned: Rust interoperability testing
 
 ## Supported Platforms

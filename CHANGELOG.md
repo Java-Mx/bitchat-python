@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Bluetooth Low Energy (BLE) transport layer (`bitchat.ble`):
+  - Service and characteristic discovery matching BitChat UUID specification (`F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C` and `A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`) with case-insensitive matching across platform backends.
+  - Asynchronous BLE scanner (`BLEScanner`) filtering for the BitChat service UUID, duplicate address deduplication, and RSSI tracking.
+  - Connection lifecycle state machine (`BLEConnection`) with states `DISCONNECTED`, `CONNECTING`, `CONNECTED`, `DISCOVERING_GATT`, `SUBSCRIBING`, `READY`, and `DISCONNECTING`, including unexpected remote disconnect callbacks.
+  - GATT discovery manager (`GATTManager`) validating required characteristic properties (`write-without-response`, `notify`).
+  - BLE transport (`BLETransport`) handling direct writes (`response=False`), automatic packet fragmentation (>500B) with 20ms inter-fragment pacing matching the reference implementation, decoupled background receive worker, bounded `asyncio.Queue` reception with backpressure protection, and automatic out-of-order fragment reassembly.
+  - Central BLE manager (`BLEManager`) coordinating scanner, active multi-peer connections, unicast sending, and broadcast delivery.
+  - BLE exception hierarchy (`BLEError`, `BLEScanError`, `BLEConnectionError`, `BLEGATTError`, `BLETransportError`).
+  - Hardware-independent mock suite and unit tests (`tests/ble/`) covering scanning, connection transitions, GATT validation, pacing, queue backpressure, malformed packet isolation, and multi-peer dispatch (472 total project tests passing).
 - Experimental Nim performance prototype and FFI evaluation (`nim/`):
   - Isolated prototype area implementing byte-level packet encode/decode validation, BitChat random block padding/unpadding, 150-byte chunk slicing, 13-byte fragment header packing, and bounded out-of-order reassembly with sender isolation.
   - Caller-allocated C-ABI FFI boundary (`bitchat_nim.dll` / `.so`) with strict buffer bounds and zero cross-runtime heap allocations.
