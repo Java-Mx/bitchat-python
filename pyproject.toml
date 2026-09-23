@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "textual>=3.0.0",
-    "bleak>=0.22.0",
+    "bleak>=3.0.2",
     "cryptography>=44.0.0",
 ]
 
