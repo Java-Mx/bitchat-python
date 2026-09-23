@@ -5,6 +5,7 @@ from bitchat.ble.gatt import GATTManager
 from bitchat.ble.manager import BLEManager
 from bitchat.ble.models import BLEConnectionState, DiscoveredPeer
 from bitchat.ble.scanner import BLEScanner
+from bitchat.ble.server import BLEServer
 from bitchat.ble.transport import BLETransport
 from bitchat.exceptions import (
     BLEConnectionError,
@@ -23,6 +24,7 @@ __all__ = [
     "BLEManager",
     "BLEScanError",
     "BLEScanner",
+    "BLEServer",
     "BLETransport",
     "BLETransportError",
     "DiscoveredPeer",

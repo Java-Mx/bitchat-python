@@ -99,6 +99,55 @@ class TestCommandParser:
         assert "Unknown command" in cmd.error_message
         assert cmd.raw_input == text
 
+    def test_phase8_commands(self, parser: CommandParser) -> None:
+        """Phase 8 commands parse correctly with arguments."""
+        # /connect
+        c1 = parser.parse("/connect AA:BB:CC:DD:EE:01")
+        assert c1.command_type == CommandType.CONNECT
+        assert c1.args == ["AA:BB:CC:DD:EE:01"]
+
+        c1_err = parser.parse("/connect")
+        assert c1_err.command_type == CommandType.CONNECT
+        assert c1_err.error_message is not None
+
+        # /disconnect
+        c2 = parser.parse("/disconnect AA:BB:CC:DD:EE:01")
+        assert c2.command_type == CommandType.DISCONNECT
+        assert c2.args == ["AA:BB:CC:DD:EE:01"]
+
+        # /scan
+        c3 = parser.parse("/scan")
+        assert c3.command_type == CommandType.SCAN
+
+        # /online
+        c4 = parser.parse("/online")
+        assert c4.command_type == CommandType.ONLINE
+        c4b = parser.parse("/peers")
+        assert c4b.command_type == CommandType.ONLINE
+
+        # /name
+        c5 = parser.parse("/name Alice")
+        assert c5.command_type == CommandType.NAME
+        assert c5.args == ["Alice"]
+
+        # /dm
+        c6 = parser.parse("/dm Bob hello world from Alice")
+        assert c6.command_type == CommandType.DM
+        assert c6.args == ["Bob", "hello world from Alice"]
+
+        c6_err = parser.parse("/dm Bob")
+        assert c6_err.command_type == CommandType.DM
+        assert c6_err.error_message is not None
+
+        # /large
+        c7 = parser.parse("/large Bob")
+        assert c7.command_type == CommandType.LARGE
+        assert c7.args == ["Bob"]
+
+        # /clear
+        c8 = parser.parse("/clear")
+        assert c8.command_type == CommandType.CLEAR
+
     def test_command_is_immutable(self) -> None:
         """Command dataclass instances cannot be mutated."""
         cmd = Command(command_type=CommandType.HELP, raw_input="help")

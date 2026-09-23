@@ -153,3 +153,33 @@ class MockBleakClient:
         self.is_connected = False
         if self.disconnected_callback:
             self.disconnected_callback(self)
+
+
+class MockBLEServerBackend:
+    """Mock backend for BLEServer enabling in-process loopback testing."""
+
+    def __init__(self) -> None:
+        self.server: Any | None = None
+        self.is_started: bool = False
+        self.clients: list[MockBleakClient] = []
+
+    async def start(self, server: Any) -> None:
+        self.server = server
+        self.is_started = True
+
+    async def stop(self) -> None:
+        self.is_started = False
+        self.server = None
+
+    def attach_client(self, client: MockBleakClient) -> None:
+        self.clients.append(client)
+
+    async def send_notification(
+        self, data: bytes, client_id: str | None = None
+    ) -> None:
+        for client in self.clients:
+            client.emit_notification(data)
+
+    def emit_write(self, data: bytes, client_id: str = "mock_client") -> None:
+        if self.server and self.server.on_data_received:
+            self.server.on_data_received(data, client_id)

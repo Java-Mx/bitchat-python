@@ -68,3 +68,63 @@ class TestStorage:
             storage.load_config()
         with pytest.raises(ConfigurationError):
             storage.save_config(AppConfig())
+        with pytest.raises(ConfigurationError):
+            storage.load_identity()
+
+    def test_in_memory_identity_load_save(self) -> None:
+        """InMemoryStorage persists and retrieves LocalIdentity."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        storage = InMemoryStorage()
+        assert storage.load_identity() is None
+
+        identity = LocalIdentity.generate()
+        storage.save_identity(identity)
+        loaded = storage.load_identity()
+        assert loaded is not None
+        assert loaded.peer_id == identity.peer_id
+        assert loaded.fingerprint == identity.fingerprint
+        assert loaded.x25519_private == identity.x25519_private
+        assert loaded.ed25519_private == identity.ed25519_private
+
+    def test_file_identity_roundtrip(self, tmp_path: Path) -> None:
+        """FileConfigStorage serializes and deserializes identity."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        id_file = tmp_path / "keys" / "identity.json"
+        storage = FileConfigStorage(
+            config_path=tmp_path / "cfg.json",
+            identity_path=id_file,
+        )
+
+        assert storage.load_identity() is None
+
+        identity = LocalIdentity.generate()
+        storage.save_identity(identity)
+        assert id_file.exists()
+
+        reloaded = FileConfigStorage(
+            config_path=tmp_path / "cfg.json",
+            identity_path=id_file,
+        )
+        loaded = reloaded.load_identity()
+        assert loaded is not None
+        assert loaded.peer_id == identity.peer_id
+        assert loaded.fingerprint == identity.fingerprint
+        assert loaded.x25519_private == identity.x25519_private
+        assert loaded.ed25519_private == identity.ed25519_private
+
+    def test_file_identity_corrupted_raises(self, tmp_path: Path) -> None:
+        """Corrupted identity JSON raises ConfigurationError."""
+        id_file = tmp_path / "bad_identity.json"
+        id_file.write_text(
+            '{"x25519_private": "invalid_hex!", "ed25519_private": "invalid_hex!"}',
+            encoding="utf-8",
+        )
+
+        storage = FileConfigStorage(
+            config_path=tmp_path / "cfg.json",
+            identity_path=id_file,
+        )
+        with pytest.raises(ConfigurationError, match="Failed to read identity"):
+            storage.load_identity()

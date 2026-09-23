@@ -3,7 +3,7 @@
   <h1>BitChat Python</h1>
   <p>Python terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE)</p>
   <p>
-    <img src="https://img.shields.io/badge/Status-Phase%207%20(BLE%20Transport)-blue" alt="Status" />
+    <img src="https://img.shields.io/badge/Status-Phase%208%20(Two--PC%20End--to--End)-blue" alt="Status" />
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
     <img src="https://img.shields.io/badge/CI-Passing-brightgreen" alt="CI" />
   </p>
@@ -12,7 +12,7 @@
 ## Overview
 BitChat Python is a terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE). It aims to be fully protocol-compatible with the Rust reference implementation.
 
-**Current Status:** Phase 7 — BLE Transport implemented and verified using Bleak (service discovery `F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C`, characteristic `A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`, connection lifecycle state machine, write-without-response with 20ms fragment pacing, decoupled async queue reception & reassembly, and multi-peer coordination).
+**Current Status:** Phase 8 — Two-PC End-to-End Functional Prototype implemented and verified. Includes Textual TUI (`BitChatApp`), session coordination (`SessionCoordinator`), Noise XX handshake and encrypted transport, BLE GATT server and central management, 20ms fragment pacing, and end-to-end integration tests.
 
 ## Goals
 - Protocol-compatible Python implementation
@@ -30,7 +30,7 @@ The project follows a layered architecture to separate concerns:
 - ✅ Implemented: Wire decoder (`decode_packet`, `unpad_packet_data`) with strict defensive validation
 - ✅ Implemented: Protocol constants & complete 22-variant `MessageType` enum
 - ✅ Implemented: Packet fragmentation & out-of-order reassembly with sender isolation & bounded limits
-- ✅ Implemented: Cryptographic identity abstraction (`LocalIdentity`) with safe representation
+- ✅ Implemented: Cryptographic identity abstraction (`LocalIdentity`) with persistent storage (`~/.bitchat/identity.json`)
 - ✅ Implemented: Ed25519 digital signatures (`sign`, `verify`)
 - ✅ Implemented: X25519 Diffie-Hellman with weak key validation
 - ✅ Implemented: Noise XX handshake (`Noise_XX_25519_ChaChaPoly_SHA256`) state machine
@@ -40,17 +40,43 @@ The project follows a layered architecture to separate concerns:
 - ✅ Implemented: Application core controller, command parser, peer model, and storage
 - ✅ Implemented: BLE peer discovery and connection lifecycle (`bitchat.ble.scanner.BLEScanner`, `bitchat.ble.connection.BLEConnection`)
 - ✅ Implemented: BLE GATT characteristic discovery, 20ms pacing, and reassembly transport (`bitchat.ble.transport.BLETransport`)
-- 🚧 Planned: Public channels and private messages
-- 🚧 Planned: Mesh routing
+- ✅ Implemented: BLE GATT peripheral server and advertising (`bitchat.ble.server.BLEServer`)
+- ✅ Implemented: Session coordinator managing Noise XX sessions and BLE routing (`bitchat.app.session_coordinator.SessionCoordinator`)
+- ✅ Implemented: Interactive Textual Terminal UI with live message log and peer sidebar (`bitchat.tui.app.BitChatApp`)
+- ✅ Implemented: Two-node end-to-end integration test (`tests/integration/test_end_to_end.py`)
+- 🚧 Planned: Multi-hop mesh routing and store-and-forward
 - 🚧 Planned: Message persistence (SQLite)
-- 🚧 Planned: Terminal UI (Textual)
-- 🚧 Planned: Cross-platform BLE hardware verification
 - 🚧 Planned: Rust interoperability testing
 
-## Supported Platforms
-- Windows (🚧 Planned / UNTESTED)
-- Linux (🚧 Planned / UNTESTED)
-- macOS (🚧 Planned / UNTESTED)
+## Hardware & Two-PC BLE Validation Status
+- **Automated Integration:** 100% automated integration and end-to-end suite passing (491 tests).
+- **Windows (WinRT):** GATT Server creation and BLE service advertisement verified on host hardware.
+- **Linux / macOS:** Central scanning and client transport implemented via Bleak; peripheral advertising pending platform-specific daemon bindings.
+- **Status Statement:** *"Automated integration is complete, but real two-PC BLE validation remains outstanding."*
+
+## Quickstart
+
+Run with interactive Textual TUI:
+```bash
+uv run bitchat
+```
+
+Run in headless / scripted CLI mode:
+```bash
+uv run bitchat --cli
+```
+
+### Available Commands
+- `/connect <address>`: Connect to peer BLE address
+- `/disconnect [address]`: Disconnect from peer or all peers
+- `/scan`: Discover nearby BitChat BLE nodes
+- `/online`: List connected and discovered peers
+- `/name <nickname>`: Change nickname and broadcast announce
+- `/dm <peer_id> <message>`: Send end-to-end encrypted Noise XX direct message
+- `/large <peer_id>`: Send 1000B test message to verify fragmentation and reassembly
+- `/clear`: Clear message log
+- `/help`: Display command reference
+- `/exit`: Quit BitChat
 
 ## Development Setup
 This project uses `uv` for dependency management.
@@ -73,26 +99,11 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-## Project Structure
-```text
-bitchat-python/
-├── src/
-│   └── bitchat/       # Application code
-├── tests/             # Test suite
-├── docs/              # Documentation
-├── README.md
-├── CONTRIBUTING.md
-└── pyproject.toml
-```
-
 ## Reference Implementation
 The reference implementation is [bitchat-tui](https://github.com/vaibhav-mattoo/bitchat-tui) written in Rust. This repository aims for protocol compatibility with the Rust implementation but does not copy its code.
 
 ## Security Notice
 This project is in early development. There has been no security audit. Do not use for sensitive communications.
-
-## Contributing
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ## License
 MIT

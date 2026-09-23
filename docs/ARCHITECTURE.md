@@ -18,8 +18,10 @@ OS Bluetooth APIs
 
 ## Module Responsibilities
 
-- **`tui/`**: Terminal UI, display, user input (depends on `app`). Must NOT directly implement BLE or cryptography.
+- **`tui/`**: Terminal UI, display, user input (`bitchat.tui.app.BitChatApp`). Must NOT directly implement BLE or cryptography. Built with Textual for responsive real-time chat log, peer discovery sidebar, and slash commands.
 - **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `ble`).
+  - `session_coordinator.py`: `SessionCoordinator` orchestrating `dict[str, NoiseSession]`, peer address resolution, deterministic Noise XX handshake progression, encrypted direct messages, presence announcements, and fragmentation pacing.
+  - `application.py`: `Application` core controller managing startup/shutdown, command dispatching, and background task lifecycle.
 - **`protocol/`**: Packet encoding/decoding, wire models, message types, fragmentation (independent). Must remain independent from presentation.
   - `constants.py`: Wire format sizes, UUIDs, bitmask flags, block sizes, fragmentation limits, and `MessageType` enum.
   - `packet.py`: Immutable `BitchatPacket` dataclass with normalized immutable `bytes` fields, property accessors, flags, and hex conversion.
@@ -43,6 +45,7 @@ OS Bluetooth APIs
   - `gatt.py`: `GATTManager` resolving service and characteristic (`A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`) with property validation (`write-without-response`, `notify`).
   - `connection.py`: `BLEConnection` state machine managing peer connection, GATT discovery, notification subscription, and disconnect callbacks.
   - `transport.py`: `BLETransport` integrating packet serialization, conditional fragmentation (>500B), 20ms pacing, bounded reception queue, and fragment reassembly.
+  - `server.py`: `BLEServer` GATT peripheral server advertising BitChat service UUID, receiving write-without-response frames, and sending notifications.
   - `manager.py`: `BLEManager` high-level coordinator managing scanner lifecycle, multiple active peer connections, direct sending, and broadcast.
 - **`models/`**: Shared data types (independent, leaf dependency).
 - **`utils/`**: Shared utilities (independent, leaf dependency).

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 8: Two-PC End-to-End Functional Prototype (`bitchat.app`, `bitchat.tui`, `bitchat.ble.server`):
+  - GATT peripheral server and advertising (`bitchat.ble.server.BLEServer`) with native Windows WinRT support and injectable mock backends for testing.
+  - Asynchronous session coordinator (`bitchat.app.session_coordinator.SessionCoordinator`) orchestrating peer discovery, presence announce exchange, deterministic Noise XX handshake progression, encrypted direct messages, and 20ms fragment pacing for large messages (>500B).
+  - Terminal User Interface (`bitchat.tui.app.BitChatApp`) built with Textual, featuring live scrollable message log, active peer discovery sidebar, local identity/fingerprint display, and full slash command integration (`/connect`, `/disconnect`, `/scan`, `/online`, `/name`, `/dm`, `/large`, `/clear`, `/help`, `/exit`).
+  - Dual runtime mode in `bitchat.__main__`: automatic interactive TUI when running in a TTY, and headless/scripted CLI mode (`--cli` or piped stdin).
+  - Identity persistence in `StorageInterface` (`load_identity`, `save_identity`) storing `LocalIdentity` in `~/.bitchat/identity.json` with restricted file permissions (`0o600` on POSIX).
+  - Comprehensive End-to-End integration suite (`tests/integration/test_end_to_end.py`) validating full two-node handshake, direct messaging, 1500B fragmentation/reassembly, and reconnection.
+  - Automated integration test suite expanded to 491 tests with 100% passing rate.
 - Bluetooth Low Energy (BLE) transport layer (`bitchat.ble`):
   - Service and characteristic discovery matching BitChat UUID specification (`F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C` and `A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`) with case-insensitive matching across platform backends.
   - Asynchronous BLE scanner (`BLEScanner`) filtering for the BitChat service UUID, duplicate address deduplication, and RSSI tracking.
