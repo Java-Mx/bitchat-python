@@ -128,3 +128,89 @@ class TestStorage:
         )
         with pytest.raises(ConfigurationError, match="Failed to read identity"):
             storage.load_identity()
+
+    def test_app_config_defaults_and_validation(self) -> None:
+        """AppConfig enforces default values and bounds clamping."""
+        cfg = AppConfig()
+        assert cfg.density == "comfortable"
+        assert cfg.show_timestamps is True
+        assert cfg.accent == "blue"
+        assert cfg.max_hops == 3
+        assert cfg.inter_fragment_delay_ms == 20
+
+        # Normalization and bounds enforcement
+        clamped = AppConfig(
+            density="unknown-mode",
+            accent="neon-yellow",
+            max_hops=999,
+            inter_fragment_delay_ms=9999,
+            nickname="   ",
+        )
+        assert clamped.density == "comfortable"
+        assert clamped.accent == "blue"
+        assert clamped.max_hops == 7
+        assert clamped.inter_fragment_delay_ms == 500
+        assert clamped.nickname == "Anonymous"
+
+    def test_app_config_defensive_deserialization(self) -> None:
+        """AppConfig.from_dict sanitizes malformed data without raising."""
+        # Non-dict
+        assert AppConfig.from_dict("not-a-dict") == AppConfig()  # type: ignore[arg-type]
+
+        # Corrupted fields with wrong types
+        bad_data = {
+            "nickname": None,
+            "density": 12345,
+            "show_timestamps": None,
+            "accent": ["invalid"],
+            "max_hops": "invalid-int",
+            "inter_fragment_delay_ms": None,
+        }
+        safe_cfg = AppConfig.from_dict(bad_data)
+        assert safe_cfg.nickname == "Anonymous"
+        assert safe_cfg.density == "comfortable"
+        assert safe_cfg.show_timestamps is True
+        assert safe_cfg.accent == "blue"
+        assert safe_cfg.max_hops == 3
+        assert safe_cfg.inter_fragment_delay_ms == 20
+
+        # Valid custom dictionary
+        custom_data = {
+            "nickname": "CustomNode",
+            "density": "compact",
+            "show_timestamps": False,
+            "accent": "emerald",
+            "max_hops": 5,
+            "inter_fragment_delay_ms": 50,
+        }
+        parsed = AppConfig.from_dict(custom_data)
+        assert parsed.nickname == "CustomNode"
+        assert parsed.density == "compact"
+        assert parsed.show_timestamps is False
+        assert parsed.accent == "emerald"
+        assert parsed.max_hops == 5
+        assert parsed.inter_fragment_delay_ms == 50
+
+    def test_file_storage_complete_appearance_roundtrip(self, tmp_path: Path) -> None:
+        """FileConfigStorage accurately preserves appearance and node configuration."""
+        cfg_file = tmp_path / "custom_config.json"
+        storage = FileConfigStorage(config_path=cfg_file)
+
+        initial = AppConfig(
+            nickname="TestPilot",
+            density="compact",
+            show_timestamps=False,
+            accent="purple",
+            max_hops=4,
+            inter_fragment_delay_ms=35,
+        )
+        storage.save_config(initial)
+
+        reloaded_storage = FileConfigStorage(config_path=cfg_file)
+        loaded = reloaded_storage.load_config()
+        assert loaded.nickname == "TestPilot"
+        assert loaded.density == "compact"
+        assert loaded.show_timestamps is False
+        assert loaded.accent == "purple"
+        assert loaded.max_hops == 4
+        assert loaded.inter_fragment_delay_ms == 35

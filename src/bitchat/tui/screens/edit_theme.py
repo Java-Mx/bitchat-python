@@ -143,7 +143,9 @@ class EditThemeModal(ModalScreen[None]):
             elif "purple" in aid:
                 accent = "purple"
 
-        self.post_message(self.ThemeApplied(density, show_ts, accent))
+        msg = self.ThemeApplied(density, show_ts, accent)
+        self.app.post_message(msg)
+        self.post_message(msg)
         self.dismiss()
 
     def action_dismiss_modal(self) -> None:

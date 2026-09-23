@@ -150,6 +150,14 @@ Fragment Packet (0x05, 0x06, 0x07) or Regular BitchatPacket
       Original BitchatPacket (Validated Data Model)
 ```
 
+## Storage & Configuration Architecture
+
+Persistent node configuration and user preferences are decoupled into `bitchat.storage`:
+- **`AppConfig`**: Strongly typed data model with strict invariant validation and defensive deserialization (graceful fallback on corrupted keys or unexpected types).
+- **`StorageInterface` / `FileConfigStorage`**: Atomic JSON persistence under `~/.bitchat/config.json`.
+- **Decoupled Appearance Settings**: Appearance parameters (`density: "comfortable" | "compact"`, `show_timestamps: bool`, `accent: "blue" | "cyan" | "emerald" | "purple"`) and node operational parameters (`nickname`, `max_hops`, `inter_fragment_delay_ms`) are saved to storage without storing sensitive keys.
+- **TUI Synchronization**: TUI screens (`EditThemeModal`, `SettingsModal`) post typed messages to the application root, which updates reactive CSS classes, triggers structured history re-rendering in `ChatView`, and updates persistent storage.
+
 ## Dependency Rules
 - Higher layers depend on lower layers, never the reverse.
 - The TUI must remain a purely presentational layer.

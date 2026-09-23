@@ -426,6 +426,12 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     align: right middle;
 }
 
+#settings-actions .action-btn, #edit-theme-actions .action-btn, #peer-info-actions .action-btn, #ble-error-actions .action-btn {
+    width: auto;
+    min-width: 14;
+    margin-left: 1;
+}
+
 /* BLE Error Modal */
 #ble-error-dialog {
     width: 70;
@@ -463,3 +469,139 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     layout: horizontal;
     align: right middle;
 }
+
+/* ------------------------------------------------------------------------------
+   Display Density Modes (Comfortable vs Compact)
+   ------------------------------------------------------------------------------ */
+.density-comfortable PeerSidebar {
+    width: 30;
+    padding: 0;
+}
+
+.density-compact PeerSidebar {
+    width: 25;
+    padding: 0;
+}
+
+.density-compact #identity-card {
+    padding: 0;
+}
+
+.density-compact .sidebar-section-title {
+    padding: 0;
+    margin: 0;
+}
+
+.density-compact .peer-list-item {
+    padding: 0;
+    margin: 0;
+}
+
+.density-compact MessageInput {
+    height: 3;
+    padding: 0 1;
+}
+
+/* ------------------------------------------------------------------------------
+   Accent Themes (Strict 5-Family Palette Integration)
+   ------------------------------------------------------------------------------ */
+.accent-blue #header-brand {
+    color: #58a6ff;
+}
+.accent-blue #identity-title {
+    color: #58a6ff;
+}
+.accent-blue PeerSidebar {
+    border-title-color: #58a6ff;
+}
+.accent-blue ChatView {
+    border-title-color: #58a6ff;
+}
+.accent-blue MessageInput:focus {
+    border: round #388bfd;
+    background: #121624;
+}
+.accent-blue .action-btn:focus {
+    border: solid #58a6ff;
+    color: #58a6ff;
+}
+.accent-blue #autocomplete-option-list > .option-list--option-highlighted {
+    background: #1e2438;
+    color: #58a6ff;
+}
+
+.accent-cyan #header-brand {
+    color: #39c5cf;
+}
+.accent-cyan #identity-title {
+    color: #39c5cf;
+}
+.accent-cyan PeerSidebar {
+    border-title-color: #39c5cf;
+}
+.accent-cyan ChatView {
+    border-title-color: #39c5cf;
+}
+.accent-cyan MessageInput:focus {
+    border: round #39c5cf;
+    background: #0f1820;
+}
+.accent-cyan .action-btn:focus {
+    border: solid #39c5cf;
+    color: #39c5cf;
+}
+.accent-cyan #autocomplete-option-list > .option-list--option-highlighted {
+    background: #10262e;
+    color: #39c5cf;
+}
+
+.accent-emerald #header-brand {
+    color: #56d364;
+}
+.accent-emerald #identity-title {
+    color: #56d364;
+}
+.accent-emerald PeerSidebar {
+    border-title-color: #56d364;
+}
+.accent-emerald ChatView {
+    border-title-color: #56d364;
+}
+.accent-emerald MessageInput:focus {
+    border: round #56d364;
+    background: #101c13;
+}
+.accent-emerald .action-btn:focus {
+    border: solid #56d364;
+    color: #56d364;
+}
+.accent-emerald #autocomplete-option-list > .option-list--option-highlighted {
+    background: #13261a;
+    color: #56d364;
+}
+
+.accent-purple #header-brand {
+    color: #bc8cff;
+}
+.accent-purple #identity-title {
+    color: #bc8cff;
+}
+.accent-purple PeerSidebar {
+    border-title-color: #bc8cff;
+}
+.accent-purple ChatView {
+    border-title-color: #bc8cff;
+}
+.accent-purple MessageInput:focus {
+    border: round #bc8cff;
+    background: #181224;
+}
+.accent-purple .action-btn:focus {
+    border: solid #bc8cff;
+    color: #bc8cff;
+}
+.accent-purple #autocomplete-option-list > .option-list--option-highlighted {
+    background: #271b3d;
+    color: #bc8cff;
+}
+

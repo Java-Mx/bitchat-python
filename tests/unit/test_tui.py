@@ -6,13 +6,14 @@ from unittest.mock import MagicMock
 
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
-from textual.widgets import Button, RichLog, Static
+from textual.widgets import Button, Input, RichLog, Static
 
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.ble.manager import BLEManager
 from bitchat.ble.models import DiscoveredPeer
 from bitchat.ble.server import BLEServer
 from bitchat.crypto.identity import LocalIdentity
+from bitchat.storage.config import AppConfig, InMemoryStorage
 from bitchat.tui.app import BitChatApp
 from bitchat.tui.screens.ble_error import BLEErrorModal
 from bitchat.tui.screens.edit_theme import EditThemeModal
@@ -37,10 +38,12 @@ def test_coordinator() -> SessionCoordinator:
             kw["detection_callback"], kw["service_uuids"]
         ),
     )
+    storage = InMemoryStorage()
     return SessionCoordinator(
         local_identity=identity,
         ble_manager=manager,
         ble_server=server,
+        storage=storage,
         nickname="Alice",
     )
 
@@ -757,3 +760,217 @@ async def test_tui_phase93_layout_alignment_responsive(
 
         # Vertical continuity: no gaps between sidebar and status bar
         assert sidebar.region.y + sidebar.region.height == status.region.y
+
+
+@pytest.mark.asyncio
+async def test_tui_appearance_density_real_effect_and_history_rerender(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Toggling density updates CSS class, chat layout, and re-renders history."""
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        chat = app.query_one(ChatView)
+        assert app.has_class("density-comfortable")
+        assert chat.compact_mode is False
+
+        # Add messages in comfortable mode
+        chat.add_chat_message("Bob", "Hello comfortable world", is_encrypted=False)
+        chat.add_system_message("Mesh routing initialized")
+        await pilot.pause()
+
+        # Open theme modal
+        await pilot.press("f2")
+        await pilot.pause()
+        assert isinstance(app.screen, EditThemeModal)
+
+        # Switch to Compact and apply
+        await pilot.click("#rb-density-comp")
+        await pilot.click("#btn-theme-apply")
+        await pilot.pause()
+
+        # Modal is closed, app root has density-compact class
+        assert not isinstance(app.screen, EditThemeModal)
+        assert app.has_class("density-compact")
+        assert not app.has_class("density-comfortable")
+        assert chat.compact_mode is True
+        assert storage.load_config().density == "compact"
+
+        rendered_lines = [str(line) for line in chat.rich_log.lines]
+        log_content = " ".join(rendered_lines)
+        assert "Hello comfortable world" in log_content
+
+        # Switch back to Comfortable
+        await pilot.press("f2")
+        await pilot.pause()
+        await pilot.click("#rb-density-comf")
+        await pilot.click("#btn-theme-apply")
+        await pilot.pause()
+
+        assert app.has_class("density-comfortable")
+        assert not app.has_class("density-compact")
+        assert chat.compact_mode is False
+        assert storage.load_config().density == "comfortable"
+
+
+@pytest.mark.asyncio
+async def test_tui_appearance_timestamps_real_toggle_and_rerender(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Disabling timestamps completely hides them from both past and future messages."""
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        chat = app.query_one(ChatView)
+        assert chat.show_timestamps is True
+
+        chat.add_chat_message("Charlie", "Test timestamp message", is_encrypted=False)
+        await pilot.pause()
+
+        # Open theme modal and select Hide Timestamps
+        await pilot.press("f2")
+        await pilot.pause()
+        await pilot.click("#rb-ts-hide")
+        await pilot.click("#btn-theme-apply")
+        await pilot.pause()
+
+        assert chat.show_timestamps is False
+        assert storage.load_config().show_timestamps is False
+
+        # Verify timestamp bullet is absent from re-rendered log
+        rendered_lines = [str(line) for line in chat.rich_log.lines]
+        for line in rendered_lines:
+            if "Test timestamp message" in line:
+                assert "•" not in line
+
+
+@pytest.mark.asyncio
+async def test_tui_appearance_accent_tone_propagation(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Selecting an accent tone propagates root CSS class and updates stored config."""
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        assert app.has_class("accent-blue")
+
+        # Switch to Emerald
+        await pilot.press("f2")
+        await pilot.pause()
+        await pilot.click("#rb-accent-emerald")
+        await pilot.click("#btn-theme-apply")
+        await pilot.pause()
+
+        assert app.has_class("accent-emerald")
+        assert not app.has_class("accent-blue")
+        assert storage.load_config().accent == "emerald"
+
+        # Switch to Purple
+        await pilot.press("f2")
+        await pilot.pause()
+        await pilot.click("#rb-accent-purple")
+        await pilot.click("#btn-theme-apply")
+        await pilot.pause()
+
+        assert app.has_class("accent-purple")
+        assert not app.has_class("accent-emerald")
+        assert storage.load_config().accent == "purple"
+
+
+@pytest.mark.asyncio
+async def test_tui_appearance_persistence_across_app_restarts(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Applied theme and appearance preferences survive application restart."""
+    storage = InMemoryStorage()
+
+    # Session 1: customize theme
+    app1 = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app1.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f2")
+        await pilot.pause()
+        await pilot.click("#rb-density-comp")
+        await pilot.click("#rb-ts-hide")
+        await pilot.click("#rb-accent-cyan")
+        await pilot.click("#btn-theme-apply")
+        await pilot.pause()
+
+    # Verify storage has all 3 updated settings
+    cfg = storage.load_config()
+    assert cfg.density == "compact"
+    assert cfg.show_timestamps is False
+    assert cfg.accent == "cyan"
+
+    # Session 2: launch fresh BitChatApp with same storage
+    app2 = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app2.run_test(size=(120, 45)) as pilot:
+        chat = app2.query_one(ChatView)
+        assert app2.current_density == "compact"
+        assert app2.current_show_timestamps is False
+        assert app2.current_accent == "cyan"
+        assert app2.has_class("density-compact")
+        assert app2.has_class("accent-cyan")
+        assert chat.compact_mode is True
+        assert chat.show_timestamps is False
+
+
+@pytest.mark.asyncio
+async def test_tui_appearance_discard_unapplied_changes_on_close(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Closing or pressing Escape discards unapplied edits without saving."""
+    storage = InMemoryStorage(AppConfig(density="comfortable", accent="blue"))
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f2")
+        await pilot.pause()
+        assert isinstance(app.screen, EditThemeModal)
+
+        # Select different options but do NOT click Apply
+        await pilot.click("#rb-density-comp")
+        await pilot.click("#rb-accent-emerald")
+        await pilot.click("#btn-theme-close")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, EditThemeModal)
+        assert app.has_class("density-comfortable")
+        assert app.has_class("accent-blue")
+        assert storage.load_config().density == "comfortable"
+        assert storage.load_config().accent == "blue"
+
+
+@pytest.mark.asyncio
+async def test_tui_settings_modal_save_and_persistence(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Settings modal saves parameters, updates coordinator, and persists."""
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+
+        settings_screen = app.screen
+        settings_screen.query_one("#settings-input-nickname", Input).value = "Commander"
+        settings_screen.query_one("#settings-input-hops", Input).value = "5"
+        settings_screen.query_one("#settings-input-delay", Input).value = "50"
+
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, SettingsModal)
+        assert test_coordinator.nickname == "Commander"
+        assert test_coordinator.mesh_router.max_relay_ttl == 5
+        assert test_coordinator.inter_fragment_delay == 0.05
+
+        cfg = storage.load_config()
+        assert cfg.nickname == "Commander"
+        assert cfg.max_hops == 5
+        assert cfg.inter_fragment_delay_ms == 50
+
+        # Verify UI reflects new nickname
+        header = app.query_one(HeaderWidget)
+        sidebar = app.query_one(PeerSidebar)
+        assert header.nickname == "Commander"
+        assert sidebar.nickname == "Commander"

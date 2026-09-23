@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual.app import App, ComposeResult
@@ -15,6 +16,7 @@ from bitchat.commands.parser import (
     CommandType,
     get_command_suggestions,
 )
+from bitchat.storage.config import AppConfig, FileConfigStorage, StorageInterface
 from bitchat.tui.screens.ble_error import BLEErrorModal
 from bitchat.tui.screens.edit_theme import EditThemeModal
 from bitchat.tui.screens.help import HelpScreen
@@ -59,6 +61,8 @@ class BitChatApp(App[None]):
     def __init__(
         self,
         coordinator: SessionCoordinator | None = None,
+        storage: StorageInterface | None = None,
+        config: AppConfig | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -66,10 +70,43 @@ class BitChatApp(App[None]):
         self.parser = CommandParser()
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
+        if storage is not None:
+            self.storage: StorageInterface = storage
+        elif (
+            coordinator is not None
+            and getattr(coordinator, "storage", None) is not None
+        ):
+            self.storage = coordinator.storage  # type: ignore[assignment]
+        else:
+            self.storage = FileConfigStorage()
+
+        if config is not None:
+            self.config = config
+        else:
+            try:
+                self.config = self.storage.load_config()
+            except Exception:
+                self.config = AppConfig()
+
         self.active_context: str = "#public"
-        self.current_density: str = "comfortable"
-        self.current_show_timestamps: bool = True
-        self.current_accent: str = "blue"
+        self.current_density: str = self.config.density
+        self.current_show_timestamps: bool = self.config.show_timestamps
+        self.current_accent: str = self.config.accent
+
+        # Sync nickname to coordinator if coordinator was default "Anonymous"
+        if (
+            self.coordinator is not None
+            and self.config.nickname != "Anonymous"
+            and self.coordinator.nickname == "Anonymous"
+        ):
+            self.coordinator.set_nickname(self.config.nickname)
+
+        # Sync mesh parameters from config to coordinator
+        if self.coordinator is not None:
+            self.coordinator.mesh_router.max_relay_ttl = self.config.max_hops
+            self.coordinator.inter_fragment_delay = (
+                self.config.inter_fragment_delay_ms / 1000.0
+            )
 
         # Connect coordinator event hooks if present
         if self.coordinator is not None:
@@ -86,7 +123,7 @@ class BitChatApp(App[None]):
         return task
 
     def compose(self) -> ComposeResult:
-        nick = self.coordinator.nickname if self.coordinator else "Anonymous"
+        nick = self.coordinator.nickname if self.coordinator else self.config.nickname
         pid = self.coordinator.local_identity.peer_id_hex if self.coordinator else ""
         fp = self.coordinator.local_identity.fingerprint if self.coordinator else ""
 
@@ -102,12 +139,19 @@ class BitChatApp(App[None]):
 
     async def on_mount(self) -> None:
         """Mount and start coordinator services."""
+        # Apply initial density and accent classes to app root
+        self.add_class(f"density-{self.current_density}")
+        self.add_class(f"accent-{self.current_accent}")
+
+        chat = self.query_one(ChatView)
+        chat.compact_mode = self.current_density == "compact"
+        chat.show_timestamps = self.current_show_timestamps
+
         msg_input = self.query_one(MessageInput)
         palette = self.query_one(AutocompletePalette)
         msg_input.autocomplete_palette = palette
         msg_input.focus()
 
-        chat = self.query_one(ChatView)
         chat.add_system_message(
             "Welcome to BitChat. Type / for commands, @<peer> for direct messages, "
             "/help for help."
@@ -349,9 +393,17 @@ class BitChatApp(App[None]):
             self._spawn_task(self.coordinator.send_announce(event.nickname))
             self.query_one(PeerSidebar).update_identity(event.nickname)
             self.query_one(HeaderWidget).nickname = event.nickname
+
+        # Update and persist config
+        self.config.nickname = event.nickname
+        self.config.max_hops = event.max_hops
+        self.config.inter_fragment_delay_ms = event.inter_fragment_delay_ms
+        with contextlib.suppress(Exception):
+            self.storage.save_config(self.config)
+
         chat = self.query_one(ChatView)
         chat.add_system_message(
-            f"Settings updated: nickname='{event.nickname}', "
+            f"Settings updated and saved: nickname='{event.nickname}', "
             f"max_hops={event.max_hops}, delay={event.inter_fragment_delay_ms}ms"
         )
 
@@ -359,14 +411,33 @@ class BitChatApp(App[None]):
         self, event: EditThemeModal.ThemeApplied
     ) -> None:
         """Handle applied appearance changes."""
+        old_density = self.current_density
+        old_accent = self.current_accent
+
         self.current_density = event.density
         self.current_show_timestamps = event.show_timestamps
         self.current_accent = event.accent_name
+
+        # Swap density and accent classes on the application root
+        self.remove_class(f"density-{old_density}")
+        self.add_class(f"density-{self.current_density}")
+        self.remove_class(f"accent-{old_accent}")
+        self.add_class(f"accent-{self.current_accent}")
+
         chat = self.query_one(ChatView)
         chat.compact_mode = event.density == "compact"
         chat.show_timestamps = event.show_timestamps
+        chat.re_render_all()
+
+        # Update and persist config
+        self.config.density = self.current_density
+        self.config.show_timestamps = self.current_show_timestamps
+        self.config.accent = self.current_accent
+        with contextlib.suppress(Exception):
+            self.storage.save_config(self.config)
+
         chat.add_system_message(
-            f"Theme applied: density={event.density}, "
+            f"Theme applied and saved: density={event.density}, "
             f"timestamps={event.show_timestamps}, accent={event.accent_name}"
         )
 
@@ -618,6 +689,9 @@ class BitChatApp(App[None]):
                     header = self.query_one(HeaderWidget)
                     sidebar.update_identity(new_name)
                     header.nickname = new_name
+                self.config.nickname = new_name
+                with contextlib.suppress(Exception):
+                    self.storage.save_config(self.config)
                 chat.add_system_message(f"Nickname changed to '{new_name}'")
 
             case CommandType.DM:
@@ -734,15 +808,13 @@ class BitChatApp(App[None]):
 
     def action_open_settings(self) -> None:
         """Action handler to open settings modal."""
-        nick = self.coordinator.nickname if self.coordinator else "Anonymous"
-        hops = (
-            getattr(self.coordinator.mesh_router, "max_relay_ttl", 3)
-            if self.coordinator
-            else 3
+        nick = (
+            self.config.nickname
+            if self.config.nickname != "Anonymous"
+            else (self.coordinator.nickname if self.coordinator else "Anonymous")
         )
-        delay = int(
-            (self.coordinator.inter_fragment_delay if self.coordinator else 0.02) * 1000
-        )
+        hops = self.config.max_hops
+        delay = self.config.inter_fragment_delay_ms
         self.push_screen(
             SettingsModal(
                 current_nickname=nick,

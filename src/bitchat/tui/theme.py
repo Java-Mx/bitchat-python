@@ -59,6 +59,48 @@ COLOR_STATUS_SUCCESS = "#3fb950"  # Connected, secure, verified
 COLOR_STATUS_WARNING = "#d29922"  # Connecting, scanning, warning
 COLOR_STATUS_ERROR = "#f85149"  # Disconnected, handshake error, failure
 
+# ==============================================================================
+# 6. Accent Themes (Strict 5-Family Preserving Accent Profiles)
+# ==============================================================================
+ACCENT_THEMES: dict[str, dict[str, str]] = {
+    "blue": {
+        "name": "Midnight Blue",
+        "primary": "#58a6ff",
+        "interactive": "#388bfd",
+        "active": "#1f6feb",
+        "surface": "#152238",
+        "border_focus": "#388bfd",
+        "border_subtle": "#28334e",
+    },
+    "cyan": {
+        "name": "Cyber Cyan",
+        "primary": "#39c5cf",
+        "interactive": "#388bfd",
+        "active": "#1f6feb",
+        "surface": "#10262e",
+        "border_focus": "#39c5cf",
+        "border_subtle": "#1d3840",
+    },
+    "emerald": {
+        "name": "Terminal Emerald",
+        "primary": "#56d364",
+        "interactive": "#3fb950",
+        "active": "#238636",
+        "surface": "#13261a",
+        "border_focus": "#56d364",
+        "border_subtle": "#1d3a24",
+    },
+    "purple": {
+        "name": "Amethyst Purple",
+        "primary": "#bc8cff",
+        "interactive": "#a371f7",
+        "active": "#8957e5",
+        "surface": "#271b3d",
+        "border_focus": "#bc8cff",
+        "border_subtle": "#392557",
+    },
+}
+
 
 def get_peer_color(identifier: str) -> str:
     """Return a deterministic, stable identity color for a peer.

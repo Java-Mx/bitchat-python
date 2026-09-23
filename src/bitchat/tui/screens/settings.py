@@ -114,7 +114,9 @@ class SettingsModal(ModalScreen[None]):
         except ValueError:
             delay = self.current_delay_ms
 
-        self.post_message(self.SettingsSaved(nick, hops, delay))
+        msg = self.SettingsSaved(nick, hops, delay)
+        self.app.post_message(msg)
+        self.post_message(msg)
         self.dismiss()
 
     def action_dismiss_modal(self) -> None:

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 9.3 Addendum: UI Functional Completeness Audit & Real Settings Implementation (`bitchat.storage`, `bitchat.tui`):
+  - Real display density switching: `Comfortable` mode (multi-line structured message bubbles, spacious 32-col sidebar) vs `Compact` mode (dense single-line chat messages, 25-col sidebar, compact message input) dynamically updates root CSS classes and re-renders full message history.
+  - Dynamic message timestamp toggling: `Show Timestamps` vs `Hide Timestamps` dynamically controls timestamp rendering on incoming messages and retroactively re-renders structured history with or without timestamps.
+  - Accent tone customization: supports `Midnight Blue` (`#58a6ff`), `Cyber Cyan` (`#39c5cf`), `Terminal Emerald` (`#56d364`), and `Amethyst Purple` (`#bc8cff`), dynamically applying scoped highlight and focus styles across the application interface while strictly preserving dark midnight backgrounds and deterministic peer identity colors.
+  - End-to-end settings persistence: extended `AppConfig` with `density`, `show_timestamps`, `accent`, `max_hops`, and `inter_fragment_delay_ms` with defensive validation and deserialization. Configuration changes in `EditThemeModal`, `SettingsModal`, and `/name <nick>` command persist to `~/.bitchat/config.json` and are restored on application boot.
+  - Unapplied changes discard: closing `EditThemeModal` via `Esc` or `Close` cleanly leaves active application settings and disk storage unaltered.
+  - Expanded unit and behavioral test suite to 554 tests with 100% pass rate.
 - Phase 9.3: Mesh / Store-and-Forward Hardening & Final TUI Layout Refinement (`bitchat.mesh`, `bitchat.tui`):
   - Enforced strict TTL boundary invariants in `MeshRouter`: drops incoming packets with TTL <= 0, clamps oversized TTL to `max_relay_ttl` to prevent amplification attacks, and ensures decremented TTL is strictly monotonically decreasing and >= 1 prior to relay.
   - Bounded TTL-invariant SHA-256 deduplication cache (LRU capped at 1,000 entries) preventing unbounded memory growth under flooding while guaranteeing duplicate packet rejection.
