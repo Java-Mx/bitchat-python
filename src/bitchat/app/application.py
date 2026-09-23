@@ -114,10 +114,20 @@ class Application:
                 return self._handle_large(command)
             case CommandType.CLEAR:
                 return self._handle_clear(command)
-            case CommandType.EMPTY:
-                return True
+            case CommandType.SETTINGS:
+                return self._handle_settings(command)
+            case CommandType.EDIT:
+                return self._handle_edit(command)
+            case CommandType.STATUS:
+                return self._handle_status(command)
+            case CommandType.INFO:
+                return self._handle_info(command)
+            case CommandType.PUBLIC:
+                return self._handle_public(command)
             case CommandType.UNKNOWN:
                 return self._handle_unknown(command)
+            case _:
+                return True
 
     def _ensure_coordinator(self) -> SessionCoordinator:
         """Lazily initialize identity, BLE components, and SessionCoordinator."""
@@ -366,6 +376,43 @@ class Application:
 
         msg = command.error_message or f"Unknown command: '{command.raw_input}'"
         self.stdout.write(f"{msg}\n")
+        self.stdout.flush()
+        return True
+
+    def _handle_settings(self, command: Command) -> bool:
+        nick = self.config.nickname if self.config else "Anonymous"
+        self.stdout.write(f"BitChat Configuration:\n  Nickname: {nick}\n")
+        self.stdout.flush()
+        return True
+
+    def _handle_edit(self, command: Command) -> bool:
+        self.stdout.write("Appearance editor is only available in TUI mode.\n")
+        self.stdout.flush()
+        return True
+
+    def _handle_status(self, command: Command) -> bool:
+        if not self.coordinator:
+            self.stdout.write("BitChat Status: Offline (Session not initialized)\n")
+        else:
+            status = self.coordinator.ble_status
+            self.stdout.write(f"BitChat Status: {status}\n")
+        self.stdout.flush()
+        return True
+
+    def _handle_info(self, command: Command) -> bool:
+        if self.local_identity:
+            self.stdout.write(
+                f"Local Identity:\n"
+                f"  Peer ID: {self.local_identity.peer_id_hex}\n"
+                f"  Fingerprint: {self.local_identity.fingerprint}\n"
+            )
+        else:
+            self.stdout.write("Identity not initialized.\n")
+        self.stdout.flush()
+        return True
+
+    def _handle_public(self, command: Command) -> bool:
+        self.stdout.write("Current context: #public\n")
         self.stdout.flush()
         return True
 

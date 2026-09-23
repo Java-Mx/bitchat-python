@@ -28,8 +28,12 @@ OS Bluetooth APIs
   - `widgets/chat_view.py`: `ChatView` with `border-title: "Conversation [#public]"`, two-tier message typography (sender anchor + timestamp, body), status tags (`[Public]`, `[🔒 DM]`, `[System]`, `[Security]`, `[Error]`), and scroll controls (`PageUp`/`PageDown`).
   - `widgets/message_input.py`: `MessageInput` prompt with sharp borders, focused blue accent, command history navigation ($\uparrow/\downarrow$), and autocomplete event delegation.
   - `widgets/autocomplete.py`: `AutocompletePalette` IDE-style floating menu anchored above input with synchronous `OptionList`, real-time prefix filtering, and contextual peer suggestions for `/dm ` and `/connect `.
-  - `widgets/status_bar.py`: Persistent keyboard shortcut guide and operational telemetry footer.
+  - `widgets/status_bar.py`: Action bar with clickable action buttons (`Edit (F2)`, `Settings (F3)`, `Peers`, `Commands (/)`, `Help (?)`, `Quit`) and operational telemetry footer.
   - `screens/help.py`: `HelpScreen` modal dialog displaying complete command table and shortcut keys.
+  - `screens/peer_info.py`: `PeerInfoModal` presenting full 64-char public fingerprint, 64-char peer ID, transport diagnostics, and Noise XX security state, while strictly protecting private secrets.
+  - `screens/settings.py`: `SettingsModal` for live configuration of nickname, max mesh relay hops (TTL), and inter-fragment transmission delay.
+  - `screens/edit_theme.py`: `EditThemeModal` for toggling display density (comfortable vs compact) and timestamp visibility.
+  - `screens/ble_error.py`: `BLEErrorModal` for hardware diagnostic guidance and automated `[Retry Adapter]` recovery.
 - **`mesh/`**: Multi-hop mesh routing, deduplication, and store-and-forward (depends on `protocol`).
   - `dedup.py`: `PacketDeduplicator` utilizing TTL-invariant SHA-256 hashing `[:16]` over `(sender_id + timestamp + message_type + recipient_id + payload)`, bounded LRU cache (2,000 entries), and 300s TTL cache.
   - `store_forward.py`: `StoreAndForwardQueue` with per-peer limits (20 packets), global cap (100 packets), aggregate byte budget (256 KB), and automatic flushing upon peer announce/connect.

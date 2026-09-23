@@ -74,6 +74,9 @@ class SessionCoordinator:
         self.on_message_received = on_message_received
         self.on_peer_status_changed = on_peer_status_changed
         self.on_handshake_completed = on_handshake_completed
+        self.on_ble_error: Callable[[str], None] | None = None
+        self.ble_status: str = "offline"
+        self.ble_error_message: str | None = None
 
         self._sessions: dict[str, NoiseSession] = {}
         self._pending_messages: dict[str, list[str]] = {}
@@ -112,6 +115,8 @@ class SessionCoordinator:
             return
 
         self._is_running = True
+        self.ble_status = "active"
+        self.ble_error_message = None
 
         # Hook server callbacks
         self.ble_server.on_data_received = self._handle_server_data_received
@@ -123,14 +128,47 @@ class SessionCoordinator:
         self.ble_manager.on_peer_disconnected = self._handle_peer_disconnected
 
         # Start server and discovery
-        await self.ble_server.start()
+        try:
+            await self.ble_server.start()
+        except Exception as e:
+            logger.warning("Could not start BLE server: %s", e)
+            self.ble_status = "unavailable"
+            self.ble_error_message = f"GATT server failed: {e}"
+            if self.on_ble_error:
+                self.on_ble_error(self.ble_error_message)
+
         try:
             await self.ble_manager.start_discovery()
+            if self.ble_status == "active":
+                self.ble_status = "scanning"
         except Exception as e:
             logger.warning("Could not start BLE discovery: %s", e)
+            self.ble_status = "unavailable"
+            self.ble_error_message = f"Bluetooth scan failed: {e}"
+            if self.on_ble_error:
+                self.on_ble_error(self.ble_error_message)
 
-        # Broadcast announce
-        await self.send_announce()
+        # Broadcast announce if BLE is active
+        if self.ble_status in ("active", "scanning"):
+            await self.send_announce()
+
+    async def retry_ble(self) -> bool:
+        """Attempt to re-initialize BLE services after a failure."""
+        self.ble_status = "scanning"
+        self.ble_error_message = None
+        try:
+            await self.ble_server.start()
+            await self.ble_manager.start_discovery()
+            self.ble_status = "scanning"
+            await self.send_announce()
+            return True
+        except Exception as e:
+            logger.warning("Retry BLE failed: %s", e)
+            self.ble_status = "unavailable"
+            self.ble_error_message = str(e)
+            if self.on_ble_error:
+                self.on_ble_error(self.ble_error_message)
+            return False
 
     async def stop(self) -> None:
         """Shutdown coordinator, close sessions, and stop BLE services."""
@@ -138,6 +176,8 @@ class SessionCoordinator:
             return
 
         self._is_running = False
+        self.ble_status = "offline"
+        self.ble_error_message = None
 
         for session in self._sessions.values():
             session.close()

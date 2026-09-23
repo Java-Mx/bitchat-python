@@ -12,7 +12,11 @@ from bitchat.ble.models import DiscoveredPeer
 from bitchat.ble.server import BLEServer
 from bitchat.crypto.identity import LocalIdentity
 from bitchat.tui.app import BitChatApp
+from bitchat.tui.screens.ble_error import BLEErrorModal
+from bitchat.tui.screens.edit_theme import EditThemeModal
 from bitchat.tui.screens.help import HelpScreen
+from bitchat.tui.screens.peer_info import PeerInfoModal
+from bitchat.tui.screens.settings import SettingsModal
 from bitchat.tui.widgets.autocomplete import AutocompletePalette
 from bitchat.tui.widgets.chat_view import ChatView
 from bitchat.tui.widgets.header import HeaderWidget
@@ -369,3 +373,204 @@ async def test_tui_responsive_terminal_sizes(
         assert app.query_one(MessageInput) is not None
         assert app.query_one(StatusBar) is not None
         await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_tui_action_bar_button_triggers(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Action bar buttons trigger settings, edit theme, help, and commands."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        # 1. Edit Theme button
+        btn_edit = app.query_one("#btn-action-edit")
+        await pilot.click(btn_edit)
+        await pilot.pause()
+        assert isinstance(app.screen, EditThemeModal)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, EditThemeModal)
+
+        # 2. Settings button
+        btn_set = app.query_one("#btn-action-settings")
+        await pilot.click(btn_set)
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, SettingsModal)
+
+        # 3. Help button
+        btn_help = app.query_one("#btn-action-help")
+        await pilot.click(btn_help)
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # 4. Commands button
+        btn_cmd = app.query_one("#btn-action-commands")
+        await pilot.click(btn_cmd)
+        await pilot.pause()
+        inp = app.query_one(MessageInput)
+        assert inp.value == "/"
+
+
+@pytest.mark.asyncio
+async def test_tui_peer_info_modal_security_and_display(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """PeerInfoModal displays full public fingerprint and peer ID, hiding secrets."""
+    mock_pid = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    mock_fp = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+
+    modal = PeerInfoModal(
+        nickname="Charlie",
+        peer_id_hex=mock_pid,
+        fingerprint=mock_fp,
+        address="12:34:56:78:90:AB",
+        is_connected=True,
+        is_encrypted=True,
+    )
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        app.push_screen(modal)
+        await pilot.pause()
+
+        assert isinstance(app.screen, PeerInfoModal)
+        # Verify public metadata is displayed in full
+        static_texts = " ".join(str(s.render()) for s in app.screen.query(Static))
+        assert mock_pid in static_texts
+        assert mock_fp in static_texts
+        assert "Charlie" in static_texts
+        assert "Noise XX" in static_texts
+
+        # Verify NO secret key material is ever shown
+        assert "private_key" not in static_texts
+        assert "sk" not in static_texts
+        assert test_coordinator.local_identity.x25519_private.hex() not in static_texts
+        assert test_coordinator.local_identity.ed25519_private.hex() not in static_texts
+
+        # Verify close button
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, PeerInfoModal)
+
+
+@pytest.mark.asyncio
+async def test_tui_context_switching_and_at_syntax(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """User can switch conversation context between #public and @peer."""
+    test_coordinator.peer_nicknames["deadbeef12345678"] = "Bob"
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        inp = app.query_one(MessageInput)
+        chat = app.query_one(ChatView)
+        status_bar = app.query_one(StatusBar)
+
+        # Initially #public
+        assert app.active_context == "#public"
+        assert "public" in chat.channel_name
+
+        # 1. Switch context to @Bob
+        app.switch_conversation_context("Bob")
+        await pilot.pause()
+        assert app.active_context == "@Bob"
+        assert "@Bob" in chat.channel_name
+        assert "@Bob" in status_bar.channel_message
+
+        # 2. Sending message in @Bob context routes as DM
+        inp.focus()
+        inp.value = "Hey Bob from context mode"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        log = app.query_one("#chat-log", RichLog)
+        assert any(
+            "to @Bob" in str(line) and "Hey Bob from context mode" in str(line)
+            for line in log.lines
+        )
+
+        # 3. Switch back via /public
+        inp.focus()
+        inp.value = "/public"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.active_context == "#public"
+
+        # 4. Direct @peer message syntax
+        inp.focus()
+        inp.value = "@Bob Direct message via at syntax"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert any(
+            "to Bob" in str(line) and "Direct message via at syntax" in str(line)
+            for line in log.lines
+        )
+
+
+@pytest.mark.asyncio
+async def test_tui_at_autocomplete_trigger(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Typing '@' triggers peer suggestions with deterministic identity colors."""
+    test_coordinator.peer_nicknames["deadbeef12345678"] = "Alice"
+    test_coordinator.peer_nicknames["cafebabe87654321"] = "Bob"
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        inp = app.query_one(MessageInput)
+        palette = app.query_one(AutocompletePalette)
+
+        # Type '@'
+        inp.value = "@"
+        await pilot.pause()
+        assert palette.is_visible is True
+        assert palette.border_title == "Peers (@mention / DM)"
+        assert len(palette._suggestions) == 2
+
+        # Filter by '@b'
+        inp.value = "@b"
+        await pilot.pause()
+        assert len(palette._suggestions) == 1
+        assert palette._suggestions[0][0] == "@Bob "
+
+        # Tab complete
+        await pilot.press("tab")
+        await pilot.pause()
+        assert inp.value == "@Bob "
+        assert palette.is_visible is False
+
+
+@pytest.mark.asyncio
+async def test_tui_ble_truthful_state_and_error_modal(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """When BLE fails, truthful status is shown and BLEErrorModal is presented."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        status_bar = app.query_one(StatusBar)
+
+        # Simulate BLE hardware failure
+        test_coordinator.ble_status = "unavailable"
+        app._refresh_peer_lists()
+        await pilot.pause()
+
+        assert "BLE Offline" in status_bar.status_message
+
+        # Trigger BLE error callback
+        app._on_coordinator_ble_error("Bluetooth adapter disabled by user")
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.error_message == "Bluetooth adapter disabled by user"
+        static_texts = " ".join(str(s.render()) for s in app.screen.query(Static))
+        assert "Bluetooth adapter disabled by user" in static_texts
+
+        # Dismiss modal
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)

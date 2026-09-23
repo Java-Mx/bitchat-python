@@ -27,6 +27,7 @@ COLOR_BLUE_INTERACTIVE = "#388bfd"
 COLOR_BLUE_ACTIVE = "#1f6feb"
 COLOR_BLUE_SURFACE = "#152238"
 COLOR_BORDER_FOCUS = "#388bfd"
+COLOR_BORDER_FOCUS_SUBTLE = "#28334e"
 
 # ==============================================================================
 # 3. Purple Family (Secondary accent, system metadata, command palette, Noise)

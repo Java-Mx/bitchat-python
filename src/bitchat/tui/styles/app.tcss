@@ -1,6 +1,7 @@
 /* ==============================================================================
    BitChat Professional Terminal Design System (app.tcss)
    Strict 5-Family Palette: Black, Blue, Purple, Deterministic Identity, Semantic Status
+   Phase 9.2: TUI UX Polish, Subtle Dark Borders & Uniform Alignment
    ============================================================================== */
 
 Screen {
@@ -168,7 +169,7 @@ ChatView {
 }
 
 /* ------------------------------------------------------------------------------
-   Input Area & Command Palette
+   Input Area & Command Palette (Subtle Dark Borders)
    ------------------------------------------------------------------------------ */
 #input-container {
     height: auto;
@@ -182,10 +183,10 @@ AutocompletePalette {
     height: auto;
     max-height: 8;
     background: #0f121c;
-    border: round #388bfd;
+    border: round #28334e;
     border-title-align: left;
     border-title-style: bold;
-    border-title-color: #bc8cff;
+    border-title-color: #58a6ff;
     padding: 0;
     display: none;
     margin-bottom: 0;
@@ -215,16 +216,16 @@ MessageInput {
 }
 
 MessageInput:focus {
-    border: round #388bfd;
-    background: #121520;
+    border: round #28334e;
+    background: #121624;
 }
 
 /* ------------------------------------------------------------------------------
-   Persistent Footer & Status Bar
+   Interactive Action Bar & Telemetry Footer
    ------------------------------------------------------------------------------ */
 StatusBar {
     dock: bottom;
-    height: 2;
+    height: 3;
     background: #0a0d14;
     border-top: solid #1b2030;
     color: #8b949e;
@@ -232,15 +233,31 @@ StatusBar {
     layout: vertical;
 }
 
-#status-shortcuts-row {
+#status-action-row {
     height: 1;
     layout: horizontal;
+    align: left middle;
+}
+
+.action-btn {
+    height: 1;
+    min-width: 8;
+    background: #141824;
     color: #8b949e;
+    border: none;
+    padding: 0 1;
+    margin-right: 1;
+}
+
+.action-btn:hover {
+    background: #1e2438;
+    color: #58a6ff;
 }
 
 #status-telemetry-row {
     height: 1;
     layout: horizontal;
+    align: left middle;
     color: #57606a;
 }
 
@@ -249,33 +266,39 @@ StatusBar {
     color: #8b949e;
 }
 
+#status-center {
+    width: auto;
+    color: #bc8cff;
+    margin-right: 2;
+}
+
 #status-right {
     width: auto;
     color: #57606a;
 }
 
 /* ------------------------------------------------------------------------------
-   Modal Screens (Help Dialog)
+   Modal Screens (Help, Peer Info, Settings, Edit Theme, BLE Error)
    ------------------------------------------------------------------------------ */
-HelpScreen {
+HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     align: center middle;
     background: rgba(8, 10, 15, 0.85);
 }
 
-#help-dialog {
+#help-dialog, #peer-info-dialog, #settings-dialog, #edit-theme-dialog {
     width: 76;
     max-width: 95%;
     height: auto;
     max-height: 85%;
     background: #0f121c;
-    border: round #388bfd;
+    border: round #28334e;
     border-title-align: left;
     border-title-style: bold;
     border-title-color: #58a6ff;
     padding: 1 2;
 }
 
-#help-title {
+#help-title, #peer-info-title, #settings-title, #edit-theme-title {
     text-style: bold;
     color: #58a6ff;
     margin-bottom: 1;
@@ -298,5 +321,102 @@ HelpScreen {
 
 #help-close-btn:hover {
     background: #1e2438;
-    border: round #388bfd;
+    border: round #28334e;
+}
+
+/* Peer Info Modal Styling */
+#peer-info-card {
+    height: auto;
+    background: #080a0f;
+    border: round #22283a;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+.peer-info-section {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#peer-info-actions {
+    height: 1;
+    layout: horizontal;
+    align: right middle;
+}
+
+/* Settings & Theme Forms */
+#settings-form, #edit-theme-form {
+    height: auto;
+    background: #080a0f;
+    border: round #22283a;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+.settings-field-label {
+    text-style: bold;
+    color: #8b949e;
+    margin-top: 1;
+}
+
+#settings-input-nickname, #settings-input-hops, #settings-input-delay {
+    height: 3;
+    background: #0f121c;
+    border: round #22283a;
+    color: #e6edf3;
+    margin-bottom: 1;
+}
+
+#settings-input-nickname:focus, #settings-input-hops:focus, #settings-input-delay:focus {
+    border: round #28334e;
+    background: #121624;
+}
+
+#settings-hint, #edit-theme-hint {
+    height: auto;
+    margin-top: 1;
+}
+
+#settings-actions, #edit-theme-actions {
+    height: 1;
+    layout: horizontal;
+    align: right middle;
+}
+
+/* BLE Error Modal */
+#ble-error-dialog {
+    width: 70;
+    max-width: 95%;
+    height: auto;
+    max-height: 85%;
+    background: #140d0d;
+    border: round #4a2222;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #f85149;
+    padding: 1 2;
+}
+
+#ble-error-title {
+    text-style: bold;
+    color: #f85149;
+    margin-bottom: 1;
+}
+
+#ble-error-content {
+    height: auto;
+    background: #0a0606;
+    border: round #3d1a1a;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+.ble-error-text {
+    height: auto;
+}
+
+#ble-error-actions {
+    height: 1;
+    layout: horizontal;
+    align: right middle;
 }

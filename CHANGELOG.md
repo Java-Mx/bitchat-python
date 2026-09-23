@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 9.2: TUI UX Polish, Interaction Model & Terminal Reliability (`bitchat.tui`, `bitchat.commands`):
+  - Subtle dark midnight focus borders (`#28334e` / `#22283a`) and restrained surface highlights (`#121624`), eliminating aggressive neon outlines.
+  - Edge-to-edge horizontal panel alignment with zero offset discrepancies across chat view, input bar, and sidebar.
+  - Interactive Action Bar in `StatusBar` with clickable action buttons (`Edit (F2)`, `Settings (F3)`, `Peers`, `Commands (/)`, `Help (?)`, `Quit`) alongside live operational telemetry.
+  - Cryptographic peer security modal (`PeerInfoModal`) displaying full 64-char fingerprint, 64-char peer ID, signal strength, transport details, and Noise XX cipher state, with `[Copy Fingerprint]` and `[Direct Message]` actions, strictly keeping private keys confidential.
+  - Node configuration dialog (`SettingsModal`) for dynamic nickname adjustments, max mesh relay hops (TTL), and inter-fragment transmission delay.
+  - Appearance customization modal (`EditThemeModal`) supporting display density modes (comfortable vs compact) and timestamp toggling.
+  - Bluetooth error dialog (`BLEErrorModal`) providing diagnostic advice and an interactive `[Retry Adapter]` recovery workflow.
+  - Truthful BLE status reporting (`✕ BLE Offline` when adapter is uninitialized or missing), preventing false "Mesh Active" claims.
+  - Direct message `@peer <message>` syntax and `@` peer autocomplete trigger with deterministic peer coloring and automatic dismissal on space.
+  - Active conversation context switching between `#public` and direct message target `@<peer>`.
+  - Expanded command registry with `/settings`, `/edit`, `/status`, `/info`, `/public`, and `/peers`.
+  - Comprehensive unit and integration test suite expanded to 531 tests with 100% pass rate.
 - Phase 9.1: Full Terminal UI Redesign & Design System (`bitchat.tui`):
   - Cohesive edge-to-edge terminal dashboard composition utilizing 100% of viewport with zero wasted margins.
   - Strict 5-family color palette: Black (`#080a0f`, `#0f121c`, `#141824`), Blue (`#58a6ff`, `#388bfd`), Purple (`#bc8cff`, `#a371f7`), Deterministic Peer Identity Colors (8 curated distinct colors with CRC32 hashing), and Restrained Semantic Status (`#3fb950`, `#d29922`, `#f85149`).

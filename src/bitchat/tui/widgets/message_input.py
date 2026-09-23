@@ -19,13 +19,14 @@ class MessageInput(Input):
     DEFAULT_CSS = """
     MessageInput {
         height: 3;
-        background: #161b22;
-        border: solid #30363d;
+        background: #0f121c;
+        border: round #22283a;
         color: #e6edf3;
         padding: 0 1;
     }
     MessageInput:focus {
-        border: solid #58a6ff;
+        border: round #28334e;
+        background: #121624;
     }
     """
 

@@ -179,3 +179,61 @@ class TestCommandParser:
 
         empty_sug = get_command_suggestions("hello")
         assert len(empty_sug) == 0
+
+    def test_at_peer_direct_message_syntax(self, parser: CommandParser) -> None:
+        """@peer <message> syntax parses into DM command."""
+        cmd1 = parser.parse("@alice Hello Alice!")
+        assert cmd1.command_type == CommandType.DM
+        assert cmd1.args == ["alice", "Hello Alice!"]
+        assert cmd1.error_message is None
+
+        cmd2 = parser.parse("@cafebabe12345678 Encrypted packet data")
+        assert cmd2.command_type == CommandType.DM
+        assert cmd2.args == ["cafebabe12345678", "Encrypted packet data"]
+
+        # Missing body
+        cmd_err1 = parser.parse("@alice")
+        assert cmd_err1.command_type == CommandType.DM
+        assert cmd_err1.error_message is not None
+
+        # Just '@'
+        cmd_err2 = parser.parse("@")
+        assert cmd_err2.command_type == CommandType.DM
+        assert cmd_err2.error_message is not None
+
+    def test_phase92_management_commands(self, parser: CommandParser) -> None:
+        """Phase 9.2 management commands parse properly."""
+        # /settings & aliases
+        c_set1 = parser.parse("/settings")
+        assert c_set1.command_type == CommandType.SETTINGS
+        c_set2 = parser.parse("/config")
+        assert c_set2.command_type == CommandType.SETTINGS
+
+        # /edit & aliases
+        c_edit1 = parser.parse("/edit")
+        assert c_edit1.command_type == CommandType.EDIT
+        c_edit2 = parser.parse("/theme")
+        assert c_edit2.command_type == CommandType.EDIT
+        c_edit3 = parser.parse("/appearance")
+        assert c_edit3.command_type == CommandType.EDIT
+
+        # /status & aliases
+        c_stat1 = parser.parse("/status")
+        assert c_stat1.command_type == CommandType.STATUS
+        c_stat2 = parser.parse("/diag")
+        assert c_stat2.command_type == CommandType.STATUS
+
+        # /public & aliases
+        c_pub1 = parser.parse("/public")
+        assert c_pub1.command_type == CommandType.PUBLIC
+        c_pub2 = parser.parse("/channel")
+        assert c_pub2.command_type == CommandType.PUBLIC
+
+        # /info
+        c_info = parser.parse("/info Bob")
+        assert c_info.command_type == CommandType.INFO
+        assert c_info.args == ["Bob"]
+
+        c_info_err = parser.parse("/info")
+        assert c_info_err.command_type == CommandType.INFO
+        assert c_info_err.error_message is not None

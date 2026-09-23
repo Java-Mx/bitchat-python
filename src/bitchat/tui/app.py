@@ -15,7 +15,11 @@ from bitchat.commands.parser import (
     CommandType,
     get_command_suggestions,
 )
+from bitchat.tui.screens.ble_error import BLEErrorModal
+from bitchat.tui.screens.edit_theme import EditThemeModal
 from bitchat.tui.screens.help import HelpScreen
+from bitchat.tui.screens.peer_info import PeerInfoModal
+from bitchat.tui.screens.settings import SettingsModal
 from bitchat.tui.theme import TCSS_STYLES
 from bitchat.tui.widgets.autocomplete import AutocompletePalette
 from bitchat.tui.widgets.chat_view import ChatView
@@ -40,8 +44,12 @@ class BitChatApp(App[None]):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+c", "quit", "Quit", show=False),
+        Binding("ctrl+q", "quit", "Quit", show=False),
         Binding("ctrl+l", "clear_log", "Clear", show=False),
         Binding("f1", "show_help", "Help", show=False),
+        Binding("?", "show_help", "Help", show=False),
+        Binding("f2", "open_edit_theme", "Edit", show=False),
+        Binding("f3", "open_settings", "Settings", show=False),
         Binding("pageup", "scroll_chat_up", "Scroll Up", show=False),
         Binding("pagedown", "scroll_chat_down", "Scroll Down", show=False),
     ]
@@ -56,11 +64,17 @@ class BitChatApp(App[None]):
         self.parser = CommandParser()
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
+        self.active_context: str = "#public"
+        self.current_density: str = "comfortable"
+        self.current_show_timestamps: bool = True
+        self.current_accent: str = "blue"
+
         # Connect coordinator event hooks if present
         if self.coordinator is not None:
             self.coordinator.on_message_received = self._on_coordinator_message
             self.coordinator.on_peer_status_changed = self._on_coordinator_peer_status
             self.coordinator.on_handshake_completed = self._on_coordinator_handshake
+            self.coordinator.on_ble_error = self._on_coordinator_ble_error
 
     def _spawn_task(self, coro: Any) -> asyncio.Task[Any]:
         """Spawn background task and keep reference until completed."""
@@ -93,7 +107,8 @@ class BitChatApp(App[None]):
 
         chat = self.query_one(ChatView)
         chat.add_system_message(
-            "Welcome to BitChat. Type / for commands, /help for help."
+            "Welcome to BitChat. Type / for commands, @<peer> for direct messages, "
+            "/help for help."
         )
 
         if self.coordinator:
@@ -101,7 +116,7 @@ class BitChatApp(App[None]):
             self._refresh_peer_lists()
 
     def _refresh_peer_lists(self) -> None:
-        """Refresh sidebar and header with latest peer states."""
+        """Refresh sidebar and header with latest peer states and truthful telemetry."""
         if not self.coordinator:
             return
 
@@ -123,12 +138,32 @@ class BitChatApp(App[None]):
         sidebar.set_connected_peers(conn_display)
         sidebar.set_discovered_peers(self.coordinator.ble_manager.discovered_peers)
 
+        # Truthful Bluetooth state reporting
         if connected_addrs:
             status_bar.status_message = (
                 f"● Connected ({len(connected_addrs)} peers) • BLE Mesh Active"
             )
-        else:
+        elif self.coordinator.ble_status == "scanning":
             status_bar.status_message = "○ Scanning for BitChat peers • BLE Mesh Active"
+        elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
+            status_bar.status_message = (
+                "✕ BLE Offline: Bluetooth unavailable • Mesh Inactive"
+            )
+        else:
+            status_bar.status_message = "○ BitChat Ready • Local Mesh"
+
+        status_bar.channel_message = f"Target: {self.active_context}"
+
+    def _on_coordinator_ble_error(self, err_msg: str) -> None:
+        """Handle Bluetooth hardware or scan failure from coordinator."""
+
+        def _do_error() -> None:
+            chat = self.query_one(ChatView)
+            chat.add_error_message(f"Bluetooth Error: {err_msg}")
+            self._refresh_peer_lists()
+            self.push_screen(BLEErrorModal(error_message=err_msg))
+
+        self._dispatch_ui(_do_error)
 
     def _on_coordinator_message(
         self, sender_id: str, text: str, is_encrypted: bool
@@ -176,10 +211,197 @@ class BitChatApp(App[None]):
         else:
             self.call_from_thread(callback)
 
+    def switch_conversation_context(self, target: str) -> None:
+        """Switch active conversation context between #public and @peer."""
+        if not target or target in ("#public", "public", "Local Node"):
+            self.active_context = "#public"
+        elif target.startswith("@"):
+            self.active_context = target
+        else:
+            self.active_context = f"@{target}"
+
+        chat = self.query_one(ChatView)
+        chat.channel_name = self.active_context
+        status_bar = self.query_one(StatusBar)
+        status_bar.channel_message = f"Target: {self.active_context}"
+        msg_input = self.query_one(MessageInput)
+        msg_input.focus()
+
+    def _open_peer_info(self, peer_identifier: str, address: str = "") -> None:
+        """Open detailed PeerInfoModal with safe public identity info."""
+        if not self.coordinator:
+            self.push_screen(
+                PeerInfoModal(
+                    nickname=peer_identifier,
+                    peer_id_hex="N/A (No Coordinator)",
+                    fingerprint="N/A",
+                    address=address,
+                )
+            )
+            return
+
+        resolved_pid = ""
+        resolved_nick = peer_identifier.lstrip("@")
+        for pid, nick in self.coordinator.peer_nicknames.items():
+            if nick.lower() == resolved_nick.lower() or pid.startswith(resolved_nick):
+                resolved_pid = pid
+                resolved_nick = nick
+                break
+
+        if not resolved_pid and address in self.coordinator.address_to_peer_id:
+            resolved_pid = self.coordinator.address_to_peer_id[address]
+            resolved_nick = self.coordinator.peer_nicknames.get(
+                resolved_pid, resolved_pid[:8]
+            )
+
+        session = (
+            self.coordinator.get_or_create_session(resolved_pid)
+            if resolved_pid
+            else None
+        )
+        fp = (
+            session.remote_fingerprint if session and session.remote_fingerprint else ""
+        )
+        is_enc = session.is_established if session else False
+        is_conn = bool(
+            address and address in self.coordinator.ble_manager.connected_peers
+        )
+
+        self.push_screen(
+            PeerInfoModal(
+                nickname=resolved_nick,
+                peer_id_hex=resolved_pid or "Unknown Node ID",
+                fingerprint=fp or "Handshake pending / Unverified",
+                address=address
+                or self.coordinator.peer_addresses.get(resolved_pid, "Mesh Multi-Hop"),
+                is_connected=is_conn,
+                is_encrypted=is_enc,
+            )
+        )
+
+    def on_status_bar_action_triggered(self, event: StatusBar.ActionTriggered) -> None:
+        """Handle clicks on bottom Action Bar buttons."""
+        match event.action:
+            case "edit":
+                self.action_open_edit_theme()
+            case "settings":
+                self.action_open_settings()
+            case "peers":
+                self.action_focus_peers()
+            case "commands":
+                self.action_open_commands()
+            case "help":
+                self.action_show_help()
+            case "quit":
+                self._spawn_task(self.action_quit())
+
+    def on_peer_sidebar_peer_selected(self, event: PeerSidebar.PeerSelected) -> None:
+        """Handle peer selection from sidebar to switch conversation context."""
+        self.switch_conversation_context(event.peer_identifier)
+
+    def on_peer_sidebar_peer_info_requested(
+        self, event: PeerSidebar.PeerInfoRequested
+    ) -> None:
+        """Handle peer info request from sidebar."""
+        self._open_peer_info(event.peer_identifier, event.address)
+
+    def on_peer_info_modal_start_direct_message(
+        self, event: PeerInfoModal.StartDirectMessage
+    ) -> None:
+        """Handle user selecting Direct Message from PeerInfoModal."""
+        self.switch_conversation_context(f"@{event.nickname}")
+
+    def on_settings_modal_settings_saved(
+        self, event: SettingsModal.SettingsSaved
+    ) -> None:
+        """Handle applied settings changes."""
+        if self.coordinator:
+            self.coordinator.set_nickname(event.nickname)
+            self.coordinator.mesh_router.max_relay_ttl = event.max_hops
+            self.coordinator.inter_fragment_delay = (
+                event.inter_fragment_delay_ms / 1000.0
+            )
+            self._spawn_task(self.coordinator.send_announce(event.nickname))
+            self.query_one(PeerSidebar).update_identity(event.nickname)
+            self.query_one(HeaderWidget).nickname = event.nickname
+        chat = self.query_one(ChatView)
+        chat.add_system_message(
+            f"Settings updated: nickname='{event.nickname}', "
+            f"max_hops={event.max_hops}, delay={event.inter_fragment_delay_ms}ms"
+        )
+
+    def on_edit_theme_modal_theme_applied(
+        self, event: EditThemeModal.ThemeApplied
+    ) -> None:
+        """Handle applied appearance changes."""
+        self.current_density = event.density
+        self.current_show_timestamps = event.show_timestamps
+        self.current_accent = event.accent_name
+        chat = self.query_one(ChatView)
+        chat.compact_mode = event.density == "compact"
+        chat.show_timestamps = event.show_timestamps
+        chat.add_system_message(
+            f"Theme applied: density={event.density}, "
+            f"timestamps={event.show_timestamps}, accent={event.accent_name}"
+        )
+
+    def on_ble_error_modal_retry_requested(
+        self, event: BLEErrorModal.RetryRequested
+    ) -> None:
+        """Handle retry request from BLE error dialog."""
+        self._spawn_task(self._handle_ble_retry())
+
+    async def _handle_ble_retry(self) -> None:
+        """Attempt to re-initialize BLE services and notify user."""
+        chat = self.query_one(ChatView)
+        chat.add_system_message("Retrying Bluetooth initialization...")
+        if self.coordinator:
+            success = await self.coordinator.retry_ble()
+            if success:
+                chat.add_system_message(
+                    "Bluetooth reconnected successfully. BLE Mesh Active."
+                )
+                self._refresh_peer_lists()
+            else:
+                chat.add_error_message(
+                    "Bluetooth retry failed. Remaining in offline mode."
+                )
+                self._refresh_peer_lists()
+
     def on_input_changed(self, event: Input.Changed) -> None:
         """Dynamically evaluate input and manage autocomplete suggestions."""
         val = event.value
         palette = self.query_one(AutocompletePalette)
+
+        # Trigger on '@' for peer autocompletion
+        if val.startswith("@"):
+            if " " in val:
+                palette.hide()
+                return
+            query = val[1:].lower().strip()
+            peer_items: list[tuple[str, str]] = []
+            if self.coordinator:
+                for pid, nick in self.coordinator.peer_nicknames.items():
+                    if (
+                        not query
+                        or nick.lower().startswith(query)
+                        or query in nick.lower()
+                        or (len(query) >= 4 and query in pid.lower())
+                    ):
+                        peer_items.append(
+                            (f"@{nick} ", f"Peer: {pid[:8]}... (Encrypted)")
+                        )
+            if not peer_items and self.coordinator:
+                for addr, peer in self.coordinator.ble_manager.discovered_peers.items():
+                    name = peer.name or addr
+                    if (
+                        not query
+                        or name.lower().startswith(query)
+                        or query in name.lower()
+                    ):
+                        peer_items.append((f"@{name} ", f"{addr} ({peer.rssi} dBm)"))
+            palette.show_suggestions(peer_items, title="Peers (@mention / DM)")
+            return
 
         if not val.startswith("/"):
             palette.hide()
@@ -191,10 +413,14 @@ class BitChatApp(App[None]):
             suggestions = get_command_suggestions(tokens[0])
             items = [(s.name, s.description) for s in suggestions]
             palette.show_suggestions(items, title="Commands")
-        elif len(tokens) >= 1 and val.startswith("/dm "):
-            # Contextual peer argument completion
+        elif len(tokens) >= 1 and (val.startswith("/dm ") or val.startswith("/info ")):
+            parts = val.split(maxsplit=2)
+            if len(parts) >= 3 or (len(parts) == 2 and val.endswith(" ")):
+                palette.hide()
+                return
             query = tokens[1] if len(tokens) > 1 else ""
-            peer_items: list[tuple[str, str]] = []
+            cmd_prefix = "/dm" if val.startswith("/dm ") else "/info"
+            peer_items = []
             if self.coordinator:
                 for pid, nick in self.coordinator.peer_nicknames.items():
                     if (
@@ -202,7 +428,9 @@ class BitChatApp(App[None]):
                         or query.lower() in nick.lower()
                         or query.lower() in pid.lower()
                     ):
-                        peer_items.append((f"/dm {nick} ", f"Peer ID: {pid[:8]}..."))
+                        peer_items.append(
+                            (f"{cmd_prefix} {nick} ", f"Peer ID: {pid[:8]}...")
+                        )
             palette.show_suggestions(peer_items, title="Peers (Noise XX)")
         elif len(tokens) >= 1 and val.startswith("/connect "):
             # Contextual discovered address argument completion
@@ -288,6 +516,26 @@ class BitChatApp(App[None]):
             case CommandType.HELP:
                 self.push_screen(HelpScreen())
 
+            case CommandType.SETTINGS:
+                self.action_open_settings()
+
+            case CommandType.EDIT:
+                self.action_open_edit_theme()
+
+            case CommandType.INFO:
+                if cmd.error_message:
+                    chat.add_error_message(cmd.error_message)
+                    return
+                target_peer = cmd.args[0] if cmd.args else ""
+                self._open_peer_info(target_peer)
+
+            case CommandType.PUBLIC:
+                self.switch_conversation_context("#public")
+                chat.add_system_message("Switched to #public channel")
+
+            case CommandType.STATUS:
+                self._display_status_diagnostics(chat)
+
             case CommandType.CLEAR:
                 chat.clear_log()
 
@@ -355,7 +603,7 @@ class BitChatApp(App[None]):
                 dm_text = cmd.args[1]
                 chat.add_chat_message(
                     self.coordinator.nickname if self.coordinator else "You",
-                    f"[to {target_peer}]: {dm_text}",
+                    f"(to {target_peer}): {dm_text}",
                     is_encrypted=True,
                     is_self=True,
                 )
@@ -394,14 +642,62 @@ class BitChatApp(App[None]):
                 if text.startswith("/"):
                     chat.add_error_message(cmd.error_message or "Unknown command")
                 else:
-                    chat.add_chat_message(
-                        self.coordinator.nickname if self.coordinator else "You",
-                        text,
-                        is_encrypted=False,
-                        is_self=True,
-                    )
-                    if self.coordinator:
-                        self._spawn_task(self.coordinator.send_broadcast_message(text))
+                    # Check active conversation context
+                    if self.active_context.startswith("@"):
+                        target_peer = self.active_context[1:]
+                        chat.add_chat_message(
+                            self.coordinator.nickname if self.coordinator else "You",
+                            f"(to @{target_peer}): {text}",
+                            is_encrypted=True,
+                            is_self=True,
+                        )
+                        if self.coordinator:
+                            resolved_pid = target_peer
+                            for pid, nick in self.coordinator.peer_nicknames.items():
+                                if nick.lower() == target_peer.lower():
+                                    resolved_pid = pid
+                                    break
+                            self._spawn_task(
+                                self.coordinator.send_direct_message(resolved_pid, text)
+                            )
+                    else:
+                        chat.add_chat_message(
+                            self.coordinator.nickname if self.coordinator else "You",
+                            text,
+                            is_encrypted=False,
+                            is_self=True,
+                        )
+                        if self.coordinator:
+                            self._spawn_task(
+                                self.coordinator.send_broadcast_message(text)
+                            )
+
+    def _display_status_diagnostics(self, chat: ChatView) -> None:
+        """Display operational diagnostics in chat."""
+        if not self.coordinator:
+            chat.add_system_message(
+                "BitChat Diagnostics: Coordinator not attached (offline)."
+            )
+            return
+
+        ble_stat = self.coordinator.ble_status.upper()
+        conn_count = len(self.coordinator.ble_manager.connected_peers)
+        disc_count = len(self.coordinator.ble_manager.discovered_peers)
+        nick = self.coordinator.nickname
+        pid = self.coordinator.local_identity.peer_id_hex[:16]
+        fp = self.coordinator.local_identity.fingerprint[:16]
+
+        chat.add_system_message("══════════ BitChat Operational Status ══════════")
+        chat.add_system_message(f"Local Node:   {nick} [ID: {pid}... FP: {fp}...]")
+        chat.add_system_message(
+            f"BLE Adapter:  {ble_stat}  │  Active Context: {self.active_context}"
+        )
+        chat.add_system_message(
+            f"Connections:  {conn_count} connected  │  {disc_count} discovered nearby"
+        )
+        max_hops = getattr(self.coordinator.mesh_router, "max_relay_ttl", 3)
+        chat.add_system_message(f"Mesh Relay:   Active (Max {max_hops} hops)")
+        chat.add_system_message("════════════════════════════════════════════════")
 
     def action_clear_log(self) -> None:
         """Action handler to clear the log."""
@@ -410,6 +706,46 @@ class BitChatApp(App[None]):
     def action_show_help(self) -> None:
         """Action handler to display the help screen."""
         self.push_screen(HelpScreen())
+
+    def action_open_settings(self) -> None:
+        """Action handler to open settings modal."""
+        nick = self.coordinator.nickname if self.coordinator else "Anonymous"
+        hops = (
+            getattr(self.coordinator.mesh_router, "max_relay_ttl", 3)
+            if self.coordinator
+            else 3
+        )
+        delay = int(
+            (self.coordinator.inter_fragment_delay if self.coordinator else 0.02) * 1000
+        )
+        self.push_screen(
+            SettingsModal(
+                current_nickname=nick,
+                current_max_hops=hops,
+                current_delay_ms=delay,
+            )
+        )
+
+    def action_open_edit_theme(self) -> None:
+        """Action handler to open theme customization modal."""
+        self.push_screen(
+            EditThemeModal(
+                current_density=self.current_density,
+                current_show_timestamps=self.current_show_timestamps,
+                current_accent=self.current_accent,
+            )
+        )
+
+    def action_focus_peers(self) -> None:
+        """Focus the sidebar peer list."""
+        self.query_one(PeerSidebar).focus()
+
+    def action_open_commands(self) -> None:
+        """Open command autocomplete palette by populating prompt."""
+        msg_input = self.query_one(MessageInput)
+        msg_input.value = "/"
+        msg_input.focus()
+        msg_input.cursor_position = 1
 
     def action_scroll_chat_up(self) -> None:
         """Action handler to scroll chat view up one page."""

@@ -225,3 +225,51 @@ class TestSessionCoordinator:
 
         await coord_a.stop()
         await coord_b.stop()
+
+    @pytest.mark.asyncio
+    async def test_coordinator_ble_error_and_retry(self) -> None:
+        """BLE failure triggers on_ble_error and updates truthful ble_status."""
+        id_a = LocalIdentity.generate()
+        server = BLEServer(backend=MockBLEServerBackend())
+
+        # Create manager with scanner that raises on start
+        def failing_scanner_factory(**kwargs: Any) -> Any:
+            mock = MockBleakScanner(
+                detection_callback=kwargs["detection_callback"],
+                service_uuids=kwargs["service_uuids"],
+            )
+
+            async def fail_start() -> None:
+                raise RuntimeError("Hardware adapter missing")
+
+            mock.start = fail_start  # type: ignore[assignment]
+            return mock
+
+        manager = BLEManager(
+            sender_id=id_a.peer_id,
+            scanner_factory=failing_scanner_factory,
+        )
+
+        reported_errors: list[str] = []
+        coord = SessionCoordinator(
+            local_identity=id_a,
+            ble_manager=manager,
+            ble_server=server,
+            nickname="Alice",
+        )
+        coord.on_ble_error = lambda err: reported_errors.append(err)
+
+        await coord.start()
+
+        assert coord.ble_status == "unavailable"
+        assert coord.ble_error_message is not None
+        assert "Hardware adapter missing" in coord.ble_error_message
+        assert len(reported_errors) >= 1
+
+        # Test retry failure
+        success = await coord.retry_ble()
+        assert success is False
+        assert coord.ble_status == "unavailable"
+
+        await coord.stop()
+        assert coord.ble_status == "offline"

@@ -74,10 +74,13 @@ class AutocompletePalette(Widget):
         options = []
         for i, (val, desc) in enumerate(self._suggestions):
             if val.startswith("/"):
-                val_styled = f"[bold #58a6ff]{val:<15}[/bold #58a6ff]"
+                val_styled = f"[bold #58a6ff]{val:<16}[/bold #58a6ff]"
+            elif val.startswith("@"):
+                color = get_peer_color(val[1:].strip())
+                val_styled = f"[bold {color}]{val:<16}[/bold {color}]"
             else:
                 color = get_peer_color(val)
-                val_styled = f"[bold {color}]{val:<15}[/bold {color}]"
+                val_styled = f"[bold {color}]{val:<16}[/bold {color}]"
             options.append(
                 Option(
                     f"{val_styled}  [dim #8b949e]{desc}[/dim #8b949e]",

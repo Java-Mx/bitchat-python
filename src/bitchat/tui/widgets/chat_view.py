@@ -22,16 +22,18 @@ class ChatView(Widget):
     """Conversation stream widget displaying formatted messages and alerts."""
 
     channel_name: reactive[str] = reactive("#public")
+    show_timestamps: reactive[bool] = reactive(True)
+    compact_mode: reactive[bool] = reactive(False)
 
     def __init__(self, channel_name: str = "#public", **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.channel_name = channel_name
 
     def on_mount(self) -> None:
-        self.border_title = f"Conversation [{self.channel_name}]"
+        self.border_title = f"Conversation ({self.channel_name})"
 
     def watch_channel_name(self, new_val: str) -> None:
-        self.border_title = f"Conversation [{new_val}]"
+        self.border_title = f"Conversation ({new_val})"
 
     def compose(self) -> ComposeResult:
         yield RichLog(
@@ -58,7 +60,11 @@ class ChatView(Widget):
         is_self: bool = False,
     ) -> None:
         """Format and write a user message with two-tier visual hierarchy."""
-        ts = self._format_timestamp()
+        ts_part = (
+            f" [dim #57606a]• {self._format_timestamp()}[/dim #57606a]"
+            if self.show_timestamps
+            else ""
+        )
         if is_self:
             sender_color = COLOR_SELF_IDENTITY
             sender_name = "You"
@@ -73,36 +79,46 @@ class ChatView(Widget):
 
         header_line = (
             f"[bold {sender_color}]{sender_name}[/bold {sender_color}] "
-            f"{type_tag} [dim #57606a]• {ts}[/dim #57606a]"
+            f"{type_tag}{ts_part}"
         )
-        body_line = f"  {text}"
-        self.rich_log.write(f"{header_line}\n{body_line}")
+
+        if self.compact_mode:
+            self.rich_log.write(f"{header_line}: {text}")
+        else:
+            body_line = f"  {text}"
+            self.rich_log.write(f"{header_line}\n{body_line}")
 
     def add_system_message(self, text: str) -> None:
         """Format and write an informative system event."""
-        ts = self._format_timestamp()
-        line = (
-            f"[dim #57606a][{ts}][/dim #57606a] [bold #388bfd]●[/bold #388bfd] "
-            f"[#8b949e]{text}[/#8b949e]"
+        ts_part = (
+            f"[dim #57606a][{self._format_timestamp()}][/dim #57606a] "
+            if self.show_timestamps
+            else ""
         )
+        line = f"{ts_part}[bold #58a6ff]●[/bold #58a6ff] [#8b949e]{text}[/#8b949e]"
         self.rich_log.write(line)
 
     def add_security_event(self, text: str) -> None:
         """Format and write a security verification or Noise handshake event."""
-        ts = self._format_timestamp()
+        ts_part = (
+            f"[dim #57606a][{self._format_timestamp()}][/dim #57606a] "
+            if self.show_timestamps
+            else ""
+        )
         line = (
-            f"[dim #57606a][{ts}][/dim #57606a] [bold #bc8cff]●[/bold #bc8cff] "
-            f"[bold #bc8cff]Security:[/] [#8b949e]{text}[/#8b949e]"
+            f"{ts_part}[bold #bc8cff]●[/bold #bc8cff] "
+            f"[bold #bc8cff]Security:[/bold #bc8cff] [#8b949e]{text}[/#8b949e]"
         )
         self.rich_log.write(line)
 
     def add_error_message(self, text: str) -> None:
         """Format and write an error alert."""
-        ts = self._format_timestamp()
-        line = (
-            f"[dim #57606a][{ts}][/dim #57606a] [bold #f85149]![/bold #f85149] "
-            f"[#f85149]{text}[/#f85149]"
+        ts_part = (
+            f"[dim #57606a][{self._format_timestamp()}][/dim #57606a] "
+            if self.show_timestamps
+            else ""
         )
+        line = f"{ts_part}[bold #f85149]![/bold #f85149] [#f85149]{text}[/#f85149]"
         self.rich_log.write(line)
 
     def clear_log(self) -> None:

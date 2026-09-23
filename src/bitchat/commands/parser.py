@@ -18,6 +18,11 @@ class CommandType(StrEnum):
     DM = "dm"
     LARGE = "large"
     CLEAR = "clear"
+    SETTINGS = "settings"
+    EDIT = "edit"
+    STATUS = "status"
+    INFO = "info"
+    PUBLIC = "public"
     EMPTY = "empty"
     UNKNOWN = "unknown"
 
@@ -61,10 +66,29 @@ COMMAND_REGISTRY: list[CommandSpec] = [
         category="Network",
     ),
     CommandSpec(
+        name="/peers",
+        usage="/peers",
+        description="Inspect connected and nearby peers",
+        category="Network",
+    ),
+    CommandSpec(
         name="/dm",
         usage="/dm <peer> <message>",
         description="Send encrypted direct message",
         category="Chat",
+        arg_type="peer_id",
+    ),
+    CommandSpec(
+        name="/public",
+        usage="/public",
+        description="Switch active conversation to #public",
+        category="Chat",
+    ),
+    CommandSpec(
+        name="/info",
+        usage="/info <peer>",
+        description="View peer fingerprint and crypto state",
+        category="Security",
         arg_type="peer_id",
     ),
     CommandSpec(
@@ -73,6 +97,24 @@ COMMAND_REGISTRY: list[CommandSpec] = [
         description="Set local nickname and announce",
         category="Identity",
         arg_type="nickname",
+    ),
+    CommandSpec(
+        name="/settings",
+        usage="/settings",
+        description="Open settings and node configuration",
+        category="System",
+    ),
+    CommandSpec(
+        name="/edit",
+        usage="/edit",
+        description="Open appearance & theme editor",
+        category="UI",
+    ),
+    CommandSpec(
+        name="/status",
+        usage="/status",
+        description="Show network & security diagnostics",
+        category="System",
     ),
     CommandSpec(
         name="/large",
@@ -131,6 +173,29 @@ class CommandParser:
         if not stripped:
             return Command(command_type=CommandType.EMPTY, raw_input=text)
 
+        # Direct message shorthand: @peer <message>
+        if stripped.startswith("@"):
+            parts = stripped.split(maxsplit=1)
+            target = parts[0][1:].strip()
+            if not target:
+                return Command(
+                    command_type=CommandType.DM,
+                    raw_input=text,
+                    error_message="Usage: @<peer> <message>",
+                )
+            if len(parts) < 2 or not parts[1].strip():
+                return Command(
+                    command_type=CommandType.DM,
+                    raw_input=text,
+                    args=[target],
+                    error_message=f"Usage: @{target} <message>",
+                )
+            return Command(
+                command_type=CommandType.DM,
+                raw_input=text,
+                args=[target, parts[1].strip()],
+            )
+
         tokens = stripped.split()
         normalized_tokens = [t.lower() for t in tokens]
 
@@ -162,7 +227,7 @@ class CommandParser:
             )
 
         if first_token in ("connect", "/connect"):
-            if len(tokens) < 2:
+            if len(tokens) < 2 or not tokens[1].strip():
                 return Command(
                     command_type=CommandType.CONNECT,
                     raw_input=text,
@@ -171,7 +236,7 @@ class CommandParser:
             return Command(
                 command_type=CommandType.CONNECT,
                 raw_input=text,
-                args=[tokens[1]],
+                args=[tokens[1].strip()],
             )
 
         if first_token in ("disconnect", "/disconnect"):
@@ -189,7 +254,7 @@ class CommandParser:
                 args=tokens[1:],
             )
 
-        if first_token in ("online", "/online", "peers", "/peers"):
+        if first_token in ("online", "/online", "peers", "/peers", "nodes", "/nodes"):
             return Command(
                 command_type=CommandType.ONLINE,
                 raw_input=text,
@@ -222,6 +287,54 @@ class CommandParser:
                 command_type=CommandType.DM,
                 raw_input=text,
                 args=[parts[1], parts[2]],
+            )
+
+        if first_token in ("info", "/info", "peer", "/peer"):
+            if len(tokens) < 2:
+                return Command(
+                    command_type=CommandType.INFO,
+                    raw_input=text,
+                    error_message="Usage: /info <peer>",
+                )
+            return Command(
+                command_type=CommandType.INFO,
+                raw_input=text,
+                args=[tokens[1]],
+            )
+
+        if first_token in ("settings", "/settings", "config", "/config"):
+            return Command(
+                command_type=CommandType.SETTINGS,
+                raw_input=text,
+                args=tokens[1:],
+            )
+
+        if first_token in (
+            "edit",
+            "/edit",
+            "theme",
+            "/theme",
+            "appearance",
+            "/appearance",
+        ):
+            return Command(
+                command_type=CommandType.EDIT,
+                raw_input=text,
+                args=tokens[1:],
+            )
+
+        if first_token in ("status", "/status", "diag", "/diag"):
+            return Command(
+                command_type=CommandType.STATUS,
+                raw_input=text,
+                args=tokens[1:],
+            )
+
+        if first_token in ("public", "/public", "channel", "/channel"):
+            return Command(
+                command_type=CommandType.PUBLIC,
+                raw_input=text,
+                args=tokens[1:],
             )
 
         if first_token in ("large", "/large"):
