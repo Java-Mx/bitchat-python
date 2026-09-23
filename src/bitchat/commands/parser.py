@@ -23,6 +23,96 @@ class CommandType(StrEnum):
 
 
 @dataclass(frozen=True)
+class CommandSpec:
+    """Specification of a supported slash command."""
+
+    name: str
+    usage: str
+    description: str
+    category: str
+    arg_type: str | None = None
+
+
+COMMAND_REGISTRY: list[CommandSpec] = [
+    CommandSpec(
+        name="/connect",
+        usage="/connect <address>",
+        description="Connect to a peer BLE address",
+        category="Network",
+        arg_type="peer_address",
+    ),
+    CommandSpec(
+        name="/disconnect",
+        usage="/disconnect [address]",
+        description="Disconnect from peer or all",
+        category="Network",
+        arg_type="peer_address",
+    ),
+    CommandSpec(
+        name="/scan",
+        usage="/scan",
+        description="Scan for nearby BitChat peers",
+        category="Network",
+    ),
+    CommandSpec(
+        name="/online",
+        usage="/online",
+        description="List connected and known peers",
+        category="Network",
+    ),
+    CommandSpec(
+        name="/dm",
+        usage="/dm <peer> <message>",
+        description="Send encrypted direct message",
+        category="Chat",
+        arg_type="peer_id",
+    ),
+    CommandSpec(
+        name="/name",
+        usage="/name <nickname>",
+        description="Set local nickname and announce",
+        category="Identity",
+        arg_type="nickname",
+    ),
+    CommandSpec(
+        name="/large",
+        usage="/large <peer>",
+        description="Send 1000B test fragmented message",
+        category="Debug",
+        arg_type="peer_id",
+    ),
+    CommandSpec(
+        name="/clear",
+        usage="/clear",
+        description="Clear chat history",
+        category="System",
+    ),
+    CommandSpec(
+        name="/help",
+        usage="/help",
+        description="Show help and command list",
+        category="System",
+    ),
+    CommandSpec(
+        name="/exit",
+        usage="/exit",
+        description="Exit BitChat",
+        category="System",
+    ),
+]
+
+
+def get_command_suggestions(prefix: str) -> list[CommandSpec]:
+    """Return matching CommandSpecs given an input prefix starting with '/'."""
+    norm = prefix.strip().lower()
+    if not norm.startswith("/"):
+        return []
+    if norm == "/":
+        return list(COMMAND_REGISTRY)
+    return [spec for spec in COMMAND_REGISTRY if spec.name.lower().startswith(norm)]
+
+
+@dataclass(frozen=True)
 class Command:
     """Structured representation of a parsed command."""
 

@@ -3,7 +3,7 @@
   <h1>BitChat Python</h1>
   <p>Python terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE)</p>
   <p>
-    <img src="https://img.shields.io/badge/Status-Phase%208%20(Two--PC%20End--to--End)-blue" alt="Status" />
+    <img src="https://img.shields.io/badge/Status-Phase%209%20(Mesh%20%26%20Modern%20TUI)-blue" alt="Status" />
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
     <img src="https://img.shields.io/badge/CI-Passing-brightgreen" alt="CI" />
   </p>
@@ -12,17 +12,17 @@
 ## Overview
 BitChat Python is a terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE). It aims to be fully protocol-compatible with the Rust reference implementation.
 
-**Current Status:** Phase 8 — Two-PC End-to-End Functional Prototype implemented and verified. Includes Textual TUI (`BitChatApp`), session coordination (`SessionCoordinator`), Noise XX handshake and encrypted transport, BLE GATT server and central management, 20ms fragment pacing, and end-to-end integration tests.
+**Current Status:** Phase 9 — Multi-hop mesh routing, store-and-forward, and modern Textual TUI with IDE-style command autocompletion implemented and verified. Includes multi-hop relaying with TTL decrementing and collision jitter, bounded TTL-invariant deduplication, offline peer queuing, professional dark-mode TUI (`#0d1117`), interactive popup autocompletion, and 515 passing automated tests.
 
 ## Goals
 - Protocol-compatible Python implementation
 - Cross-platform BLE messaging
-- Terminal UI
-- Mesh networking
+- Modern, professional terminal UI with IDE-style command completion
+- Multi-hop mesh networking with store-and-forward delivery
 
 ## Architecture Overview
 The project follows a layered architecture to separate concerns:
-- **TUI** -> **App Core** -> **Protocol/Crypto/Storage** -> **BLE** -> **OS Bluetooth APIs**
+- **TUI** -> **App Core / Session Coordinator** -> **Mesh Router** -> **Protocol/Crypto/Storage** -> **BLE Transport** -> **OS Bluetooth APIs**
 
 ## Feature Status
 - ✅ Implemented: Binary packet model (`BitchatPacket`) with true immutability & byte normalization
@@ -38,21 +38,26 @@ The project follows a layered architecture to separate concerns:
 - ✅ Implemented: Lexicographic peer ID tie-breaking (`determine_handshake_role`)
 - ✅ Implemented: AES-256-GCM legacy encryption & PBKDF2-HMAC-SHA256 channel key derivation
 - ✅ Implemented: Application core controller, command parser, peer model, and storage
+- ✅ Implemented: Centralized command registry with prefix matching and argument metadata (`bitchat.commands.parser`)
 - ✅ Implemented: BLE peer discovery and connection lifecycle (`bitchat.ble.scanner.BLEScanner`, `bitchat.ble.connection.BLEConnection`)
 - ✅ Implemented: BLE GATT characteristic discovery, 20ms pacing, and reassembly transport (`bitchat.ble.transport.BLETransport`)
 - ✅ Implemented: BLE GATT peripheral server and advertising (`bitchat.ble.server.BLEServer`)
-- ✅ Implemented: Session coordinator managing Noise XX sessions and BLE routing (`bitchat.app.session_coordinator.SessionCoordinator`)
-- ✅ Implemented: Interactive Textual Terminal UI with live message log and peer sidebar (`bitchat.tui.app.BitChatApp`)
-- ✅ Implemented: Two-node end-to-end integration test (`tests/integration/test_end_to_end.py`)
-- 🚧 Planned: Multi-hop mesh routing and store-and-forward
-- 🚧 Planned: Message persistence (SQLite)
-- 🚧 Planned: Rust interoperability testing
+- ✅ Implemented: Multi-hop mesh routing (`bitchat.mesh.router.MeshRouter`) with TTL decrementing, anti-looping, and 10–50ms randomized jitter
+- ✅ Implemented: TTL-invariant packet deduplication (`bitchat.mesh.dedup.PacketDeduplicator`) with bounded 2,000-entry LRU and 300s TTL cache
+- ✅ Implemented: Store-and-forward queue (`bitchat.mesh.store_forward.StoreAndForwardQueue`) with per-peer limits, byte budget, and automatic flushing upon peer announce
+- ✅ Implemented: Session coordinator integrating Noise XX sessions, mesh routing, and BLE transport (`bitchat.app.session_coordinator.SessionCoordinator`)
+- ✅ Implemented: Professional Textual TUI (`bitchat.tui.app.BitChatApp`) with near-black `#0d1117` GitHub dark theme, header bar, peer sidebar, conversation stream with status badges, and reactive status bar
+- ✅ Implemented: IDE-style command autocompletion palette (`AutocompletePalette`) with keyboard navigation (↑/↓, Tab, Enter, Esc) and contextual peer ID suggestions
+- ✅ Implemented: Modal help screen (`HelpScreen`) displaying command table and keybinding reference
+- ✅ Implemented: Multi-hop mesh relay integration test ($A \to B \to C$) and comprehensive TUI unit test suite (515 tests passing)
+- 🚧 Planned: Persistent message database (SQLite)
+- 🚧 Planned: Full physical multi-PC over-the-air validation on two real Bluetooth machines
 
 ## Hardware & Two-PC BLE Validation Status
-- **Automated Integration:** 100% automated integration and end-to-end suite passing (491 tests).
+- **Automated Integration:** 100% automated integration and end-to-end suite passing (515 tests, including two-node Noise XX and three-node multi-hop mesh relay).
 - **Windows (WinRT):** GATT Server creation and BLE service advertisement verified on host hardware.
 - **Linux / macOS:** Central scanning and client transport implemented via Bleak; peripheral advertising pending platform-specific daemon bindings.
-- **Status Statement:** *"Automated integration is complete, but real two-PC BLE validation remains outstanding."*
+- **Status Statement:** *"Automated integration and simulated multi-node mesh tests are complete, but real two-PC physical BLE validation remains outstanding pending a second physical machine."*
 
 ## Quickstart
 

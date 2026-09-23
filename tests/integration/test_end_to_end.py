@@ -190,3 +190,114 @@ async def test_end_to_end_two_node_communication() -> None:
     await coord_b.stop()
     assert not coord_a.is_running
     assert not coord_b.is_running
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_three_node_mesh_relay() -> None:
+    """Validate multi-hop packet relay (A -> B -> C) with TTL decrementing."""
+    from bitchat.mesh.router import MeshRouter
+
+    id_a = LocalIdentity.generate()
+    id_b = LocalIdentity.generate()
+    id_c = LocalIdentity.generate()
+
+    storage_a = InMemoryStorage()
+    storage_b = InMemoryStorage()
+    storage_c = InMemoryStorage()
+
+    backend_b = MockBLEServerBackend()
+    server_b = BLEServer(backend=backend_b)
+    backend_c = MockBLEServerBackend()
+    server_c = BLEServer(backend=backend_c)
+
+    client_a_to_b = MockBleakClient(address="BB:01")
+    backend_b.attach_client(client_a_to_b)
+
+    async def hooked_write_ab(char: Any, data: bytes, response: bool = False) -> None:
+        backend_b.emit_write(data, client_id="client_a")
+
+    client_a_to_b.write_gatt_char = hooked_write_ab  # type: ignore[assignment]
+
+    client_b_to_c = MockBleakClient(address="CC:01")
+    backend_c.attach_client(client_b_to_c)
+
+    async def hooked_write_bc(char: Any, data: bytes, response: bool = False) -> None:
+        backend_c.emit_write(data, client_id="client_b")
+
+    client_b_to_c.write_gatt_char = hooked_write_bc  # type: ignore[assignment]
+
+    def mock_scanner(**kw: Any) -> MockBleakScanner:
+        return MockBleakScanner(kw["detection_callback"], kw["service_uuids"])
+
+    manager_a = BLEManager(
+        sender_id=id_a.peer_id,
+        client_factory=lambda *a, **kw: client_a_to_b,
+        scanner_factory=mock_scanner,
+    )
+    manager_b = BLEManager(
+        sender_id=id_b.peer_id,
+        client_factory=lambda *a, **kw: client_b_to_c,
+        scanner_factory=mock_scanner,
+    )
+    manager_c = BLEManager(
+        sender_id=id_c.peer_id,
+        scanner_factory=mock_scanner,
+    )
+
+    msgs_c: list[tuple[str, str, bool]] = []
+
+    coord_a = SessionCoordinator(
+        local_identity=id_a,
+        ble_manager=manager_a,
+        ble_server=BLEServer(backend=MockBLEServerBackend()),
+        storage=storage_a,
+        nickname="Node-A",
+    )
+    router_b = MeshRouter(
+        local_peer_id=id_b.peer_id,
+        relay_jitter_min=0.001,
+        relay_jitter_max=0.005,
+    )
+    coord_b = SessionCoordinator(
+        local_identity=id_b,
+        ble_manager=manager_b,
+        ble_server=server_b,
+        storage=storage_b,
+        nickname="Node-B",
+        mesh_router=router_b,
+    )
+    coord_c = SessionCoordinator(
+        local_identity=id_c,
+        ble_manager=manager_c,
+        ble_server=server_c,
+        storage=storage_c,
+        nickname="Node-C",
+        on_message_received=lambda s, m, enc: msgs_c.append((s, m, enc)),
+    )
+
+    await coord_c.start()
+    await coord_b.start()
+    await coord_a.start()
+
+    # B connects to C, A connects to B
+    await coord_b.ble_manager.connect_peer("CC:01")
+    await coord_a.ble_manager.connect_peer("BB:01")
+    await asyncio.sleep(0.05)
+
+    # A broadcasts message with TTL=5
+    # B receives, decrements TTL to 4, and relays to C
+    # C receives!
+    await coord_a.send_broadcast_message("Mesh broadcast through Node B to Node C")
+
+    for _ in range(50):
+        if len(msgs_c) >= 1:
+            break
+        await asyncio.sleep(0.02)
+
+    assert len(msgs_c) == 1
+    assert msgs_c[0][1] == "Mesh broadcast through Node B to Node C"
+    assert msgs_c[0][0] == id_a.peer_id_hex
+
+    await coord_a.stop()
+    await coord_b.stop()
+    await coord_c.stop()

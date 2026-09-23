@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 9: Mesh Routing, Store-and-Forward, and Modern Textual TUI with Autocompletion:
+  - Multi-hop mesh relay engine (`bitchat.mesh.router.MeshRouter`) featuring TTL decrementing, loop prevention, peer rate-limiting (50 pkts/s), destination filtering, and 10–50ms randomized relay jitter to mitigate BLE broadcast collisions.
+  - TTL-invariant packet deduplication (`bitchat.mesh.dedup.PacketDeduplicator`) computing SHA-256 hashes over invariant packet fields (`sender_id`, `timestamp`, `message_type`, `recipient_id`, `payload`), bounded LRU cache (2,000 entries), and 300s TTL expiration window.
+  - Offline store-and-forward queue (`bitchat.mesh.store_forward.StoreAndForwardQueue`) with strict per-peer limits (20 packets), global queue cap (100 packets), aggregate byte budget (256 KB), and automatic queue flushing upon peer presence announcement.
+  - Central command registry (`bitchat.commands.parser`) with prefix-based suggestion lookup, command metadata, argument specifiers, and contextual peer target completion.
+  - Complete Textual TUI redesign (`bitchat.tui`) with modular widget architecture:
+    - Pure dark GitHub-inspired theme (`#0d1117`, `#161b22`, `#30363d`, `#58a6ff`).
+    - Top header widget (`HeaderWidget`) with dynamic BLE connection pill, peer counter, and local ID.
+    - Peer sidebar (`PeerSidebar`) with connected peers, discovered nodes, and identity summary.
+    - Message stream (`ChatView`) with timestamps, badges (`[Public]`, `[🔒 DM]`, `[System]`, `[Security]`, `[Error]`), and scrollback log.
+    - Message input (`MessageInput`) with command history navigation ($\uparrow/\downarrow$) and autocompletion interception.
+    - IDE-style floating autocomplete palette (`AutocompletePalette`) with `/` trigger, prefix filtering, arrow key navigation, Tab/Enter acceptance, and Esc dismissal.
+    - Bottom status bar (`StatusBar`) with real-time status and shortcut hint legend.
+    - Modal help screen (`HelpScreen`) displaying keyboard shortcuts and command reference table.
+  - Multi-hop mesh relay integration test ($A \to B \to C$) in `tests/integration/test_end_to_end.py`.
+  - Comprehensive unit test suites for mesh subsystem (`tests/unit/test_mesh.py`) and TUI components (`tests/unit/test_tui.py`), expanding test suite to 515 passing tests.
 - Phase 8: Two-PC End-to-End Functional Prototype (`bitchat.app`, `bitchat.tui`, `bitchat.ble.server`):
   - GATT peripheral server and advertising (`bitchat.ble.server.BLEServer`) with native Windows WinRT support and injectable mock backends for testing.
   - Asynchronous session coordinator (`bitchat.app.session_coordinator.SessionCoordinator`) orchestrating peer discovery, presence announce exchange, deterministic Noise XX handshake progression, encrypted direct messages, and 20ms fragment pacing for large messages (>500B).

@@ -159,11 +159,17 @@ class BLEManager:
             )
         await transport.send_packet(packet)
 
-    async def broadcast_packet(self, packet: BitchatPacket) -> None:
-        """Broadcast a packet to all currently ready connected peers."""
+    async def broadcast_packet(
+        self, packet: BitchatPacket, exclude_address: str | None = None
+    ) -> None:
+        """Broadcast a packet to all currently ready connected peers,
+        optionally excluding one.
+        """
         tasks = []
-        for transport in list(self._transports.values()):
-            if transport.connection.is_ready:
+        for addr, transport in list(self._transports.items()):
+            if (
+                exclude_address is None or addr != exclude_address
+            ) and transport.connection.is_ready:
                 tasks.append(transport.send_packet(packet))
 
         if tasks:

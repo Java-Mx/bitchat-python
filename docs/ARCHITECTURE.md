@@ -7,7 +7,9 @@ BitChat Python follows a strict layered architecture to maintain separation of c
 ```
 TUI (Textual)
  ↓
-Application Core
+Application Core / Session Coordinator
+ ↓
+Mesh Router (Relay, Dedup, Store & Forward)
  ↓
 Protocol / Crypto / Storage
  ↓
@@ -18,9 +20,21 @@ OS Bluetooth APIs
 
 ## Module Responsibilities
 
-- **`tui/`**: Terminal UI, display, user input (`bitchat.tui.app.BitChatApp`). Must NOT directly implement BLE or cryptography. Built with Textual for responsive real-time chat log, peer discovery sidebar, and slash commands.
-- **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `ble`).
-  - `session_coordinator.py`: `SessionCoordinator` orchestrating `dict[str, NoiseSession]`, peer address resolution, deterministic Noise XX handshake progression, encrypted direct messages, presence announcements, and fragmentation pacing.
+- **`tui/`**: Modular Textual terminal user interface (`bitchat.tui.app.BitChatApp`). Must NOT directly implement BLE or cryptography. Built with Textual for responsive real-time dark theme (`#0d1117`), peer sidebar, scrollback conversation log, status bar, and IDE-style popup autocompletion.
+  - `theme.py`: Pure dark TCSS stylesheet with GitHub-inspired palette (`#0d1117`, `#161b22`, `#30363d`, `#58a6ff`).
+  - `widgets/header.py`: `HeaderWidget` with dynamic BLE connection pill, peer count, and local identity fingerprint.
+  - `widgets/sidebar.py`: `PeerSidebar` displaying connected peers, discovered nodes, and identity summary.
+  - `widgets/chat_view.py`: `ChatView` conversation stream with timestamps, styled message tags (`[Public]`, `[🔒 DM]`, `[System]`, `[Security]`, `[Error]`), and scrollback log.
+  - `widgets/message_input.py`: `MessageInput` handling text entry, command history navigation ($\uparrow/\downarrow$), and autocompletion event interception.
+  - `widgets/autocomplete.py`: `AutocompletePalette` floating menu with synchronous option rendering, prefix filtering, arrow key navigation, Tab/Enter acceptance, and Esc dismissal.
+  - `widgets/status_bar.py`: `StatusBar` reactive bottom bar with real-time status updates and keyboard shortcut hints.
+  - `screens/help.py`: `HelpScreen` modal dialog displaying complete command table and shortcut keys.
+- **`mesh/`**: Multi-hop mesh routing, deduplication, and store-and-forward (depends on `protocol`).
+  - `dedup.py`: `PacketDeduplicator` utilizing TTL-invariant SHA-256 hashing `[:16]` over `(sender_id + timestamp + message_type + recipient_id + payload)`, bounded LRU cache (2,000 entries), and 300s TTL cache.
+  - `store_forward.py`: `StoreAndForwardQueue` with per-peer limits (20 packets), global cap (100 packets), aggregate byte budget (256 KB), and automatic flushing upon peer announce/connect.
+  - `router.py`: `MeshRouter` handling origin loop prevention, peer rate-limiting (50 pkts/s), deduplication, TTL validation/clamping/decrementing, 10–50ms randomized collision-mitigation jitter, and destination evaluation.
+- **`app/`**: Application logic, command handling, state (depends on `protocol`, `crypto`, `storage`, `mesh`, `ble`).
+  - `session_coordinator.py`: `SessionCoordinator` orchestrating `dict[str, NoiseSession]`, peer address resolution, deterministic Noise XX handshake progression, encrypted direct messages, presence announcements, mesh routing/relaying with collision jitter, store-and-forward queueing/flushing, and fragmentation pacing.
   - `application.py`: `Application` core controller managing startup/shutdown, command dispatching, and background task lifecycle.
 - **`protocol/`**: Packet encoding/decoding, wire models, message types, fragmentation (independent). Must remain independent from presentation.
   - `constants.py`: Wire format sizes, UUIDs, bitmask flags, block sizes, fragmentation limits, and `MessageType` enum.

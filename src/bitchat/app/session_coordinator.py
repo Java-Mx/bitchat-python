@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from bitchat.crypto.noise import NoiseRole, NoiseSessionState
 from bitchat.crypto.sessions import NoiseSession
 from bitchat.exceptions import PacketDecodingError
+from bitchat.mesh.router import MeshRouter
 from bitchat.protocol.constants import MessageType
 from bitchat.protocol.decoder import decode_packet
 from bitchat.protocol.encoder import encode_packet
@@ -58,6 +59,7 @@ class SessionCoordinator:
         on_peer_status_changed: Callable[[str, str], None] | None = None,
         on_handshake_completed: Callable[[str, str], None] | None = None,
         inter_fragment_delay: float = 0.02,
+        mesh_router: MeshRouter | None = None,
     ) -> None:
         self.local_identity = local_identity
         self.ble_manager = ble_manager
@@ -65,6 +67,9 @@ class SessionCoordinator:
         self.storage = storage
         self.nickname = nickname
         self.inter_fragment_delay = inter_fragment_delay
+        self.mesh_router = mesh_router or MeshRouter(
+            local_peer_id=self.local_identity.peer_id
+        )
 
         self.on_message_received = on_message_received
         self.on_peer_status_changed = on_peer_status_changed
@@ -207,6 +212,8 @@ class SessionCoordinator:
         self, target_peer_id_hex: str | None, packet: BitchatPacket
     ) -> None:
         """Transmit packet via direct central transport or peripheral notification."""
+        self.mesh_router.deduplicator.record(packet)
+
         target_addr = (
             self.peer_addresses.get(target_peer_id_hex) if target_peer_id_hex else None
         )
@@ -233,13 +240,19 @@ class SessionCoordinator:
             else:
                 await self.ble_server.send_notification(encoded)
 
-    async def _broadcast_packet(self, packet: BitchatPacket) -> None:
+    async def _broadcast_packet(
+        self, packet: BitchatPacket, exclude_peer: str | None = None
+    ) -> None:
         """Broadcast packet over central connections and peripheral notifications."""
+        self.mesh_router.deduplicator.record(packet)
+
         tasks: list[Any] = []
         if self.ble_manager.connected_peers:
-            tasks.append(self.ble_manager.broadcast_packet(packet))
+            tasks.append(
+                self.ble_manager.broadcast_packet(packet, exclude_address=exclude_peer)
+            )
 
-        if self.ble_server.is_advertising:
+        if self.ble_server.is_advertising and exclude_peer != "server":
             encoded = encode_packet(packet, add_padding=True)
             if should_fragment(encoded):
                 fragments = fragment_encoded_packet(
@@ -290,8 +303,58 @@ class SessionCoordinator:
     def _handle_incoming_packet(
         self, packet: BitchatPacket, peer_address: str | None = None
     ) -> None:
-        """Route decoded incoming packet to asynchronous processing."""
-        self._spawn_task(self._process_packet_async(packet, peer_address))
+        """Route decoded incoming packet to mesh router and asynchronous processing."""
+        decision = self.mesh_router.evaluate_incoming(
+            packet, ingress_source=peer_address
+        )
+
+        if decision.should_process_locally:
+            self._spawn_task(self._process_packet_async(packet, peer_address))
+
+        if decision.packet_to_relay is not None:
+            self._spawn_task(
+                self._relay_packet_async(
+                    decision.packet_to_relay,
+                    decision.target_peer_id_hex,
+                    decision.exclude_ingress,
+                )
+            )
+        elif decision.target_peer_id_hex and not decision.should_process_locally:
+            # Store-and-forward for offline destination
+            self.mesh_router.store_forward_queue.enqueue(
+                decision.target_peer_id_hex, packet
+            )
+
+    async def _relay_packet_async(
+        self,
+        packet: BitchatPacket,
+        target_peer_id_hex: str | None = None,
+        exclude_ingress: str | None = None,
+    ) -> None:
+        """Relay packet across mesh with collision-mitigation jitter."""
+        jitter = self.mesh_router.get_relay_jitter()
+        await asyncio.sleep(jitter)
+
+        if target_peer_id_hex:
+            target_addr = self.peer_addresses.get(target_peer_id_hex)
+            if (
+                target_addr
+                and target_addr in self.ble_manager.connected_peers
+                and target_addr != exclude_ingress
+            ):
+                try:
+                    await self.ble_manager.send_to_peer(target_addr, packet)
+                    return
+                except Exception as e:
+                    logger.warning("Failed relaying packet to %s: %s", target_addr, e)
+
+            # Target is not a direct neighbor: broadcast relay across mesh or store
+            if target_peer_id_hex not in self.peer_addresses:
+                await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
+            else:
+                self.mesh_router.store_forward_queue.enqueue(target_peer_id_hex, packet)
+        else:
+            await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
 
     async def _process_packet_async(
         self, packet: BitchatPacket, peer_address: str | None = None
@@ -308,6 +371,15 @@ class SessionCoordinator:
                 self.peer_nicknames[sender_hex] = nickname
                 if self.on_peer_status_changed:
                     self.on_peer_status_changed(sender_hex, f"Online ({nickname})")
+
+                if self.mesh_router.store_forward_queue.has_pending(sender_hex):
+                    pending_pkts = (
+                        self.mesh_router.store_forward_queue.dequeue_for_peer(
+                            sender_hex
+                        )
+                    )
+                    for pending in pending_pkts:
+                        self._spawn_task(self._send_packet(sender_hex, pending))
 
             case MessageType.Message:
                 text = _decode_chat_payload(packet.payload)
@@ -427,6 +499,14 @@ class SessionCoordinator:
         if self.on_peer_status_changed:
             self.on_peer_status_changed(peer_address, "Connected")
         self._spawn_task(self.send_announce())
+
+        peer_id = self.address_to_peer_id.get(peer_address)
+        if peer_id and self.mesh_router.store_forward_queue.has_pending(peer_id):
+            pending_pkts = self.mesh_router.store_forward_queue.dequeue_for_peer(
+                peer_id
+            )
+            for pending in pending_pkts:
+                self._spawn_task(self.ble_manager.send_to_peer(peer_address, pending))
 
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Callback when peer disconnects."""

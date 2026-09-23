@@ -153,3 +153,29 @@ class TestCommandParser:
         cmd = Command(command_type=CommandType.HELP, raw_input="help")
         with pytest.raises(AttributeError):
             cmd.command_type = CommandType.EXIT  # type: ignore[misc]
+
+    def test_command_registry_and_suggestions(self) -> None:
+        """Command registry contains specifications and filters suggestions."""
+        from bitchat.commands.parser import COMMAND_REGISTRY, get_command_suggestions
+
+        assert len(COMMAND_REGISTRY) >= 10
+        names = [spec.name for spec in COMMAND_REGISTRY]
+        assert "/connect" in names
+        assert "/dm" in names
+        assert "/help" in names
+
+        # Suggestion filtering
+        all_sug = get_command_suggestions("/")
+        assert len(all_sug) == len(COMMAND_REGISTRY)
+
+        co_sug = get_command_suggestions("/co")
+        assert len(co_sug) == 1
+        assert co_sug[0].name == "/connect"
+
+        d_sug = get_command_suggestions("/d")
+        d_names = [s.name for s in d_sug]
+        assert "/dm" in d_names
+        assert "/disconnect" in d_names
+
+        empty_sug = get_command_suggestions("hello")
+        assert len(empty_sug) == 0
