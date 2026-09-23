@@ -1,212 +1,87 @@
-"""Visual theme, color constants, and TCSS definitions for BitChat TUI."""
+"""Visual theme, design tokens, and deterministic identity colors for BitChat TUI."""
 
 from __future__ import annotations
 
-# Theme color palette (GitHub Dark / JetBrains Dark inspired)
-COLOR_BG_DARK = "#0d1117"
-COLOR_PANEL_BG = "#161b22"
-COLOR_BORDER = "#30363d"
-COLOR_BORDER_FOCUS = "#58a6ff"
+import zlib
+from pathlib import Path
+
+# ==============================================================================
+# 1. Black Family (Backgrounds, deepest surfaces, negative space, inactive areas)
+# ==============================================================================
+COLOR_BG = "#080a0f"
+COLOR_SURFACE = "#0f121c"
+COLOR_SURFACE_ACTIVE = "#141824"
+COLOR_SURFACE_SELECTED = "#1e2438"
+COLOR_SURFACE_CARD = "#121520"
+COLOR_BORDER = "#22283a"
+COLOR_BORDER_MUTED = "#1b2030"
 COLOR_TEXT_PRIMARY = "#e6edf3"
 COLOR_TEXT_MUTED = "#8b949e"
-COLOR_ACCENT = "#58a6ff"
-COLOR_SUCCESS = "#3fb950"
-COLOR_WARNING = "#d29922"
-COLOR_ERROR = "#f85149"
-COLOR_SECURITY = "#a371f7"
+COLOR_TEXT_DIM = "#57606a"
 
-TCSS_STYLES = """
-Screen {
-    background: #0d1117;
-    color: #e6edf3;
-    layout: vertical;
-}
+# ==============================================================================
+# 2. Blue Family (Primary interactive accent, active items, borders, focus)
+# ==============================================================================
+COLOR_BLUE_ACCENT = "#58a6ff"
+COLOR_BLUE_INTERACTIVE = "#388bfd"
+COLOR_BLUE_ACTIVE = "#1f6feb"
+COLOR_BLUE_SURFACE = "#152238"
+COLOR_BORDER_FOCUS = "#388bfd"
 
-#top-header {
-    dock: top;
-    height: 3;
-    background: #161b22;
-    border-bottom: solid #30363d;
-    padding: 0 1;
-    layout: horizontal;
-    align: left middle;
-}
+# ==============================================================================
+# 3. Purple Family (Secondary accent, system metadata, command palette, Noise)
+# ==============================================================================
+COLOR_PURPLE_ACCENT = "#bc8cff"
+COLOR_PURPLE_SUBTLE = "#a371f7"
+COLOR_PURPLE_DIM = "#8957e5"
+COLOR_PURPLE_SURFACE = "#271b3d"
 
-#header-title {
-    text-style: bold;
-    color: #58a6ff;
-    width: auto;
-}
+# ==============================================================================
+# 4. Identity / People Colors (Deterministic, restrained set of 8 distinct colors)
+# ==============================================================================
+PEER_IDENTITY_COLORS: tuple[str, ...] = (
+    "#39c5cf",  # Cyan
+    "#56d364",  # Emerald
+    "#e3b341",  # Amber
+    "#f778ba",  # Pink
+    "#79c0ff",  # Sky
+    "#d2a8ff",  # Lavender
+    "#f0883e",  # Coral
+    "#ff7b72",  # Rose
+)
+COLOR_SELF_IDENTITY = "#79c0ff"
 
-#header-version {
-    color: #8b949e;
-    width: auto;
-    margin-left: 1;
-}
+# ==============================================================================
+# 5. Semantic Status Colors (Single restrained family for exceptional states)
+# ==============================================================================
+COLOR_STATUS_SUCCESS = "#3fb950"  # Connected, secure, verified
+COLOR_STATUS_WARNING = "#d29922"  # Connecting, scanning, warning
+COLOR_STATUS_ERROR = "#f85149"  # Disconnected, handshake error, failure
 
-#header-status {
-    width: auto;
-    margin-left: 2;
-    color: #3fb950;
-    text-style: bold;
-}
 
-#header-identity {
-    dock: right;
-    width: auto;
-    color: #8b949e;
-}
+def get_peer_color(identifier: str) -> str:
+    """Return a deterministic, stable identity color for a peer.
 
-#main-body {
-    height: 1fr;
-    layout: horizontal;
-}
+    Uses CRC32 over the UTF-8 bytes of the peer identifier (nickname or peer ID)
+    to select an identity color from the fixed PEER_IDENTITY_COLORS palette.
+    """
+    if not identifier:
+        return COLOR_TEXT_MUTED
+    if identifier.lower() in ("you", "self", "local"):
+        return COLOR_SELF_IDENTITY
 
-#sidebar {
-    width: 32;
-    min-width: 24;
-    max-width: 38;
-    background: #161b22;
-    border-right: solid #30363d;
-    padding: 0 1;
-    layout: vertical;
-}
+    digest = zlib.crc32(identifier.encode("utf-8"))
+    return PEER_IDENTITY_COLORS[digest % len(PEER_IDENTITY_COLORS)]
 
-.sidebar-title {
-    text-style: bold;
-    color: #58a6ff;
-    margin-top: 1;
-    margin-bottom: 0;
-}
 
-#identity-card {
-    height: auto;
-    background: #0d1117;
-    border: solid #30363d;
-    padding: 1;
-    margin-top: 1;
-    margin-bottom: 1;
-}
+# Legacy compatibility aliases
+COLOR_BG_DARK = COLOR_BG
+COLOR_PANEL_BG = COLOR_SURFACE
+COLOR_ACCENT = COLOR_BLUE_ACCENT
+COLOR_SUCCESS = COLOR_STATUS_SUCCESS
+COLOR_WARNING = COLOR_STATUS_WARNING
+COLOR_ERROR = COLOR_STATUS_ERROR
+COLOR_SECURITY = COLOR_PURPLE_SUBTLE
 
-.peer-list-container {
-    height: 1fr;
-    layout: vertical;
-}
-
-.peer-list-view {
-    height: 1fr;
-    background: #161b22;
-    border: none;
-}
-
-.peer-item {
-    height: auto;
-    padding: 0 1;
-    margin-bottom: 0;
-}
-
-#chat-column {
-    width: 1fr;
-    height: 1fr;
-    layout: vertical;
-    background: #0d1117;
-    padding: 0 1;
-}
-
-#chat-log {
-    height: 1fr;
-    background: #0d1117;
-    color: #e6edf3;
-    border: none;
-    padding: 0 1;
-    scrollbar-size-vertical: 1;
-}
-
-#input-container {
-    dock: bottom;
-    height: auto;
-    layout: vertical;
-}
-
-#autocomplete-popup {
-    height: auto;
-    max-height: 8;
-    background: #161b22;
-    border: solid #58a6ff;
-    padding: 0 1;
-    display: none;
-    margin-bottom: 0;
-}
-
-.autocomplete-item {
-    height: 1;
-    padding: 0;
-}
-
-.autocomplete-item-selected {
-    background: #1f6feb;
-    color: #ffffff;
-    text-style: bold;
-}
-
-#message-input {
-    height: 3;
-    background: #161b22;
-    border: solid #30363d;
-    color: #e6edf3;
-    padding: 0 1;
-}
-
-#message-input:focus {
-    border: solid #58a6ff;
-}
-
-#status-bar {
-    dock: bottom;
-    height: 1;
-    background: #161b22;
-    color: #8b949e;
-    padding: 0 1;
-    layout: horizontal;
-}
-
-#status-left {
-    width: 1fr;
-    color: #8b949e;
-}
-
-#status-right {
-    width: auto;
-    color: #8b949e;
-}
-
-/* Help Modal Screen */
-HelpScreen {
-    align: center middle;
-    background: rgba(0, 0, 0, 0.75);
-}
-
-#help-dialog {
-    width: 70;
-    max-width: 90%;
-    height: auto;
-    max-height: 85%;
-    background: #161b22;
-    border: solid #58a6ff;
-    padding: 1 2;
-}
-
-#help-title {
-    text-style: bold;
-    color: #58a6ff;
-    margin-bottom: 1;
-}
-
-#help-table {
-    height: auto;
-    max-height: 20;
-    background: #0d1117;
-    border: solid #30363d;
-    margin-bottom: 1;
-}
-"""
+TCSS_FILE = Path(__file__).parent / "styles" / "app.tcss"
+TCSS_STYLES = TCSS_FILE.read_text(encoding="utf-8") if TCSS_FILE.exists() else ""

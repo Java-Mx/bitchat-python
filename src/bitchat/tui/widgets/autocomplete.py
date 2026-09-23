@@ -3,37 +3,22 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+from bitchat.tui.theme import get_peer_color
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
 
 class AutocompletePalette(Widget):
-    """Floating/docked suggestion popup menu for slash commands and arguments."""
-
-    DEFAULT_CSS = """
-    AutocompletePalette {
-        height: auto;
-        max-height: 8;
-        background: #161b22;
-        border: solid #58a6ff;
-        padding: 0;
-        display: none;
-        margin-bottom: 0;
-    }
-    #autocomplete-option-list {
-        height: auto;
-        max-height: 8;
-        background: #161b22;
-        border: none;
-        scrollbar-size-vertical: 1;
-    }
+    """Floating/docked suggestion popup menu for slash commands
+    and contextual arguments.
     """
 
     class SuggestionAccepted(Message):
@@ -43,7 +28,7 @@ class AutocompletePalette(Widget):
             super().__init__()
             self.value = value
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(id="autocomplete-popup", **kwargs)
         self._suggestions: list[tuple[str, str]] = []  # (value, description)
 
@@ -70,7 +55,11 @@ class AutocompletePalette(Widget):
             ol = self.query_one("#autocomplete-option-list", OptionList)
             ol.highlighted = val
 
-    def show_suggestions(self, suggestions: list[tuple[str, str]]) -> None:
+    def show_suggestions(
+        self,
+        suggestions: list[tuple[str, str]],
+        title: str = "Commands",
+    ) -> None:
         """Display suggestion list and highlight first item."""
         self._suggestions = list(suggestions)
         ol = self.query_one("#autocomplete-option-list", OptionList)
@@ -80,14 +69,21 @@ class AutocompletePalette(Widget):
             self.styles.display = "none"
             return
 
+        self.border_title = title
         self.styles.display = "block"
-        options = [
-            Option(
-                f"[bold #58a6ff]{val}[/bold #58a6ff]  [dim]{desc}[/dim]",
-                id=f"opt-{i}",
+        options = []
+        for i, (val, desc) in enumerate(self._suggestions):
+            if val.startswith("/"):
+                val_styled = f"[bold #58a6ff]{val:<15}[/bold #58a6ff]"
+            else:
+                color = get_peer_color(val)
+                val_styled = f"[bold {color}]{val:<15}[/bold {color}]"
+            options.append(
+                Option(
+                    f"{val_styled}  [dim #8b949e]{desc}[/dim #8b949e]",
+                    id=f"opt-{i}",
+                )
             )
-            for i, (val, desc) in enumerate(self._suggestions)
-        ]
         ol.add_options(options)
         ol.highlighted = 0
 

@@ -14,30 +14,11 @@ if TYPE_CHECKING:
 
 
 class StatusBar(Widget):
-    """Bottom status bar providing real-time status and shortcut keys."""
+    """Bottom status bar providing real-time status and keyboard shortcut hints."""
 
-    DEFAULT_CSS = """
-    StatusBar {
-        dock: bottom;
-        height: 1;
-        background: #161b22;
-        color: #8b949e;
-        padding: 0 1;
-        layout: horizontal;
-    }
-    #status-left {
-        width: 1fr;
-        color: #8b949e;
-    }
-    #status-right {
-        width: auto;
-        color: #8b949e;
-    }
-    """
-
-    status_message: reactive[str] = reactive("● Initialized | BLE Mesh Active")
+    status_message: reactive[str] = reactive("● Secure • BLE Mesh Active")
     hint_message: reactive[str] = reactive(
-        "Enter: Send | /: Commands | Tab: Complete | Esc: Close | Ctrl+C: Quit"
+        "Enter Send   ↑↓ History   Tab Complete   Esc Clear   / Commands   Ctrl+C Quit"
     )
 
     def __init__(self, **kwargs: Any) -> None:

@@ -18,44 +18,6 @@ if TYPE_CHECKING:
 class HelpScreen(ModalScreen[None]):
     """Modal screen displaying all available slash commands and keyboard shortcuts."""
 
-    DEFAULT_CSS = """
-    HelpScreen {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.75);
-    }
-    #help-dialog {
-        width: 76;
-        max-width: 95%;
-        height: auto;
-        max-height: 85%;
-        background: #161b22;
-        border: solid #58a6ff;
-        padding: 1 2;
-    }
-    #help-title {
-        text-style: bold;
-        color: #58a6ff;
-        margin-bottom: 1;
-    }
-    #help-table {
-        height: auto;
-        max-height: 18;
-        background: #0d1117;
-        border: solid #30363d;
-        margin-bottom: 1;
-    }
-    #help-close-btn {
-        dock: right;
-        background: #21262d;
-        color: #e6edf3;
-        border: solid #30363d;
-    }
-    #help-close-btn:hover {
-        background: #30363d;
-        border: solid #58a6ff;
-    }
-    """
-
     BINDINGS: ClassVar[list[BindingType]] = [
         ("escape", "dismiss_modal", "Close"),
         ("q", "dismiss_modal", "Close"),

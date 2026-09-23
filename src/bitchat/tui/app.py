@@ -35,12 +35,15 @@ class BitChatApp(App[None]):
 
     TITLE = "BitChat"
     SUB_TITLE = "Bluetooth Low Energy Mesh Chat"
+    CSS_PATH = "styles/app.tcss"
     CSS = TCSS_STYLES
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+c", "quit", "Quit", show=False),
         Binding("ctrl+l", "clear_log", "Clear", show=False),
         Binding("f1", "show_help", "Help", show=False),
+        Binding("pageup", "scroll_chat_up", "Scroll Up", show=False),
+        Binding("pagedown", "scroll_chat_down", "Scroll Down", show=False),
     ]
 
     def __init__(
@@ -122,10 +125,10 @@ class BitChatApp(App[None]):
 
         if connected_addrs:
             status_bar.status_message = (
-                f"● Connected | {len(connected_addrs)} peer(s) | BLE Mesh Ready"
+                f"● Connected ({len(connected_addrs)} peers) • BLE Mesh Active"
             )
         else:
-            status_bar.status_message = "○ Scanning for BitChat peers | Mesh Listening"
+            status_bar.status_message = "○ Scanning for BitChat peers • BLE Mesh Active"
 
     def _on_coordinator_message(
         self, sender_id: str, text: str, is_encrypted: bool
@@ -182,13 +185,12 @@ class BitChatApp(App[None]):
             palette.hide()
             return
 
-        # Check if user is typing a command or arguments
         tokens = val.split(maxsplit=1)
         if len(tokens) == 1 and not val.endswith(" "):
             # Filtering command names (/c, /dm, etc.)
             suggestions = get_command_suggestions(tokens[0])
             items = [(s.name, s.description) for s in suggestions]
-            palette.show_suggestions(items)
+            palette.show_suggestions(items, title="Commands")
         elif len(tokens) >= 1 and val.startswith("/dm "):
             # Contextual peer argument completion
             query = tokens[1] if len(tokens) > 1 else ""
@@ -201,7 +203,7 @@ class BitChatApp(App[None]):
                         or query.lower() in pid.lower()
                     ):
                         peer_items.append((f"/dm {nick} ", f"Peer ID: {pid[:8]}..."))
-            palette.show_suggestions(peer_items)
+            palette.show_suggestions(peer_items, title="Peers (Noise XX)")
         elif len(tokens) >= 1 and val.startswith("/connect "):
             # Contextual discovered address argument completion
             query = tokens[1] if len(tokens) > 1 else ""
@@ -217,7 +219,7 @@ class BitChatApp(App[None]):
                         addr_items.append(
                             (f"/connect {addr}", f"{name} ({peer.rssi} dBm)")
                         )
-            palette.show_suggestions(addr_items)
+            palette.show_suggestions(addr_items, title="Discovered BLE Peers")
         else:
             palette.hide()
 
@@ -238,7 +240,6 @@ class BitChatApp(App[None]):
             case "accept":
                 selected = palette.get_selected_value()
                 if selected is not None:
-                    # Check if selected is a command with arguments
                     matching_spec = next(
                         (s for s in COMMAND_REGISTRY if s.name == selected), None
                     )
@@ -359,7 +360,6 @@ class BitChatApp(App[None]):
                     is_self=True,
                 )
                 if self.coordinator:
-                    # Resolve nickname to peer ID if nickname provided
                     resolved_pid = target_peer
                     for pid, nick in self.coordinator.peer_nicknames.items():
                         if nick.lower() == target_peer.lower():
@@ -394,7 +394,6 @@ class BitChatApp(App[None]):
                 if text.startswith("/"):
                     chat.add_error_message(cmd.error_message or "Unknown command")
                 else:
-                    # Plain broadcast message
                     chat.add_chat_message(
                         self.coordinator.nickname if self.coordinator else "You",
                         text,
@@ -411,6 +410,14 @@ class BitChatApp(App[None]):
     def action_show_help(self) -> None:
         """Action handler to display the help screen."""
         self.push_screen(HelpScreen())
+
+    def action_scroll_chat_up(self) -> None:
+        """Action handler to scroll chat view up one page."""
+        self.query_one(ChatView).page_up()
+
+    def action_scroll_chat_down(self) -> None:
+        """Action handler to scroll chat view down one page."""
+        self.query_one(ChatView).page_down()
 
     async def action_quit(self) -> None:
         """Clean shutdown handler."""

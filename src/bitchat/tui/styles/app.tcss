@@ -1,0 +1,302 @@
+/* ==============================================================================
+   BitChat Professional Terminal Design System (app.tcss)
+   Strict 5-Family Palette: Black, Blue, Purple, Deterministic Identity, Semantic Status
+   ============================================================================== */
+
+Screen {
+    background: #080a0f;
+    color: #e6edf3;
+    layout: vertical;
+    margin: 0;
+    padding: 0;
+}
+
+/* ------------------------------------------------------------------------------
+   Top Application Header (Compact 1-row, edge-to-edge)
+   ------------------------------------------------------------------------------ */
+HeaderWidget {
+    dock: top;
+    height: 1;
+    background: #0a0d14;
+    border-bottom: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: left middle;
+}
+
+#header-brand {
+    text-style: bold;
+    color: #58a6ff;
+    width: auto;
+}
+
+#header-version {
+    color: #57606a;
+    width: auto;
+    margin-left: 1;
+}
+
+#header-channel {
+    color: #bc8cff;
+    width: auto;
+    margin-left: 2;
+}
+
+#header-status {
+    width: auto;
+    margin-left: 2;
+    color: #3fb950;
+}
+
+#header-right {
+    dock: right;
+    width: auto;
+    color: #8b949e;
+}
+
+/* ------------------------------------------------------------------------------
+   Main Viewport Layout (Horizontal Split: Sidebar + Chat)
+   ------------------------------------------------------------------------------ */
+#main-body {
+    height: 1fr;
+    layout: horizontal;
+    background: #080a0f;
+    margin: 0;
+    padding: 0;
+}
+
+/* ------------------------------------------------------------------------------
+   Left Navigation / Peer Sidebar
+   ------------------------------------------------------------------------------ */
+PeerSidebar {
+    width: 30;
+    min-width: 22;
+    max-width: 36;
+    height: 100%;
+    background: #080a0f;
+    border: round #22283a;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #58a6ff;
+    padding: 0;
+    layout: vertical;
+}
+
+#identity-card {
+    height: auto;
+    background: #0f121c;
+    border-bottom: solid #1b2030;
+    padding: 0 1;
+    margin: 0;
+}
+
+#identity-title {
+    text-style: bold;
+    color: #58a6ff;
+    height: 1;
+}
+
+#identity-box {
+    height: auto;
+    color: #e6edf3;
+    padding-bottom: 0;
+}
+
+.sidebar-section-title {
+    text-style: bold;
+    color: #8b949e;
+    padding: 0 1;
+    margin-top: 1;
+    height: 1;
+}
+
+.peer-list-view {
+    height: auto;
+    max-height: 1fr;
+    background: #080a0f;
+    border: none;
+    padding: 0;
+}
+
+.peer-list-view > ListItem {
+    background: #080a0f;
+    padding: 0 1;
+    height: auto;
+}
+
+.peer-list-view > ListItem:hover {
+    background: #141824;
+}
+
+.peer-list-view > ListItem.--highlight {
+    background: #1e2438;
+}
+
+/* ------------------------------------------------------------------------------
+   Main Content Area (Chat View & Input Column)
+   ------------------------------------------------------------------------------ */
+#chat-column {
+    width: 1fr;
+    height: 100%;
+    layout: vertical;
+    background: #080a0f;
+    margin: 0;
+    padding: 0;
+}
+
+ChatView {
+    height: 1fr;
+    background: #080a0f;
+    border: round #22283a;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #58a6ff;
+    layout: vertical;
+    padding: 0 1;
+}
+
+#chat-log {
+    height: 1fr;
+    background: #080a0f;
+    color: #e6edf3;
+    border: none;
+    padding: 0;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: #22283a;
+    scrollbar-color-hover: #388bfd;
+    scrollbar-color-active: #58a6ff;
+}
+
+/* ------------------------------------------------------------------------------
+   Input Area & Command Palette
+   ------------------------------------------------------------------------------ */
+#input-container {
+    height: auto;
+    layout: vertical;
+    background: #080a0f;
+    margin: 0;
+    padding: 0;
+}
+
+AutocompletePalette {
+    height: auto;
+    max-height: 8;
+    background: #0f121c;
+    border: round #388bfd;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #bc8cff;
+    padding: 0;
+    display: none;
+    margin-bottom: 0;
+}
+
+#autocomplete-option-list {
+    height: auto;
+    max-height: 8;
+    background: #0f121c;
+    border: none;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: #22283a;
+}
+
+#autocomplete-option-list > .option-list--option-highlighted {
+    background: #1e2438;
+    color: #58a6ff;
+}
+
+MessageInput {
+    height: 3;
+    background: #0f121c;
+    border: round #22283a;
+    color: #e6edf3;
+    padding: 0 1;
+    margin: 0;
+}
+
+MessageInput:focus {
+    border: round #388bfd;
+    background: #121520;
+}
+
+/* ------------------------------------------------------------------------------
+   Persistent Footer & Status Bar
+   ------------------------------------------------------------------------------ */
+StatusBar {
+    dock: bottom;
+    height: 2;
+    background: #0a0d14;
+    border-top: solid #1b2030;
+    color: #8b949e;
+    padding: 0 1;
+    layout: vertical;
+}
+
+#status-shortcuts-row {
+    height: 1;
+    layout: horizontal;
+    color: #8b949e;
+}
+
+#status-telemetry-row {
+    height: 1;
+    layout: horizontal;
+    color: #57606a;
+}
+
+#status-left {
+    width: 1fr;
+    color: #8b949e;
+}
+
+#status-right {
+    width: auto;
+    color: #57606a;
+}
+
+/* ------------------------------------------------------------------------------
+   Modal Screens (Help Dialog)
+   ------------------------------------------------------------------------------ */
+HelpScreen {
+    align: center middle;
+    background: rgba(8, 10, 15, 0.85);
+}
+
+#help-dialog {
+    width: 76;
+    max-width: 95%;
+    height: auto;
+    max-height: 85%;
+    background: #0f121c;
+    border: round #388bfd;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #58a6ff;
+    padding: 1 2;
+}
+
+#help-title {
+    text-style: bold;
+    color: #58a6ff;
+    margin-bottom: 1;
+}
+
+#help-table {
+    height: auto;
+    max-height: 18;
+    background: #080a0f;
+    border: round #22283a;
+    margin-bottom: 1;
+}
+
+#help-close-btn {
+    dock: right;
+    background: #161b26;
+    color: #e6edf3;
+    border: round #22283a;
+}
+
+#help-close-btn:hover {
+    background: #1e2438;
+    border: round #388bfd;
+}

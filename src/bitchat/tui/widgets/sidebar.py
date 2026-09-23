@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual.containers import Vertical
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
+
+from bitchat.tui.theme import get_peer_color
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -19,18 +21,6 @@ if TYPE_CHECKING:
 class PeerSidebar(Widget):
     """Sidebar displaying local identity card and real-time peer lists."""
 
-    DEFAULT_CSS = """
-    PeerSidebar {
-        width: 32;
-        min-width: 24;
-        max-width: 38;
-        background: #161b22;
-        border-right: solid #30363d;
-        padding: 0 1;
-        layout: vertical;
-    }
-    """
-
     nickname: reactive[str] = reactive("Anonymous")
     peer_id_hex: reactive[str] = reactive("")
     fingerprint: reactive[str] = reactive("")
@@ -40,7 +30,7 @@ class PeerSidebar(Widget):
         nickname: str = "Anonymous",
         peer_id_hex: str = "",
         fingerprint: str = "",
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(id="sidebar", **kwargs)
         self.nickname = nickname
@@ -49,28 +39,28 @@ class PeerSidebar(Widget):
         self._connected_peers: dict[str, str] = {}  # addr -> label
         self._discovered_peers: dict[str, str] = {}  # addr -> label
 
+    def on_mount(self) -> None:
+        self.border_title = "Peers [BLE Mesh]"
+
     def compose(self) -> ComposeResult:
         with Vertical(id="identity-card"):
-            yield Label("[bold #58a6ff]Identity[/bold #58a6ff]")
+            yield Label("[bold #58a6ff]Local Node[/bold #58a6ff]", id="identity-title")
             yield Static(self._render_identity_card(), id="identity-box")
 
-        yield Label(
-            "[bold #3fb950]Connected Peers[/bold #3fb950]", classes="sidebar-title"
-        )
+        yield Label("Connected", classes="sidebar-section-title")
         yield ListView(id="connected-peers-list", classes="peer-list-view")
 
-        yield Label(
-            "[bold #8b949e]Discovered (BLE)[/bold #8b949e]", classes="sidebar-title"
-        )
+        yield Label("Discovered (Nearby)", classes="sidebar-section-title")
         yield ListView(id="discovered-peers-list", classes="peer-list-view")
 
     def _render_identity_card(self) -> str:
         short_id = self.peer_id_hex[:12] if self.peer_id_hex else "N/A"
         short_fp = self.fingerprint[:16] + "..." if self.fingerprint else "N/A"
+        self_color = get_peer_color(self.nickname)
         return (
-            f"[bold]{self.nickname}[/bold]\n"
-            f"ID: [dim]{short_id}[/dim]\n"
-            f"FP: [dim]{short_fp}[/dim]"
+            f"[bold {self_color}]{self.nickname}[/bold {self_color}]\n"
+            f"[dim]ID:[/dim]  [dim #8b949e]{short_id}[/dim #8b949e]\n"
+            f"[dim]FP:[/dim]  [dim #8b949e]{short_fp}[/dim #8b949e]"
         )
 
     def update_identity(
@@ -97,9 +87,14 @@ class PeerSidebar(Widget):
             else:
                 for addr, label in self._connected_peers.items():
                     item_id = f"peer-{addr.replace(':', '_')}"
+                    name = label.split(" (")[0]
+                    color = get_peer_color(name)
                     view.append(
                         ListItem(
-                            Label(f"[#3fb950]●[/#3fb950] {label}"),
+                            Label(
+                                f"[bold {color}]● {name}[/bold {color}]\n"
+                                f"  [dim #8b949e]Secure • Connected[/dim #8b949e]"
+                            ),
                             id=item_id,
                         )
                     )
@@ -113,11 +108,17 @@ class PeerSidebar(Widget):
             view = self.query_one("#discovered-peers-list", ListView)
             view.clear()
             if not self._discovered_peers:
-                view.append(ListItem(Label("[dim]Scanning...[/dim]")))
+                view.append(ListItem(Label("[dim]Scanning for nodes...[/dim]")))
             else:
-                for addr, label in self._discovered_peers.items():
+                for addr, p in peers.items():
+                    name = p.name or "BitChat Node"
+                    color = get_peer_color(name)
+                    rssi_str = f"{p.rssi} dBm" if p.rssi is not None else "Nearby"
                     view.append(
                         ListItem(
-                            Label(f"[#8b949e]○[/#8b949e] {label}\n  [dim]{addr}[/dim]")
+                            Label(
+                                f"[{color}]○ {name}[/{color}]\n"
+                                f"  [dim #8b949e]{rssi_str} • {addr}[/dim #8b949e]"
+                            )
                         )
                     )

@@ -20,14 +20,15 @@ OS Bluetooth APIs
 
 ## Module Responsibilities
 
-- **`tui/`**: Modular Textual terminal user interface (`bitchat.tui.app.BitChatApp`). Must NOT directly implement BLE or cryptography. Built with Textual for responsive real-time dark theme (`#0d1117`), peer sidebar, scrollback conversation log, status bar, and IDE-style popup autocompletion.
-  - `theme.py`: Pure dark TCSS stylesheet with GitHub-inspired palette (`#0d1117`, `#161b22`, `#30363d`, `#58a6ff`).
-  - `widgets/header.py`: `HeaderWidget` with dynamic BLE connection pill, peer count, and local identity fingerprint.
-  - `widgets/sidebar.py`: `PeerSidebar` displaying connected peers, discovered nodes, and identity summary.
-  - `widgets/chat_view.py`: `ChatView` conversation stream with timestamps, styled message tags (`[Public]`, `[🔒 DM]`, `[System]`, `[Security]`, `[Error]`), and scrollback log.
-  - `widgets/message_input.py`: `MessageInput` handling text entry, command history navigation ($\uparrow/\downarrow$), and autocompletion event interception.
-  - `widgets/autocomplete.py`: `AutocompletePalette` floating menu with synchronous option rendering, prefix filtering, arrow key navigation, Tab/Enter acceptance, and Esc dismissal.
-  - `widgets/status_bar.py`: `StatusBar` reactive bottom bar with real-time status updates and keyboard shortcut hints.
+- **`tui/`**: Professional full-screen terminal user interface (`bitchat.tui.app.BitChatApp`). Must NOT directly implement BLE or cryptography. Built with Textual as an edge-to-edge dashboard canvas using a strict 5-family color system (Black, Blue, Purple, Deterministic Peer Colors, and Restrained Semantic Status):
+  - `styles/app.tcss`: Centralized Textual stylesheet defining full-viewport layout, panel borders, inline border titles, focus states, custom scrollbars, and modal styling.
+  - `theme.py`: Design tokens, color constants, and deterministic peer identity color generator (`get_peer_color`) mapping peer identifiers to stable colors.
+  - `widgets/header.py`: Compact 1-line top header displaying branding, channel indicator, peer count, and local identity fingerprint.
+  - `widgets/sidebar.py`: `PeerSidebar` with `border-title: "Peers [BLE Mesh]"`, displaying connected and discovered nodes with deterministic peer colors and local identity card.
+  - `widgets/chat_view.py`: `ChatView` with `border-title: "Conversation [#public]"`, two-tier message typography (sender anchor + timestamp, body), status tags (`[Public]`, `[🔒 DM]`, `[System]`, `[Security]`, `[Error]`), and scroll controls (`PageUp`/`PageDown`).
+  - `widgets/message_input.py`: `MessageInput` prompt with sharp borders, focused blue accent, command history navigation ($\uparrow/\downarrow$), and autocomplete event delegation.
+  - `widgets/autocomplete.py`: `AutocompletePalette` IDE-style floating menu anchored above input with synchronous `OptionList`, real-time prefix filtering, and contextual peer suggestions for `/dm ` and `/connect `.
+  - `widgets/status_bar.py`: Persistent keyboard shortcut guide and operational telemetry footer.
   - `screens/help.py`: `HelpScreen` modal dialog displaying complete command table and shortcut keys.
 - **`mesh/`**: Multi-hop mesh routing, deduplication, and store-and-forward (depends on `protocol`).
   - `dedup.py`: `PacketDeduplicator` utilizing TTL-invariant SHA-256 hashing `[:16]` over `(sender_id + timestamp + message_type + recipient_id + payload)`, bounded LRU cache (2,000 entries), and 300s TTL cache.

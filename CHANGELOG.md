@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 9.1: Full Terminal UI Redesign & Design System (`bitchat.tui`):
+  - Cohesive edge-to-edge terminal dashboard composition utilizing 100% of viewport with zero wasted margins.
+  - Strict 5-family color palette: Black (`#080a0f`, `#0f121c`, `#141824`), Blue (`#58a6ff`, `#388bfd`), Purple (`#bc8cff`, `#a371f7`), Deterministic Peer Identity Colors (8 curated distinct colors with CRC32 hashing), and Restrained Semantic Status (`#3fb950`, `#d29922`, `#f85149`).
+  - Dedicated Textual CSS stylesheet (`src/bitchat/tui/styles/app.tcss`) centralizing layout, spacing, borders, focus states, and scrollbars.
+  - Panel borders with inline titles (`border-title: "Peers [BLE Mesh]"`, `border-title: "Conversation [#public]"`).
+  - Two-tier message rendering in `ChatView` with sender identity anchor in that peer's deterministic color, muted timestamp, and clear message body.
+  - Compact 1-line top header (`HeaderWidget`) with branding, channel indicator, and peer/telemetry badges.
+  - IDE-quality floating autocomplete palette (`AutocompletePalette`) anchored right above the input bar with real-time prefix filtering and dynamic contextual completion for `/dm <peer>` and `/connect <address>`.
+  - Persistent keyboard footer (`StatusBar`) with monospace shortcut guide and operational telemetry.
+  - PageUp / PageDown chat scroll keybindings.
+  - Responsive layout verified across standard terminal resolutions (`80x24`, `100x30`, `120x40`, `160x50`).
+  - Unit test suite expanded to 523 tests with 100% pass rate.
 - Phase 9: Mesh Routing, Store-and-Forward, and Modern Textual TUI with Autocompletion:
   - Multi-hop mesh relay engine (`bitchat.mesh.router.MeshRouter`) featuring TTL decrementing, loop prevention, peer rate-limiting (50 pkts/s), destination filtering, and 10–50ms randomized relay jitter to mitigate BLE broadcast collisions.
   - TTL-invariant packet deduplication (`bitchat.mesh.dedup.PacketDeduplicator`) computing SHA-256 hashes over invariant packet fields (`sender_id`, `timestamp`, `message_type`, `recipient_id`, `payload`), bounded LRU cache (2,000 entries), and 300s TTL expiration window.

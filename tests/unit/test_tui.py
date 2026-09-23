@@ -14,6 +14,7 @@ from bitchat.crypto.identity import LocalIdentity
 from bitchat.tui.app import BitChatApp
 from bitchat.tui.screens.help import HelpScreen
 from bitchat.tui.widgets.autocomplete import AutocompletePalette
+from bitchat.tui.widgets.chat_view import ChatView
 from bitchat.tui.widgets.header import HeaderWidget
 from bitchat.tui.widgets.message_input import MessageInput
 from bitchat.tui.widgets.sidebar import PeerSidebar
@@ -243,3 +244,128 @@ async def test_tui_peer_discovery_and_status_update(
 
         log = app.query_one("#chat-log", RichLog)
         assert any("Connected" in str(line) for line in log.lines)
+
+
+def test_tui_deterministic_identity_colors() -> None:
+    """Peer identity colors are deterministic and stable across calls."""
+    from bitchat.tui.theme import (
+        COLOR_SELF_IDENTITY,
+        PEER_IDENTITY_COLORS,
+        get_peer_color,
+    )
+
+    # Identical peer produces identical color
+    color_alice_1 = get_peer_color("Alice")
+    color_alice_2 = get_peer_color("Alice")
+    assert color_alice_1 == color_alice_2
+    assert color_alice_1 in PEER_IDENTITY_COLORS
+
+    # Local user gets self identity color
+    assert get_peer_color("You") == COLOR_SELF_IDENTITY
+    assert get_peer_color("self") == COLOR_SELF_IDENTITY
+
+    # Empty identifier handled gracefully
+    assert get_peer_color("") != ""
+
+
+@pytest.mark.asyncio
+async def test_tui_contextual_dm_autocomplete(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Typing '/dm ' triggers contextual peer autocomplete list."""
+    test_coordinator.peer_nicknames["deadbeef12345678"] = "Bob"
+    test_coordinator.peer_nicknames["cafebabe87654321"] = "Charlie"
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        inp = app.query_one(MessageInput)
+        palette = app.query_one(AutocompletePalette)
+
+        # Type '/dm '
+        inp.value = "/dm "
+        await pilot.pause()
+        assert palette.is_visible is True
+        assert palette.border_title == "Peers (Noise XX)"
+        assert len(palette._suggestions) == 2
+
+        # Filter by 'Bo'
+        inp.value = "/dm Bo"
+        await pilot.pause()
+        assert palette.is_visible is True
+        assert len(palette._suggestions) == 1
+        assert palette._suggestions[0][0] == "/dm Bob "
+
+        # Tab complete
+        await pilot.press("tab")
+        await pilot.pause()
+        assert inp.value == "/dm Bob "
+        assert palette.is_visible is False
+
+
+@pytest.mark.asyncio
+async def test_tui_contextual_connect_autocomplete(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Typing '/connect ' triggers contextual discovered BLE peers autocomplete."""
+    peer = DiscoveredPeer(
+        address="AA:BB:CC:DD:EE:FF",
+        name="Nearby-Node",
+        rssi=-70,
+        service_uuids=(),
+    )
+    test_coordinator.ble_manager.scanner._discovered_peers[peer.address] = peer
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        inp = app.query_one(MessageInput)
+        palette = app.query_one(AutocompletePalette)
+
+        # Type '/connect '
+        inp.value = "/connect "
+        await pilot.pause()
+        assert palette.is_visible is True
+        assert palette.border_title == "Discovered BLE Peers"
+        assert len(palette._suggestions) == 1
+        assert "AA:BB:CC:DD:EE:FF" in palette._suggestions[0][0]
+
+
+@pytest.mark.asyncio
+async def test_tui_chat_scroll_actions(test_coordinator: SessionCoordinator) -> None:
+    """PageUp and PageDown scroll chat view without errors."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        chat = app.query_one(ChatView)
+        for i in range(50):
+            chat.add_chat_message("Alice", f"Message number {i}", False)
+        await pilot.pause()
+
+        # Scroll actions execute without error
+        app.action_scroll_chat_up()
+        await pilot.pause()
+        app.action_scroll_chat_down()
+        await pilot.pause()
+        assert len(chat.rich_log.lines) >= 50
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "width,height",
+    [
+        (80, 24),
+        (100, 30),
+        (120, 40),
+        (160, 50),
+    ],
+)
+async def test_tui_responsive_terminal_sizes(
+    test_coordinator: SessionCoordinator, width: int, height: int
+) -> None:
+    """TUI mounts and lays out cleanly across various terminal dimensions."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(width, height)) as pilot:
+        assert app.query_one(HeaderWidget) is not None
+        assert app.query_one(PeerSidebar) is not None
+        assert app.query_one(ChatView) is not None
+        assert app.query_one(MessageInput) is not None
+        assert app.query_one(StatusBar) is not None
+        await pilot.pause()
