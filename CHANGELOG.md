@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Experimental Nim performance prototype and FFI evaluation (`nim/`):
+  - Isolated prototype area implementing byte-level packet encode/decode validation, BitChat random block padding/unpadding, 150-byte chunk slicing, 13-byte fragment header packing, and bounded out-of-order reassembly with sender isolation.
+  - Caller-allocated C-ABI FFI boundary (`bitchat_nim.dll` / `.so`) with strict buffer bounds and zero cross-runtime heap allocations.
+  - Native unit tests (`test_packet.nim`, `test_fragment.nim`) and comprehensive Python-Nim equivalence test suite (`tests/interoperability/test_nim_equivalence.py`, 445 total project tests passing).
+  - Comparative benchmark suite (`bench_native.nim`, `bench_comparison.py`) measuring pure Python, Python+FFI, and native Nim across realistic payloads and fragment topologies.
+  - Technical evaluation report and architectural decision documentation (`nim/README.md`) recommending rejection of production Nim integration due to FFI marshalling overhead and Python 3.14's sufficient native performance (400k packets/sec).
 - BitChat packet fragmentation and reassembly layer (`bitchat.protocol`):
   - Fragmentation engine (`fragmentation.py`): conditional thresholding at >500 bytes (`FRAGMENTATION_THRESHOLD`), chunk size 150 bytes (`FRAGMENT_CHUNK_SIZE`), 13-byte metadata header encoding (`fragment_id`, `index`, `total`, `original_type`), outer fragment packet generation (`FragmentStart`, `FragmentContinue`, `FragmentEnd`), and strict handling of two-fragment edge case.
   - Reassembly engine (`reassembly.py`): `FragmentReassembler` supporting out-of-order fragment arrivals, per-sender isolation via `(sender_id, fragment_id)` composite keys, LRU active assembly eviction (`MAX_ACTIVE_ASSEMBLIES`), chunk count limits (`MAX_FRAGMENTS_PER_ASSEMBLY`), byte caps (`MAX_REASSEMBLED_BYTES`), duplicate chunk rejection, conflicting metadata validation, and automatic assembly cleanup upon completion.

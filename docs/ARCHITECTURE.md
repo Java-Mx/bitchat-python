@@ -91,3 +91,11 @@ Fragment Packet (0x05, 0x06, 0x07) or Regular BitchatPacket
 - Higher layers depend on lower layers, never the reverse.
 - The TUI must remain a purely presentational layer.
 - Core logic (`protocol`, `crypto`) must be isolated and unit-testable without relying on OS-level BLE abstractions.
+
+## Isolated Prototype Area (`nim/`)
+
+An isolated evaluation area exists under `nim/` to benchmark low-level native performance:
+- **Authoritative Core**: Python (`src/bitchat/`) remains the authoritative implementation.
+- **FFI Boundary**: Minimal C-ABI dynamic library with caller-allocated memory buffers.
+- **Runtime Dependency**: Nim is strictly an experimental evaluation prototype and is **not** a runtime or packaging dependency of `bitchat`.
+- **Findings**: Micro-benchmarks confirmed pure Python 3.14 processes 340k–400k packets/sec (4 orders of magnitude above BLE bandwidth); FFI marshalling overhead made hybrid Python+Nim slower than pure Python. Production adoption is rejected in favor of pure-Python portability.

@@ -27,5 +27,6 @@ All functional and non-functional requirements below are currently marked as **�
 - **NFR-02**: ✅ Implemented - Separation of concerns (Layered package architecture enforced)
 - **NFR-03**: ✅ Implemented - No cryptographic improvisation (standard `cryptography` primitives, reference-matched parameters, explicit boundaries)
 - **NFR-04**: 🚧 Planned - Cross-platform BLE abstraction
-- **NFR-05**: ✅ Implemented - Testability (435 unit, crypto, fragmentation, and security invariant tests passing, strict type checking and linting)
+- **NFR-05**: ✅ Implemented - Testability (445 unit, crypto, fragmentation, security invariant, and protocol equivalence tests passing, strict type checking and linting)
 - **NFR-06**: ✅ Implemented - Human-readable code (Documented modules, typed dataclasses)
+- **NFR-07**: ✅ Evaluated - Performance prototype & FFI evaluation (isolated Nim prototype evaluated; empirical benchmarks demonstrated Python 3.14 handles 400k packets/sec; FFI marshalling overhead confirmed negative ROI; Python retained as authoritative)

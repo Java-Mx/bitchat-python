@@ -101,3 +101,14 @@ $RECYCLE.BIN/
 # Explicitly ensure test vectors and fixtures are tracked
 !tests/test_vectors/**
 !tests/**/test_vectors/**
+
+# Nim build artifacts
+nimcache/
+*.exe
+*.dll
+*.dylib
+*.a
+*.o
+*.obj
+nim/bin/
+nim/build/
