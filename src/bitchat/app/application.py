@@ -184,10 +184,7 @@ class Application:
             coord = self._ensure_coordinator()
             self._run_async(coord.start())
 
-        self.stdout.write(
-            "Chat initialized. (Network and messaging features will be available "
-            "in future phases.)\n"
-        )
+        self.stdout.write("Chat initialized.\n")
         if self.enable_ble and self.local_identity:
             self.stdout.write(
                 f"Local Peer ID: {self.local_identity.peer_id_hex} "
