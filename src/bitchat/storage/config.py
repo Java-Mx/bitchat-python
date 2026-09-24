@@ -1,9 +1,8 @@
-"""Storage abstraction and configuration management."""
-
+import contextlib
 import json
 import os
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +11,54 @@ from bitchat.exceptions import ConfigurationError
 
 VALID_DENSITIES: frozenset[str] = frozenset({"comfortable", "compact"})
 VALID_ACCENTS: frozenset[str] = frozenset({"blue", "cyan", "emerald", "purple"})
+
+DEFAULT_KEYBINDINGS: dict[str, str] = {
+    "help": "f1",
+    "edit_theme": "f2",
+    "settings": "f3",
+    "clear_chat": "ctrl+l",
+    "quit": "ctrl+q",
+    "scroll_up": "pageup",
+    "scroll_down": "pagedown",
+}
+KEYBINDING_ACTIONS: frozenset[str] = frozenset(DEFAULT_KEYBINDINGS.keys())
+
+
+def _parse_bool(val: Any, default: bool) -> bool:
+    """Defensively parse a boolean value without unsafe casting."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        v = val.strip().lower()
+        if v in ("true", "1", "yes", "on"):
+            return True
+        if v in ("false", "0", "no", "off"):
+            return False
+    return default
+
+
+def _validate_and_normalize_keybindings(kb: Any) -> dict[str, str]:
+    """Validate, normalize, and resolve keybindings against defaults and conflicts."""
+    if not isinstance(kb, dict):
+        return DEFAULT_KEYBINDINGS.copy()
+
+    cleaned: dict[str, str] = {}
+    used_keys: dict[str, str] = {}
+
+    for action in DEFAULT_KEYBINDINGS:
+        raw_key = kb.get(action)
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            cleaned[action] = DEFAULT_KEYBINDINGS[action]
+        else:
+            k = raw_key.strip().lower()
+            if k in used_keys:
+                # Key conflict between actions - fall back to default
+                cleaned[action] = DEFAULT_KEYBINDINGS[action]
+            else:
+                cleaned[action] = k
+        used_keys[cleaned[action]] = action
+
+    return cleaned
 
 
 @dataclass
@@ -29,6 +76,9 @@ class AppConfig:
     accent: str = "blue"
     max_hops: int = 3
     inter_fragment_delay_ms: int = 20
+    keybindings: dict[str, str] = field(
+        default_factory=lambda: DEFAULT_KEYBINDINGS.copy()
+    )
 
     def __post_init__(self) -> None:
         if self.density not in VALID_DENSITIES:
@@ -49,8 +99,9 @@ class AppConfig:
             self.nickname = "Anonymous"
         else:
             self.nickname = self.nickname.strip()[:32]
-        self.show_timestamps = bool(self.show_timestamps)
-        self.debug = bool(self.debug)
+        self.show_timestamps = _parse_bool(self.show_timestamps, True)
+        self.debug = _parse_bool(self.debug, False)
+        self.keybindings = _validate_and_normalize_keybindings(self.keybindings)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to a dictionary."""
@@ -68,7 +119,7 @@ class AppConfig:
             if isinstance(nick_val, str) and nick_val.strip()
             else "Anonymous"
         )
-        debug = bool(data.get("debug", False))
+        debug = _parse_bool(data.get("debug"), False)
 
         density_val = data.get("density")
         density = (
@@ -77,8 +128,7 @@ class AppConfig:
         if density not in VALID_DENSITIES:
             density = "comfortable"
 
-        show_ts_val = data.get("show_timestamps")
-        show_timestamps = bool(show_ts_val) if show_ts_val is not None else True
+        show_timestamps = _parse_bool(data.get("show_timestamps"), True)
 
         accent_val = data.get("accent")
         accent = str(accent_val).lower() if isinstance(accent_val, str) else "blue"
@@ -97,6 +147,8 @@ class AppConfig:
         except (ValueError, TypeError):
             inter_fragment_delay_ms = 20
 
+        keybindings = _validate_and_normalize_keybindings(data.get("keybindings"))
+
         return cls(
             nickname=nickname,
             debug=debug,
@@ -105,6 +157,7 @@ class AppConfig:
             accent=accent,
             max_hops=max_hops,
             inter_fragment_delay_ms=inter_fragment_delay_ms,
+            keybindings=keybindings,
         )
 
 
@@ -172,6 +225,27 @@ class InMemoryStorage(StorageInterface):
         self._is_closed = True
 
 
+def _atomic_write_json(
+    target_path: Path, data: dict[str, Any], chmod_mode: int | None = None
+) -> None:
+    """Safely persist JSON data via temp file, flush, fsync, and atomic replace."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = target_path.with_suffix(f".tmp.{os.getpid()}.{id(data)}")
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        if chmod_mode is not None and os.name == "posix":
+            os.chmod(temp_file, chmod_mode)
+        temp_file.replace(target_path)
+    except Exception:
+        if temp_file.exists():
+            with contextlib.suppress(OSError):
+                temp_file.unlink()
+        raise
+
+
 class FileConfigStorage(StorageInterface):
     """File-based JSON configuration and identity storage."""
 
@@ -214,9 +288,7 @@ class FileConfigStorage(StorageInterface):
         if self._is_closed:
             raise ConfigurationError("Cannot save configuration to closed storage.")
         try:
-            self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config.to_dict(), f, indent=2)
+            _atomic_write_json(self.config_path, config.to_dict())
         except OSError as e:
             raise ConfigurationError(
                 f"Failed to write configuration to {self.config_path}: {e}"
@@ -250,19 +322,13 @@ class FileConfigStorage(StorageInterface):
         if self._is_closed:
             raise ConfigurationError("Cannot save identity to closed storage.")
         try:
-            self.identity_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "x25519_private": identity.x25519_private.hex(),
                 "ed25519_private": identity.ed25519_private.hex(),
                 "fingerprint": identity.fingerprint,
                 "peer_id": identity.peer_id.hex(),
             }
-            with open(self.identity_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
-
-            # Restrict permissions on POSIX
-            if os.name == "posix":
-                os.chmod(self.identity_path, 0o600)
+            _atomic_write_json(self.identity_path, payload, chmod_mode=0o600)
         except OSError as e:
             raise ConfigurationError(
                 f"Failed to write identity to {self.identity_path}: {e}"

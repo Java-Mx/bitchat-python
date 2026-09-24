@@ -214,3 +214,76 @@ class TestStorage:
         assert loaded.accent == "purple"
         assert loaded.max_hops == 4
         assert loaded.inter_fragment_delay_ms == 35
+
+    def test_keybinding_defaults_and_validation(self) -> None:
+        """AppConfig initializes with default keybindings and validates entries."""
+        config = AppConfig()
+        assert config.keybindings["help"] == "f1"
+        assert config.keybindings["edit_theme"] == "f2"
+        assert config.keybindings["settings"] == "f3"
+        assert config.keybindings["clear_chat"] == "ctrl+l"
+        assert config.keybindings["quit"] == "ctrl+q"
+        assert config.keybindings["scroll_up"] == "pageup"
+        assert config.keybindings["scroll_down"] == "pagedown"
+
+    def test_keybinding_defensive_parsing_and_conflict_resolution(self) -> None:
+        """Malicious/corrupt keybinding data safely falls back to defaults."""
+        from bitchat.storage.config import DEFAULT_KEYBINDINGS
+
+        # 1. keybindings is null or invalid type
+        assert (
+            AppConfig.from_dict({"keybindings": None}).keybindings
+            == DEFAULT_KEYBINDINGS
+        )
+        assert (
+            AppConfig.from_dict({"keybindings": "invalid"}).keybindings
+            == DEFAULT_KEYBINDINGS
+        )
+        assert (
+            AppConfig.from_dict({"keybindings": 12345}).keybindings
+            == DEFAULT_KEYBINDINGS
+        )
+
+        # 2. non-string value for an action
+        bad_val = AppConfig.from_dict({"keybindings": {"help": 123456}})
+        assert bad_val.keybindings["help"] == "f1"
+
+        # 3. unknown action in mapping is safely ignored
+        unknown = AppConfig.from_dict(
+            {"keybindings": {"unknown_action": "f1", "help": "f4"}}
+        )
+        assert "unknown_action" not in unknown.keybindings
+        assert unknown.keybindings["help"] == "f4"
+
+        # 4. conflicting keys (same key for two actions) fall back to default
+        conflict = AppConfig.from_dict(
+            {"keybindings": {"help": "f1", "settings": "f1"}}
+        )
+        assert conflict.keybindings["help"] == "f1"
+        # settings conflicts with help, so settings falls back to default f3
+        assert conflict.keybindings["settings"] == "f3"
+
+    def test_defensive_boolean_parsing(self) -> None:
+        """String boolean representations do not evaluate unsafely."""
+        assert (
+            AppConfig.from_dict({"show_timestamps": "false"}).show_timestamps is False
+        )
+        assert AppConfig.from_dict({"show_timestamps": "0"}).show_timestamps is False
+        assert AppConfig.from_dict({"show_timestamps": "no"}).show_timestamps is False
+        assert AppConfig.from_dict({"show_timestamps": "off"}).show_timestamps is False
+        assert AppConfig.from_dict({"show_timestamps": "true"}).show_timestamps is True
+        assert AppConfig.from_dict({"show_timestamps": "1"}).show_timestamps is True
+        assert AppConfig.from_dict({"debug": "yes"}).debug is True
+
+    def test_file_storage_atomic_write_guarantee(self, tmp_path: Path) -> None:
+        """Atomic write ensures files are replaced without temp artifacts."""
+        cfg_file = tmp_path / "atomic_config.json"
+        storage = FileConfigStorage(config_path=cfg_file)
+
+        config = AppConfig(nickname="AtomicNode")
+        storage.save_config(config)
+
+        assert cfg_file.exists()
+        # Verify no stray .tmp files left in the directory
+        tmp_files = list(tmp_path.glob("*.tmp*"))
+        assert len(tmp_files) == 0

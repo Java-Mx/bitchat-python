@@ -974,3 +974,200 @@ async def test_tui_settings_modal_save_and_persistence(
         sidebar = app.query_one(PeerSidebar)
         assert header.nickname == "Commander"
         assert sidebar.nickname == "Commander"
+
+
+@pytest.mark.asyncio
+async def test_phase10_keybinding_customization_and_authoritative_rebinding(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Keybinding re-assignment updates authoritative key dispatch and persists."""
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        # Initial: F1 opens help
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+        # Open settings to rebind Help to F4
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        settings_modal = app.screen
+        settings_modal.query_one("#settings-kb-help", Input).value = "f4"
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+        assert not isinstance(app.screen, SettingsModal)
+
+        # Verification: F4 now opens help; F1 no longer opens help
+        await pilot.press("f4")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("f1")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+        # Persistence verification: reload into fresh app instance
+        cfg = storage.load_config()
+        assert cfg.keybindings["help"] == "f4"
+
+    fresh_app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with fresh_app.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f4")
+        await pilot.pause()
+        assert isinstance(fresh_app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("f1")
+        await pilot.pause()
+        assert not isinstance(fresh_app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_phase10_keybinding_conflict_detection_and_validation(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Duplicate keys or empty key inputs are caught and block saving."""
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        settings_modal = app.screen
+
+        # Test duplicate key conflict: assign f2 to help (edit_theme already has f2)
+        settings_modal.query_one("#settings-kb-help", Input).value = "f2"
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        hint = settings_modal.query_one("#settings-hint", Static)
+        assert "conflict" in str(hint.render()).lower()
+
+        # Test empty key input
+        settings_modal.query_one("#settings-kb-help", Input).value = ""
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        assert "cannot be empty" in str(hint.render()).lower()
+
+        # Test restore defaults
+        await pilot.click("#btn-settings-restore-defaults")
+        await pilot.pause()
+        assert settings_modal.query_one("#settings-kb-help", Input).value == "f1"
+        assert settings_modal.query_one("#settings-kb-settings", Input).value == "f3"
+
+
+@pytest.mark.asyncio
+async def test_phase10_modal_no_duplicate_stacking_and_toggle(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Pressing active modal key toggles off; opening another modal pops previous."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        # F1 opens HelpScreen
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+
+        # F1 again toggles HelpScreen off
+        await pilot.press("f1")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+        # F2 opens EditThemeModal
+        await pilot.press("f2")
+        await pilot.pause()
+        assert isinstance(app.screen, EditThemeModal)
+
+        # Pressing F3 on EditThemeModal replaces it with SettingsModal without stacking
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        # Stack should only have root and SettingsModal (len == 2)
+        assert len(app._screen_stack) == 2
+
+        # BLE Error modal does not duplicate
+        app._on_coordinator_ble_error("BLE Hardware Disconnected")
+        await pilot.pause()
+        assert isinstance(app.screen, BLEErrorModal)
+        app._on_coordinator_ble_error("BLE Repeated Failure")
+        await pilot.pause()
+        ble_modals = [s for s in app._screen_stack if isinstance(s, BLEErrorModal)]
+        assert len(ble_modals) == 1
+
+
+@pytest.mark.asyncio
+async def test_phase10_direct_messaging_and_context_switching(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """@peer syntax handles both conversation switching and direct messaging."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        inp = app.query_one(MessageInput)
+
+        # 1. @Bob context switch
+        inp.value = "@Bob"
+        await inp.action_submit()
+        await pilot.pause()
+        assert app.active_context == "@Bob"
+        chat = app.query_one(ChatView)
+        assert any(
+            "Switched conversation context to @Bob" in m.text
+            for m in chat._message_history
+        )
+
+        # 2. @Alice hello direct message
+        test_coordinator.peer_nicknames["cafebabe12345678"] = "Alice"
+        inp.value = "@Alice How are you?"
+        await inp.action_submit()
+        await pilot.pause()
+        assert any("to Alice" in m.text for m in chat._message_history)
+
+        # 3. Return to #public
+        inp.value = "/public"
+        await inp.action_submit()
+        await pilot.pause()
+        assert app.active_context == "#public"
+
+
+@pytest.mark.asyncio
+async def test_phase10_connect_command_peer_resolution_and_discovery(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """/connect without args shows peers; with peer name resolves to address."""
+    # Add a mock discovered peer to ble_manager scanner
+    test_coordinator.ble_manager.scanner._discovered_peers["11:22:33:44:55:66"] = (
+        DiscoveredPeer(
+            address="11:22:33:44:55:66",
+            name="BitChat-Remote",
+            rssi=-65,
+        )
+    )
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        inp = app.query_one(MessageInput)
+        chat = app.query_one(ChatView)
+
+        # /connect without args lists discovered peers
+        inp.value = "/connect"
+        await inp.action_submit()
+        await pilot.pause()
+        assert any("11:22:33:44:55:66" in m.text for m in chat._message_history)
+        assert any("BitChat-Remote" in m.text for m in chat._message_history)
+
+        # /connect BitChat-Remote resolves name to address
+        inp.value = "/connect BitChat-Remote"
+        await inp.action_submit()
+        await pilot.pause()
+        assert any(
+            "Connecting to peer at 11:22:33:44:55:66 (BitChat-Remote)" in m.text
+            for m in chat._message_history
+        )

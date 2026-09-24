@@ -231,6 +231,7 @@ class CommandParser:
                 return Command(
                     command_type=CommandType.CONNECT,
                     raw_input=text,
+                    args=[],
                     error_message="Usage: /connect <peer_address_or_id>",
                 )
             return Command(

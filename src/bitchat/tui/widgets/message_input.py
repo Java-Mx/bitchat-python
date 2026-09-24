@@ -24,10 +24,6 @@ class MessageInput(Input):
         color: #e6edf3;
         padding: 0 1;
     }
-    MessageInput:focus {
-        border: round #28334e;
-        background: #121624;
-    }
     """
 
     class AutocompleteAction(Message):
@@ -103,20 +99,19 @@ class MessageInput(Input):
             event.stop()
             self.post_message(self.AutocompleteAction("accept"))
 
-        elif event.key == "f1":
-            event.prevent_default()
-            event.stop()
-            getattr(self.app, "action_show_help", lambda: None)()
-
-        elif event.key == "f2":
-            event.prevent_default()
-            event.stop()
-            getattr(self.app, "action_open_edit_theme", lambda: None)()
-
-        elif event.key == "f3":
-            event.prevent_default()
-            event.stop()
-            getattr(self.app, "action_open_settings", lambda: None)()
+        # Check unified dynamic keybinding lookup on parent application
+        get_action = getattr(self.app, "get_action_for_key", None)
+        if callable(get_action):
+            action = get_action(event.key)
+            if action:
+                event.prevent_default()
+                event.stop()
+                trigger = getattr(self.app, "trigger_action", None)
+                if callable(trigger):
+                    trigger(action)
+                else:
+                    getattr(self.app, f"action_{action}", lambda: None)()
+                return
 
     def _navigate_history_prev(self) -> None:
         """Recall older history entry."""

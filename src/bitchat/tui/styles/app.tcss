@@ -76,7 +76,7 @@ PeerSidebar {
     height: 100%;
     background: #080a0f;
     border: round #22283a;
-    border-title-align: left;
+    border-title-align: center;
     border-title-style: bold;
     border-title-color: #58a6ff;
     padding: 0;
@@ -149,7 +149,7 @@ ChatView {
     height: 1fr;
     background: #080a0f;
     border: round #22283a;
-    border-title-align: left;
+    border-title-align: center;
     border-title-style: bold;
     border-title-color: #58a6ff;
     layout: vertical;
@@ -249,8 +249,12 @@ StatusBar {
 
 #status-line-mesh {
     height: 1;
-    color: #3fb950;
+    color: #bc8cff;
     text-style: bold;
+}
+
+#status-line-mesh.status-offline {
+    color: #f85149;
 }
 
 #status-line-crypto {
@@ -287,12 +291,21 @@ StatusBar {
 
 .action-btn:hover {
     background: #1e2438;
-    color: #58a6ff;
+    color: #e6edf3;
+    border: none;
 }
 
 .action-btn:focus {
-    background: #1f6feb;
+    background: #1f283d;
     color: #ffffff;
+    text-style: bold;
+    border: none;
+}
+
+Button.-active, .action-btn.-active {
+    background: #253352;
+    color: #ffffff;
+    border: none;
 }
 
 /* ------------------------------------------------------------------------------
@@ -317,7 +330,7 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     layout: vertical;
 }
 
-#peer-info-dialog, #settings-dialog, #edit-theme-dialog {
+#peer-info-dialog, #edit-theme-dialog {
     width: 76;
     max-width: 95%;
     height: auto;
@@ -328,6 +341,18 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     border-title-style: bold;
     border-title-color: #58a6ff;
     padding: 1 2;
+}
+
+#settings-dialog {
+    width: 76;
+    max-width: 95%;
+    height: auto;
+    max-height: 90%;
+    background: #0f121c;
+    border: round #28334e;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #58a6ff;
 }
 
 #help-title, #peer-info-title, #settings-title, #edit-theme-title {
@@ -388,12 +413,41 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
 }
 
 /* Settings & Theme Forms */
-#settings-form, #edit-theme-form {
+#settings-form {
+    height: auto;
+    max-height: 24;
+    overflow-y: auto;
+    background: #080a0f;
+    border: round #22283a;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+#edit-theme-form {
     height: auto;
     background: #080a0f;
     border: round #22283a;
     padding: 1;
     margin-bottom: 1;
+}
+
+.settings-kb-row {
+    height: 3;
+    width: 100%;
+    align: left middle;
+    margin-bottom: 0;
+}
+
+.settings-kb-label {
+    width: 24;
+    color: #e6edf3;
+    padding: 0 1;
+}
+
+.settings-kb-input {
+    width: 20;
+    height: 3;
+    margin-bottom: 0;
 }
 
 .settings-field-label {
@@ -402,7 +456,7 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     margin-top: 1;
 }
 
-#settings-input-nickname, #settings-input-hops, #settings-input-delay {
+Input {
     height: 3;
     background: #0f121c;
     border: round #22283a;
@@ -410,9 +464,31 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     margin-bottom: 1;
 }
 
-#settings-input-nickname:focus, #settings-input-hops:focus, #settings-input-delay:focus {
+Input:focus {
     border: round #28334e;
     background: #121624;
+}
+
+RadioSet {
+    border: round #22283a;
+    background: #080a0f;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+RadioSet:focus {
+    border: round #28334e;
+    background: #0a0d14;
+}
+
+RadioSet > RadioButton {
+    border: none;
+    background: transparent;
+}
+
+RadioSet > RadioButton:focus {
+    border: none;
+    background: transparent;
 }
 
 #settings-hint, #edit-theme-hint {
@@ -517,13 +593,15 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
 .accent-blue ChatView {
     border-title-color: #58a6ff;
 }
-.accent-blue MessageInput:focus {
-    border: round #388bfd;
+.accent-blue MessageInput:focus, .accent-blue Input:focus, .accent-blue RadioSet:focus {
+    border: round #28334e;
     background: #121624;
 }
 .accent-blue .action-btn:focus {
-    border: solid #58a6ff;
+    background: #152238;
     color: #58a6ff;
+    text-style: bold;
+    border: none;
 }
 .accent-blue #autocomplete-option-list > .option-list--option-highlighted {
     background: #1e2438;
@@ -542,13 +620,15 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
 .accent-cyan ChatView {
     border-title-color: #39c5cf;
 }
-.accent-cyan MessageInput:focus {
-    border: round #39c5cf;
+.accent-cyan MessageInput:focus, .accent-cyan Input:focus, .accent-cyan RadioSet:focus {
+    border: round #1d3840;
     background: #0f1820;
 }
 .accent-cyan .action-btn:focus {
-    border: solid #39c5cf;
+    background: #10262e;
     color: #39c5cf;
+    text-style: bold;
+    border: none;
 }
 .accent-cyan #autocomplete-option-list > .option-list--option-highlighted {
     background: #10262e;
@@ -567,13 +647,15 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
 .accent-emerald ChatView {
     border-title-color: #56d364;
 }
-.accent-emerald MessageInput:focus {
-    border: round #56d364;
+.accent-emerald MessageInput:focus, .accent-emerald Input:focus, .accent-emerald RadioSet:focus {
+    border: round #1d3a24;
     background: #101c13;
 }
 .accent-emerald .action-btn:focus {
-    border: solid #56d364;
+    background: #13261a;
     color: #56d364;
+    text-style: bold;
+    border: none;
 }
 .accent-emerald #autocomplete-option-list > .option-list--option-highlighted {
     background: #13261a;
@@ -592,13 +674,15 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
 .accent-purple ChatView {
     border-title-color: #bc8cff;
 }
-.accent-purple MessageInput:focus {
-    border: round #bc8cff;
+.accent-purple MessageInput:focus, .accent-purple Input:focus, .accent-purple RadioSet:focus {
+    border: round #392557;
     background: #181224;
 }
 .accent-purple .action-btn:focus {
-    border: solid #bc8cff;
+    background: #271b3d;
     color: #bc8cff;
+    text-style: bold;
+    border: none;
 }
 .accent-purple #autocomplete-option-list > .option-list--option-highlighted {
     background: #271b3d;

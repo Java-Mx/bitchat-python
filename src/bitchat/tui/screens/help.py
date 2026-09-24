@@ -12,6 +12,7 @@ from textual.widgets import Button, DataTable, Label
 from bitchat.commands.parser import COMMAND_REGISTRY
 
 if TYPE_CHECKING:
+    from textual import events
     from textual.app import ComposeResult
     from textual.binding import BindingType
 
@@ -22,7 +23,25 @@ class HelpScreen(ModalScreen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "dismiss_modal", "Close", priority=True),
         Binding("q", "dismiss_modal", "Close", priority=True),
+        Binding("f1", "dismiss_modal", "Close", priority=True),
     ]
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle global function keys inside modal to toggle or switch."""
+        get_action = getattr(self.app, "get_action_for_key", None)
+        if callable(get_action):
+            action = get_action(event.key)
+            if action == "help":
+                event.prevent_default()
+                event.stop()
+                self.dismiss()
+            elif action in ("edit_theme", "settings"):
+                event.prevent_default()
+                event.stop()
+                self.dismiss()
+                trigger = getattr(self.app, "trigger_action", None)
+                if callable(trigger):
+                    trigger(action)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="help-dialog"):

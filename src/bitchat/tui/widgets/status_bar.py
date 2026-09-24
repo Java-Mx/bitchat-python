@@ -62,7 +62,10 @@ class StatusBar(Widget):
     def compose(self) -> ComposeResult:
         with Horizontal(id="status-container"):
             with Vertical(id="status-telemetry-col"):
-                yield Label(self.mesh_status, id="status-line-mesh")
+                mesh_lbl = Label(self.mesh_status, id="status-line-mesh")
+                if "Offline" in self.mesh_status or "Error" in self.mesh_status:
+                    mesh_lbl.add_class("status-offline")
+                yield mesh_lbl
                 yield Label(self.security_status, id="status-line-crypto")
                 yield Label(self.target_status, id="status-line-target")
 
@@ -93,7 +96,12 @@ class StatusBar(Widget):
 
     def watch_mesh_status(self, new_val: str) -> None:
         with contextlib.suppress(Exception):
-            self.query_one("#status-line-mesh", Label).update(new_val)
+            lbl = self.query_one("#status-line-mesh", Label)
+            lbl.update(new_val)
+            if "Offline" in new_val or "Error" in new_val:
+                lbl.add_class("status-offline")
+            else:
+                lbl.remove_class("status-offline")
 
     def watch_security_status(self, new_val: str) -> None:
         with contextlib.suppress(Exception):

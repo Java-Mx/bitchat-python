@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, RadioButton, RadioSet, Static
 
 if TYPE_CHECKING:
+    from textual import events
     from textual.app import ComposeResult
     from textual.binding import BindingType
 
@@ -18,8 +20,26 @@ class EditThemeModal(ModalScreen[None]):
     """Modal screen for editing appearance, density, and accent options."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        ("escape", "dismiss_modal", "Close"),
+        Binding("escape", "dismiss_modal", "Close", priority=True),
+        Binding("f2", "dismiss_modal", "Close", priority=True),
     ]
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle global function keys inside modal to toggle or switch."""
+        get_action = getattr(self.app, "get_action_for_key", None)
+        if callable(get_action):
+            action = get_action(event.key)
+            if action == "edit_theme":
+                event.prevent_default()
+                event.stop()
+                self.dismiss()
+            elif action in ("help", "settings"):
+                event.prevent_default()
+                event.stop()
+                self.dismiss()
+                trigger = getattr(self.app, "trigger_action", None)
+                if callable(trigger):
+                    trigger(action)
 
     class ThemeApplied(Message):
         """Emitted when user applies appearance changes."""
