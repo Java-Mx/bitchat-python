@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual.app import App, ComposeResult
@@ -31,9 +32,12 @@ from bitchat.tui.widgets.sidebar import PeerSidebar
 from bitchat.tui.widgets.status_bar import StatusBar
 
 if TYPE_CHECKING:
+    from textual import events
     from textual.widgets import Input
 
     from bitchat.app.session_coordinator import SessionCoordinator
+
+logger = logging.getLogger(__name__)
 
 
 class BitChatApp(App[None]):
@@ -122,7 +126,15 @@ class BitChatApp(App[None]):
         """Spawn background task and keep reference until completed."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+
+        def _task_done(t: asyncio.Task[Any]) -> None:
+            self._background_tasks.discard(t)
+            if not t.cancelled():
+                exc = t.exception()
+                if exc is not None:
+                    logger.debug("Background task error: %s", exc)
+
+        task.add_done_callback(_task_done)
         return task
 
     def apply_keybindings(self, keymap: dict[str, str]) -> None:
@@ -168,6 +180,14 @@ class BitChatApp(App[None]):
             case "scroll_down":
                 self.action_scroll_chat_down()
 
+    def on_key(self, event: events.Key) -> None:
+        """Global key event interceptor guaranteeing dynamic binding execution."""
+        action = self.get_action_for_key(event.key)
+        if action:
+            event.prevent_default()
+            event.stop()
+            self.trigger_action(action)
+
     def compose(self) -> ComposeResult:
         nick = self.coordinator.nickname if self.coordinator else self.config.nickname
         pid = self.coordinator.local_identity.peer_id_hex if self.coordinator else ""
@@ -203,8 +223,21 @@ class BitChatApp(App[None]):
             "/help for help."
         )
 
-        if self.coordinator:
-            self._spawn_task(self.coordinator.start())
+        if self.coordinator is not None:
+            coord = self.coordinator
+
+            async def _start_coordinator() -> None:
+                try:
+                    await coord.start()
+                except Exception as e:
+                    logger.warning("Coordinator start error: %s", e)
+                    if hasattr(coord, "ble_status"):
+                        coord.ble_status = "unavailable"
+                    self._on_coordinator_ble_error(str(e))
+                finally:
+                    self._refresh_peer_lists()
+
+            self._spawn_task(_start_coordinator())
             self._refresh_peer_lists()
 
     def _refresh_peer_lists(self) -> None:
@@ -235,10 +268,12 @@ class BitChatApp(App[None]):
             status_bar.mesh_status = (
                 f"● Connected ({len(connected_addrs)} peers) • Local Mesh"
             )
-        elif self.coordinator.ble_status == "scanning":
-            status_bar.mesh_status = "◌ Mesh Initializing"
+        elif self.coordinator.ble_status in ("active", "scanning"):
+            status_bar.mesh_status = "● BitChat Ready • Local Mesh"
         elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
-            status_bar.mesh_status = "✕ BLE Offline"
+            status_bar.mesh_status = "✕ BLE Offline • Bluetooth Unavailable"
+        elif self.coordinator.ble_status == "offline":
+            status_bar.mesh_status = "◌ Initializing Mesh..."
         else:
             status_bar.mesh_status = "● BitChat Ready • Local Mesh"
 
@@ -276,6 +311,11 @@ class BitChatApp(App[None]):
         def _do_error() -> None:
             chat = self.query_one(ChatView)
             chat.add_error_message(f"Bluetooth Error: {err_msg}")
+            chat.add_system_message(
+                "Bluetooth hardware is unavailable or disabled. "
+                "Please enable Bluetooth in settings and "
+                "click 'Retry Adapter' or type /scan."
+            )
             self._refresh_peer_lists()
             if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
                 self.push_screen(BLEErrorModal(error_message=err_msg))
@@ -291,34 +331,51 @@ class BitChatApp(App[None]):
 
         clean_target = target.strip().lstrip("@")
         clean_lower = clean_target.lower()
+        unpunctuated = clean_lower.replace(":", "").replace("-", "")
 
         # 1. Exact match in discovered peers
         if clean_target in self.coordinator.ble_manager.discovered_peers:
             return clean_target
 
-        # 2. Match known peer IDs
+        # 2. Match unpunctuated MAC in discovered peers
+        for addr in self.coordinator.ble_manager.discovered_peers:
+            if addr.replace(":", "").replace("-", "").lower() == unpunctuated:
+                return addr
+
+        # 3. Match known peer IDs
         for pid, addr in self.coordinator.peer_addresses.items():
             if pid.lower().startswith(clean_lower):
                 return addr
 
-        # 3. Match known nicknames
+        # 4. Match known nicknames
         for pid, nick in self.coordinator.peer_nicknames.items():
             if nick.lower() == clean_lower and pid in self.coordinator.peer_addresses:
                 return self.coordinator.peer_addresses[pid]
 
-        # 4. Match discovered peer name or address prefix
+        # 5. Match discovered peer name or address prefix
         for addr, peer in self.coordinator.ble_manager.discovered_peers.items():
             if peer.name and peer.name.lower() == clean_lower:
                 return addr
-            if addr.lower().startswith(clean_lower) or clean_lower in addr.lower():
+            clean_addr = addr.replace(":", "").replace("-", "").lower()
+            if (
+                addr.lower().startswith(clean_lower)
+                or clean_lower in addr.lower()
+                or clean_addr.startswith(clean_lower)
+            ):
                 return addr
             if peer.name and clean_lower in peer.name.lower():
                 return addr
 
-        # 5. Reverse lookup in address_to_peer_id
+        # 6. Reverse lookup in address_to_peer_id
         for addr, pid in self.coordinator.address_to_peer_id.items():
             if pid.lower().startswith(clean_lower):
                 return addr
+
+        # 7. Format 12-char hex string into standard colon-separated MAC address
+        if len(unpunctuated) == 12 and all(
+            c in "0123456789abcdef" for c in unpunctuated
+        ):
+            return ":".join(unpunctuated[i : i + 2] for i in range(0, 12, 2))
 
         return None
 
@@ -769,39 +826,99 @@ class BitChatApp(App[None]):
                     f" ({target})" if resolved_addr and resolved_addr != target else ""
                 )
                 chat.add_system_message(f"Connecting to peer at {target_addr}{desc}...")
-                if self.coordinator:
-                    self._spawn_task(
-                        self.coordinator.ble_manager.connect_peer(target_addr)
-                    )
+                if self.coordinator is not None:
+                    coord = self.coordinator
+
+                    async def _perform_connect(addr: str, description: str) -> None:
+                        try:
+                            await coord.ble_manager.connect_peer(addr, timeout=10.0)
+                            chat.add_system_message(
+                                f"Connected to peer at {addr}{description}."
+                            )
+                            self._refresh_peer_lists()
+                        except Exception as e:
+                            chat.add_error_message(
+                                f"Connection failed for {addr}{description}: {e}"
+                            )
+                            self._refresh_peer_lists()
+
+                    self._spawn_task(_perform_connect(target_addr, desc))
 
             case CommandType.DISCONNECT:
-                if not self.coordinator:
+                if self.coordinator is None:
                     return
+                coord = self.coordinator
                 if cmd.args:
                     target = cmd.args[0]
-                    chat.add_system_message(f"Disconnecting from {target}...")
-                    self._spawn_task(
-                        self.coordinator.ble_manager.disconnect_peer(target)
-                    )
+                    resolved_addr = self._resolve_peer_address(target) or target
+                    chat.add_system_message(f"Disconnecting from {resolved_addr}...")
+
+                    async def _perform_disconnect(addr: str) -> None:
+                        try:
+                            await coord.ble_manager.disconnect_peer(addr)
+                            chat.add_system_message(f"Disconnected from {addr}.")
+                            self._refresh_peer_lists()
+                        except Exception as e:
+                            chat.add_error_message(f"Disconnect failed for {addr}: {e}")
+                            self._refresh_peer_lists()
+
+                    self._spawn_task(_perform_disconnect(resolved_addr))
                 else:
                     chat.add_system_message("Disconnecting all peers...")
-                    self._spawn_task(self.coordinator.ble_manager.shutdown())
+
+                    async def _perform_disconnect_all() -> None:
+                        try:
+                            await coord.ble_manager.shutdown()
+                            chat.add_system_message("All peers disconnected.")
+                            self._refresh_peer_lists()
+                        except Exception as e:
+                            chat.add_error_message(f"Error during disconnect: {e}")
+                            self._refresh_peer_lists()
+
+                    self._spawn_task(_perform_disconnect_all())
 
             case CommandType.SCAN:
                 chat.add_system_message("Starting BLE discovery scan...")
-                if self.coordinator:
-                    self._spawn_task(self.coordinator.ble_manager.start_discovery())
+                if self.coordinator is not None:
+                    coord = self.coordinator
+
+                    async def _perform_scan() -> None:
+                        try:
+                            await coord.ble_manager.start_discovery()
+                            self._refresh_peer_lists()
+                        except Exception as e:
+                            chat.add_error_message(f"Scan failed: {e}")
+                            self._refresh_peer_lists()
+
+                    self._spawn_task(_perform_scan())
 
             case CommandType.ONLINE:
                 if not self.coordinator:
+                    chat.add_system_message("BLE coordinator offline.")
                     return
                 connected = self.coordinator.ble_manager.connected_peers
+                discovered = self.coordinator.ble_manager.discovered_peers
                 chat.add_system_message(f"Connected peers ({len(connected)}):")
-                for addr in connected:
-                    pid = self.coordinator.address_to_peer_id.get(addr, "unknown")
-                    nick = self.coordinator.peer_nicknames.get(pid, "unknown")
+                if connected:
+                    for addr in connected:
+                        pid = self.coordinator.address_to_peer_id.get(addr, "unknown")
+                        nick = self.coordinator.peer_nicknames.get(pid, "unknown")
+                        chat.add_system_message(
+                            f"  • {addr} (Peer: {pid[:8]}, Nick: {nick})"
+                        )
+                else:
+                    chat.add_system_message("  (No peers currently connected)")
+
+                chat.add_system_message(f"Discovered nearby peers ({len(discovered)}):")
+                if discovered:
+                    for addr, peer in discovered.items():
+                        name = peer.name or "Unknown"
+                        chat.add_system_message(
+                            f"  • {addr} — {name} ({peer.rssi} dBm)"
+                        )
+                else:
                     chat.add_system_message(
-                        f"  • {addr} (Peer: {pid[:8]}, Nick: {nick})"
+                        "  (No nearby nodes found; type /scan to discover)"
                     )
 
             case CommandType.NAME:
@@ -1017,6 +1134,10 @@ class BitChatApp(App[None]):
         msg_input.value = "/"
         msg_input.focus()
         msg_input.cursor_position = 1
+        palette = self.query_one(AutocompletePalette)
+        suggestions = get_command_suggestions("/")
+        items = [(s.name, s.description) for s in suggestions]
+        palette.show_suggestions(items, title="Commands")
 
     def action_scroll_chat_up(self) -> None:
         """Action handler to scroll chat view up one page."""

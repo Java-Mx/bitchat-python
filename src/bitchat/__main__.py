@@ -52,7 +52,7 @@ def main() -> None:
             nickname=config.nickname,
         )
 
-        tui_app = BitChatApp(coordinator=coordinator)
+        tui_app = BitChatApp(coordinator=coordinator, storage=storage)
         tui_app.run()
         sys.exit(0)
 

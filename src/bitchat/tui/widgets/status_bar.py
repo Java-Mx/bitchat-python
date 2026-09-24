@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class StatusBar(Widget):
     """Interactive bottom action bar providing click shortcuts and live telemetry."""
 
-    mesh_status: reactive[str] = reactive("● BitChat Ready • Local Mesh")
+    mesh_status: reactive[str] = reactive("◌ Initializing Mesh...")
     security_status: reactive[str] = reactive("Noise XX • Forward Secrecy")
     target_status: reactive[str] = reactive("Target: #public")
 
@@ -63,7 +63,10 @@ class StatusBar(Widget):
         with Horizontal(id="status-container"):
             with Vertical(id="status-telemetry-col"):
                 mesh_lbl = Label(self.mesh_status, id="status-line-mesh")
-                if "Offline" in self.mesh_status or "Error" in self.mesh_status:
+                if any(
+                    w in self.mesh_status
+                    for w in ("Offline", "Unavailable", "Error", "Disabled")
+                ):
                     mesh_lbl.add_class("status-offline")
                 yield mesh_lbl
                 yield Label(self.security_status, id="status-line-crypto")
@@ -98,7 +101,9 @@ class StatusBar(Widget):
         with contextlib.suppress(Exception):
             lbl = self.query_one("#status-line-mesh", Label)
             lbl.update(new_val)
-            if "Offline" in new_val or "Error" in new_val:
+            if any(
+                w in new_val for w in ("Offline", "Unavailable", "Error", "Disabled")
+            ):
                 lbl.add_class("status-offline")
             else:
                 lbl.remove_class("status-offline")
