@@ -109,13 +109,81 @@ class SessionCoordinator:
             self._sessions[remote_peer_id_hex] = session
         return session
 
+    def get_detailed_status(self) -> dict[str, Any]:
+        """Return truthful telemetry dictionary for diagnostics."""
+        adapter = self.ble_manager.adapter_manager.current_info
+        connected_peers = self.ble_manager.connected_peers
+        discovered_peers = self.ble_manager.discovered_peers
+        server_telem = self.ble_server.get_telemetry()
+
+        if adapter.is_enabled:
+            adapter_state_str = "On"
+        elif adapter.radio_state in ("off", "disabled"):
+            adapter_state_str = "Off"
+        else:
+            adapter_state_str = "Unavailable"
+
+        return {
+            "adapter_available": adapter.is_available,
+            "adapter_state": adapter_state_str,
+            "radio_state": adapter.radio_state,
+            "gatt_server_status": "Advertising"
+            if server_telem.get("is_advertising")
+            else "Stopped",
+            "scanner_status": "Active"
+            if self.ble_manager.scanner.is_scanning
+            else "Stopped",
+            "discovered_peers_count": len(discovered_peers),
+            "connected_peers_count": len(connected_peers),
+            "connected_peers": connected_peers,
+            "discovered_peers": discovered_peers,
+            "local_nickname": self.nickname,
+            "local_peer_id": self.local_identity.peer_id_hex,
+            "local_fingerprint": self.local_identity.fingerprint,
+        }
+
+    def resolve_peer_address(self, target: str) -> str | None:
+        """Resolve nickname, peer ID prefix, or device to a BLE address."""
+        clean = target.strip().lstrip("@").lower()
+
+        # 1. Exact or prefix match in peer_addresses
+        for pid, addr in self.peer_addresses.items():
+            if pid.lower() == clean or pid.lower().startswith(clean):
+                return addr
+
+        # 2. Nickname match
+        for pid, nick in self.peer_nicknames.items():
+            if nick.lower() == clean and pid in self.peer_addresses:
+                return self.peer_addresses[pid]
+
+        # 3. Discovered peer lookup
+        for addr, peer in self.ble_manager.discovered_peers.items():
+            if peer.peer_id and (
+                peer.peer_id.lower() == clean or peer.peer_id.lower().startswith(clean)
+            ):
+                return addr
+            if peer.name and (peer.name.lower() == clean or clean in peer.name.lower()):
+                return addr
+            clean_addr = addr.lower().replace(":", "").replace("-", "")
+            if addr.lower() == clean or clean_addr == clean.replace(":", "").replace(
+                "-", ""
+            ):
+                return addr
+
+        # 4. Reverse lookup in address_to_peer_id
+        for addr, pid in self.address_to_peer_id.items():
+            if pid.lower() == clean or pid.lower().startswith(clean):
+                return addr
+
+        return None
+
     async def start(self) -> None:
         """Initialize BLE server, callbacks, and start peer discovery."""
         if self._is_running:
             return
 
         self._is_running = True
-        self.ble_status = "active"
+        self.ble_status = "checking"
         self.ble_error_message = None
 
         # Hook server callbacks
@@ -126,8 +194,40 @@ class SessionCoordinator:
         self.ble_manager.on_peer_discovered = self._handle_peer_discovered
         self.ble_manager.on_peer_connected = self._handle_peer_connected
         self.ble_manager.on_peer_disconnected = self._handle_peer_disconnected
+        self.ble_manager.on_adapter_state_changed = self._handle_adapter_state_changed
 
-        # Start server and discovery
+        # Update server advertised identity
+        self.ble_server.update_identity(self.local_identity.peer_id_hex, self.nickname)
+
+        # 1. Check adapter existence and power state (bypass if mock backend present)
+        is_mock = getattr(self.ble_server, "_custom_backend", None) is not None
+        if not is_mock:
+            adapter_info = await self.ble_manager.adapter_manager.check_adapter()
+            if not adapter_info.is_available:
+                self.ble_status = "unavailable"
+                self.ble_error_message = "Bluetooth hardware adapter is not detected."
+                if self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
+                return
+
+            if not adapter_info.is_enabled:
+                self.ble_status = "disabled"
+                self.ble_error_message = (
+                    "Bluetooth radio is turned off. "
+                    "Please enable Bluetooth in system settings."
+                )
+                if self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
+                await self.ble_manager.adapter_manager.start_monitoring(
+                    self._handle_adapter_state_changed
+                )
+                return
+
+            await self.ble_manager.adapter_manager.start_monitoring(
+                self._handle_adapter_state_changed
+            )
+
+        # 2. Start GATT server
         try:
             await self.ble_server.start()
         except Exception as e:
@@ -136,31 +236,77 @@ class SessionCoordinator:
             self.ble_error_message = f"GATT server failed: {e}"
             if self.on_ble_error:
                 self.on_ble_error(self.ble_error_message)
+            return
 
+        # 3. Start discovery scanner
         try:
             await self.ble_manager.start_discovery()
-            if self.ble_status == "active":
-                self.ble_status = "scanning"
+            self.ble_status = "scanning"
         except Exception as e:
             logger.warning("Could not start BLE discovery: %s", e)
             self.ble_status = "unavailable"
             self.ble_error_message = f"Bluetooth scan failed: {e}"
             if self.on_ble_error:
                 self.on_ble_error(self.ble_error_message)
+            return
 
-        # Broadcast announce if BLE is active
-        if self.ble_status in ("active", "scanning"):
-            await self.send_announce()
+        # 4. Broadcast initial presence announcement
+        await self.send_announce()
+
+    def _handle_adapter_state_changed(self, info: Any) -> None:
+        """Handle hardware Bluetooth adapter state changes (ON -> OFF -> ON)."""
+        logger.info(
+            "Coordinator observed adapter change: %s (enabled=%s)",
+            getattr(info, "radio_state", "unknown"),
+            getattr(info, "is_enabled", False),
+        )
+        if not getattr(info, "is_enabled", False):
+            radio_st = getattr(info, "radio_state", "unknown")
+            self.ble_status = (
+                "disabled" if radio_st in ("off", "disabled") else "unavailable"
+            )
+            self.ble_error_message = f"Bluetooth adapter is {radio_st}."
+            if self.on_ble_error:
+                self.on_ble_error(self.ble_error_message)
+            if self.on_peer_status_changed:
+                self.on_peer_status_changed("mesh", "offline")
+        else:
+            logger.info("Bluetooth adapter re-enabled, initiating recovery...")
+            self._spawn_task(self._handle_adapter_recovery())
+
+    async def _handle_adapter_recovery(self) -> None:
+        """Recover BLE services after Bluetooth is turned back ON."""
+        logger.info("Attempting automatic BLE recovery...")
+        await self.retry_ble()
 
     async def retry_ble(self) -> bool:
-        """Attempt to re-initialize BLE services after a failure."""
-        self.ble_status = "scanning"
+        """Attempt to re-initialize BLE services after a failure or radio recovery."""
+        self.ble_status = "checking"
         self.ble_error_message = None
+
+        is_mock = getattr(self.ble_server, "_custom_backend", None) is not None
+        if not is_mock:
+            adapter_info = await self.ble_manager.adapter_manager.check_adapter()
+            if not adapter_info.is_available:
+                self.ble_status = "unavailable"
+                self.ble_error_message = "Bluetooth hardware adapter is not detected."
+                if self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
+                return False
+
+            if not adapter_info.is_enabled:
+                self.ble_status = "disabled"
+                self.ble_error_message = "Bluetooth radio is turned off."
+                if self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
+                return False
+
         try:
             await self.ble_server.start()
             await self.ble_manager.start_discovery()
             self.ble_status = "scanning"
             await self.send_announce()
+            logger.info("BLE services successfully recovered and active")
             return True
         except Exception as e:
             logger.warning("Retry BLE failed: %s", e)
@@ -191,6 +337,7 @@ class SessionCoordinator:
     def set_nickname(self, nickname: str) -> None:
         """Update local nickname."""
         self.nickname = nickname
+        self.ble_server.update_identity(self.local_identity.peer_id_hex, self.nickname)
 
     async def send_announce(self, nickname: str | None = None) -> None:
         """Broadcast an Announce packet to notify peers of our presence."""
@@ -544,6 +691,13 @@ class SessionCoordinator:
 
     def _handle_peer_discovered(self, peer: DiscoveredPeer) -> None:
         """Callback when scanner detects a BitChat BLE peer."""
+        if peer.peer_id:
+            clean_pid = peer.peer_id.lower()
+            self.peer_addresses[clean_pid] = peer.address
+            self.address_to_peer_id[peer.address] = clean_pid
+            if peer.nickname:
+                self.peer_nicknames[clean_pid] = peer.nickname
+
         if self.on_peer_status_changed:
             name = peer.name or "Unknown"
             self.on_peer_status_changed(

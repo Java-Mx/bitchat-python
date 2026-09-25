@@ -141,7 +141,12 @@ class PeerSidebar(Widget):
                     )
                     view.append(item)
 
-    def set_discovered_peers(self, peers: dict[str, DiscoveredPeer]) -> None:
+    def set_discovered_peers(
+        self,
+        peers: dict[str, DiscoveredPeer],
+        is_scanning: bool = True,
+        is_offline: bool = False,
+    ) -> None:
         """Update discovered peers list."""
         self._discovered_peers = {
             addr: f"{p.name or 'Unknown'} ({p.rssi} dBm)" for addr, p in peers.items()
@@ -149,16 +154,33 @@ class PeerSidebar(Widget):
         with contextlib.suppress(Exception):
             view = self.query_one("#discovered-peers-list", ListView)
             view.clear()
-            if not self._discovered_peers:
-                view.append(ListItem(Label("[dim]Scanning for nodes...[/dim]")))
+            if is_offline:
+                view.append(ListItem(Label("[dim red]Bluetooth Unavailable[/dim red]")))
+            elif not self._discovered_peers:
+                if is_scanning:
+                    view.append(
+                        ListItem(Label("[dim]Scanning for BitChat peers...[/dim]"))
+                    )
+                else:
+                    view.append(
+                        ListItem(Label("[dim]No BitChat peers discovered[/dim]"))
+                    )
             else:
                 for addr, p in peers.items():
-                    name = p.name or "BitChat Node"
+                    name = p.name or (
+                        f"Peer {p.peer_id[:8]}" if p.peer_id else "BitChat Node"
+                    )
                     color = get_peer_color(name)
                     rssi_str = f"{p.rssi} dBm" if p.rssi is not None else "Nearby"
+                    id_line = (
+                        f"  [dim #8b949e]ID: {p.peer_id[:12]}[/dim #8b949e]\n"
+                        if p.peer_id
+                        else ""
+                    )
                     item = PeerListItem(
                         Label(
                             f"[{color}]○ {name}[/{color}]\n"
+                            f"{id_line}"
                             f"  [dim #8b949e]{rssi_str} • {addr}[/dim #8b949e]"
                         ),
                         peer_address=addr,

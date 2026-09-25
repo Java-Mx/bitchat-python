@@ -29,6 +29,8 @@ class MockAdvertisementData:
         default_factory=lambda: [BITCHAT_SERVICE_UUID.lower()]
     )
     rssi: int = -55
+    service_data: dict[str, bytes] = field(default_factory=dict)
+    manufacturer_data: dict[int, bytes] = field(default_factory=dict)
 
 
 @dataclass

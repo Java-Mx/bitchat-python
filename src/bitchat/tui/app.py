@@ -261,7 +261,17 @@ class BitChatApp(App[None]):
             conn_display[addr] = f"{nick} {sec_tag} ({addr})"
 
         sidebar.set_connected_peers(conn_display)
-        sidebar.set_discovered_peers(self.coordinator.ble_manager.discovered_peers)
+        is_sc = self.coordinator.ble_manager.scanner.is_scanning
+        is_off = self.coordinator.ble_status in (
+            "unavailable",
+            "disabled",
+            "offline",
+        )
+        sidebar.set_discovered_peers(
+            self.coordinator.ble_manager.discovered_peers,
+            is_scanning=is_sc,
+            is_offline=is_off,
+        )
 
         # Truthful Bluetooth state reporting
         if connected_addrs:
@@ -272,7 +282,7 @@ class BitChatApp(App[None]):
             status_bar.mesh_status = "● BitChat Ready • Local Mesh"
         elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
             status_bar.mesh_status = "✕ BLE Offline • Bluetooth Unavailable"
-        elif self.coordinator.ble_status == "offline":
+        elif self.coordinator.ble_status in ("offline", "checking"):
             status_bar.mesh_status = "◌ Initializing Mesh..."
         else:
             status_bar.mesh_status = "● BitChat Ready • Local Mesh"
@@ -323,7 +333,7 @@ class BitChatApp(App[None]):
         self._dispatch_ui(_do_error)
 
     def _resolve_peer_address(self, target: str) -> str | None:
-        """Resolve a nickname, peer ID prefix, or BLE address
+        """Resolve a nickname, peer ID prefix, or discovered device
         to a concrete BLE address.
         """
         if not self.coordinator:
@@ -331,52 +341,23 @@ class BitChatApp(App[None]):
 
         clean_target = target.strip().lstrip("@")
         clean_lower = clean_target.lower()
-        unpunctuated = clean_lower.replace(":", "").replace("-", "")
 
-        # 1. Exact match in discovered peers
+        # 1. Ask coordinator to resolve through known addresses and discovered peers
+        resolved = self.coordinator.resolve_peer_address(clean_target)
+        if resolved:
+            return resolved
+
+        # 2. Match exact address in discovered peers
         if clean_target in self.coordinator.ble_manager.discovered_peers:
             return clean_target
 
-        # 2. Match unpunctuated MAC in discovered peers
+        # 3. Match unpunctuated MAC ONLY if it exists in discovered peers
+        unpunctuated = clean_lower.replace(":", "").replace("-", "")
         for addr in self.coordinator.ble_manager.discovered_peers:
             if addr.replace(":", "").replace("-", "").lower() == unpunctuated:
                 return addr
 
-        # 3. Match known peer IDs
-        for pid, addr in self.coordinator.peer_addresses.items():
-            if pid.lower().startswith(clean_lower):
-                return addr
-
-        # 4. Match known nicknames
-        for pid, nick in self.coordinator.peer_nicknames.items():
-            if nick.lower() == clean_lower and pid in self.coordinator.peer_addresses:
-                return self.coordinator.peer_addresses[pid]
-
-        # 5. Match discovered peer name or address prefix
-        for addr, peer in self.coordinator.ble_manager.discovered_peers.items():
-            if peer.name and peer.name.lower() == clean_lower:
-                return addr
-            clean_addr = addr.replace(":", "").replace("-", "").lower()
-            if (
-                addr.lower().startswith(clean_lower)
-                or clean_lower in addr.lower()
-                or clean_addr.startswith(clean_lower)
-            ):
-                return addr
-            if peer.name and clean_lower in peer.name.lower():
-                return addr
-
-        # 6. Reverse lookup in address_to_peer_id
-        for addr, pid in self.coordinator.address_to_peer_id.items():
-            if pid.lower().startswith(clean_lower):
-                return addr
-
-        # 7. Format 12-char hex string into standard colon-separated MAC address
-        if len(unpunctuated) == 12 and all(
-            c in "0123456789abcdef" for c in unpunctuated
-        ):
-            return ":".join(unpunctuated[i : i + 2] for i in range(0, 12, 2))
-
+        # DO NOT blindly fabricate a MAC address from a raw peer ID!
         return None
 
     def _on_coordinator_message(
@@ -821,10 +802,15 @@ class BitChatApp(App[None]):
 
                 target = cmd.args[0]
                 resolved_addr = self._resolve_peer_address(target)
-                target_addr = resolved_addr or target
-                desc = (
-                    f" ({target})" if resolved_addr and resolved_addr != target else ""
-                )
+                if not resolved_addr:
+                    chat.add_error_message(
+                        f"Peer '{target}' not discovered. "
+                        "Run /scan or wait for discovery."
+                    )
+                    return
+
+                target_addr = resolved_addr
+                desc = f" ({target})" if resolved_addr != target else ""
                 chat.add_system_message(f"Connecting to peer at {target_addr}{desc}...")
                 if self.coordinator is not None:
                     coord = self.coordinator
@@ -1033,29 +1019,30 @@ class BitChatApp(App[None]):
     def _display_status_diagnostics(self, chat: ChatView) -> None:
         """Display operational diagnostics in chat."""
         if not self.coordinator:
-            chat.add_system_message(
-                "BitChat Diagnostics: Coordinator not attached (offline)."
-            )
+            chat.add_system_message("BitChat Status")
+            chat.add_system_message("Bluetooth Adapter: Unavailable")
+            chat.add_system_message("Bluetooth State:   Off")
+            chat.add_system_message("GATT Server:       Stopped")
+            chat.add_system_message("Scanner:           Stopped")
             return
 
-        ble_stat = self.coordinator.ble_status.upper()
-        conn_count = len(self.coordinator.ble_manager.connected_peers)
-        disc_count = len(self.coordinator.ble_manager.discovered_peers)
-        nick = self.coordinator.nickname
-        pid = self.coordinator.local_identity.peer_id_hex[:16]
-        fp = self.coordinator.local_identity.fingerprint[:16]
-
-        chat.add_system_message("══════════ BitChat Operational Status ══════════")
-        chat.add_system_message(f"Local Node:   {nick} [ID: {pid}... FP: {fp}...]")
+        status = self.coordinator.get_detailed_status()
+        chat.add_system_message("══════════ BitChat Status ══════════")
+        ad_stat = "Available" if status["adapter_available"] else "Unavailable"
+        chat.add_system_message(f"Bluetooth Adapter: {ad_stat}")
+        chat.add_system_message(f"Bluetooth State:   {status['adapter_state']}")
+        chat.add_system_message(f"GATT Server:       {status['gatt_server_status']}")
+        chat.add_system_message(f"Scanner:           {status['scanner_status']}")
         chat.add_system_message(
-            f"BLE Adapter:  {ble_stat}  │  Active Context: {self.active_context}"
+            f"Discovered Peers:  {status['discovered_peers_count']}"
         )
+        chat.add_system_message(f"Connected Peers:   {status['connected_peers_count']}")
         chat.add_system_message(
-            f"Connections:  {conn_count} connected  │  {disc_count} discovered nearby"
+            f"Local Node:        {status['local_nickname']} "
+            f"(ID: {status['local_peer_id'][:12]})"
         )
-        max_hops = getattr(self.coordinator.mesh_router, "max_relay_ttl", 3)
-        chat.add_system_message(f"Mesh Relay:   Active (Max {max_hops} hops)")
-        chat.add_system_message("════════════════════════════════════════════════")
+        chat.add_system_message(f"Active Context:    {self.active_context}")
+        chat.add_system_message("════════════════════════════════════")
 
     def action_clear_log(self) -> None:
         """Action handler to clear the log."""

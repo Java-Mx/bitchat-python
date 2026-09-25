@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import uuid
@@ -31,6 +32,8 @@ class BLEServer:
         on_client_subscribed: Callable[[str], None] | None = None,
         on_client_unsubscribed: Callable[[str], None] | None = None,
         backend: Any | None = None,
+        peer_id: str = "",
+        nickname: str = "",
     ) -> None:
         self.service_uuid = service_uuid.lower()
         self.characteristic_uuid = characteristic_uuid.lower()
@@ -38,10 +41,13 @@ class BLEServer:
         self.on_client_subscribed = on_client_subscribed
         self.on_client_unsubscribed = on_client_unsubscribed
         self._custom_backend = backend
+        self.peer_id = peer_id
+        self.nickname = nickname
 
         self._is_advertising: bool = False
         self._provider: Any | None = None
         self._characteristic: Any | None = None
+        self._publisher: Any | None = None
         self._lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -49,6 +55,22 @@ class BLEServer:
     def is_advertising(self) -> bool:
         """Return True if the server is currently advertising."""
         return self._is_advertising
+
+    def update_identity(self, peer_id: str, nickname: str) -> None:
+        """Update identity advertised in BLE packets."""
+        self.peer_id = peer_id
+        self.nickname = nickname
+
+    def get_telemetry(self) -> dict[str, Any]:
+        """Return truthful telemetry about GATT server state."""
+        return {
+            "server_active": self._is_advertising,
+            "is_advertising": self._is_advertising,
+            "service_uuid": self.service_uuid,
+            "characteristic_uuid": self.characteristic_uuid,
+            "has_provider": self._provider is not None,
+            "has_publisher": self._publisher is not None,
+        }
 
     async def start(self) -> None:
         """Start the GATT server and advertise the BitChat service."""
@@ -85,13 +107,17 @@ class BLEServer:
                 logger.info("BLEServer stopped using custom/mock backend")
                 return
 
-            if os.name == "nt" and self._provider is not None:
-                try:
-                    self._provider.stop_advertising()
-                except Exception as e:
-                    logger.debug("Error stopping WinRT advertisement: %s", e)
-                self._provider = None
-                self._characteristic = None
+            if os.name == "nt":
+                if self._publisher is not None:
+                    with contextlib.suppress(Exception):
+                        self._publisher.stop()
+                    self._publisher = None
+
+                if self._provider is not None:
+                    with contextlib.suppress(Exception):
+                        self._provider.stop_advertising()
+                    self._provider = None
+                    self._characteristic = None
 
             self._is_advertising = False
             logger.info("BLEServer stopped")
@@ -121,7 +147,9 @@ class BLEServer:
     async def _start_windows_server(self) -> None:
         """Initialize Windows WinRT GATT provider and characteristic."""
         try:
+            import winrt.windows.devices.bluetooth.advertisement as adv
             import winrt.windows.devices.bluetooth.genericattributeprofile as gatt
+            from winrt.windows.storage.streams import DataWriter
 
             srv_uuid = uuid.UUID(self.service_uuid)
             res = await gatt.GattServiceProvider.create_async(srv_uuid)
@@ -135,6 +163,7 @@ class BLEServer:
             char_params = gatt.GattLocalCharacteristicParameters()
             char_params.characteristic_properties = (
                 gatt.GattCharacteristicProperties.WRITE_WITHOUT_RESPONSE
+                | gatt.GattCharacteristicProperties.WRITE
                 | gatt.GattCharacteristicProperties.NOTIFY
             )
 
@@ -151,16 +180,59 @@ class BLEServer:
             char.add_subscribed_clients_changed(self._on_winrt_subscribers_changed)
             self._characteristic = char
 
-            self._provider.start_advertising()
+            # Start GATT provider advertising
+            with contextlib.suppress(Exception):
+                self._provider.start_advertising()
+
+            # Broadcast companion manufacturer advertisement so nodes detect BitChat
+            try:
+                publisher = adv.BluetoothLEAdvertisementPublisher()
+                m = adv.BluetoothLEManufacturerData()
+                m.company_id = 0xFFFF
+                writer = DataWriter()
+                # b'BC' + 16-byte UUID + peer_id + '|' + nickname
+                payload = b"BC" + srv_uuid.bytes
+                if self.peer_id:
+                    pid_bytes = self.peer_id[:12].encode("utf-8")
+                    nick_bytes = (self.nickname[:8] if self.nickname else "").encode(
+                        "utf-8"
+                    )
+                    payload += pid_bytes + b"|" + nick_bytes
+                writer.write_bytes(payload)
+                m.data = writer.detach_buffer()
+                publisher.advertisement.manufacturer_data.append(m)
+                publisher.start()
+                self._publisher = publisher
+                logger.info(
+                    "WinRT BLE advertisement publisher started for BitChat (%s)",
+                    self.service_uuid,
+                )
+            except Exception as pub_err:
+                logger.warning(
+                    "WinRT advertisement publisher could not start: %s", pub_err
+                )
+
             self._is_advertising = True
             logger.info(
-                "WinRT BLEServer advertising BitChat service %s", self.service_uuid
+                "WinRT BLEServer active for BitChat service %s", self.service_uuid
             )
         except Exception as e:
-            self._provider = None
-            self._characteristic = None
+            self._cleanup_windows_resources()
             self._is_advertising = False
             raise BLEError(f"Failed to start WinRT BLEServer: {e}") from e
+
+    def _cleanup_windows_resources(self) -> None:
+        """Safely release Windows WinRT provider and publisher."""
+        if self._publisher is not None:
+            with contextlib.suppress(Exception):
+                self._publisher.stop()
+            self._publisher = None
+
+        if self._provider is not None:
+            with contextlib.suppress(Exception):
+                self._provider.stop_advertising()
+            self._provider = None
+            self._characteristic = None
 
     def _on_winrt_write_requested(self, _char: Any, args: Any) -> None:
         """Callback for incoming write requests from WinRT."""

@@ -19,6 +19,21 @@ class BLEConnectionState(StrEnum):
     DISCONNECTING = "disconnecting"
 
 
+class BLEState(StrEnum):
+    """Overall operational state of the local BLE subsystem."""
+
+    OFFLINE = "offline"
+    CHECKING = "checking"
+    BLUETOOTH_UNAVAILABLE = "unavailable"
+    BLUETOOTH_DISABLED = "disabled"
+    READY = "ready"
+    SCANNING = "scanning"
+    PEER_FOUND = "peer_found"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    ERROR = "error"
+
+
 @dataclass(frozen=True)
 class DiscoveredPeer:
     """Represents a discovered BitChat BLE peripheral."""
@@ -28,3 +43,9 @@ class DiscoveredPeer:
     rssi: int = -100
     service_uuids: tuple[str, ...] = field(default_factory=tuple)
     last_seen: float = field(default_factory=time.time)
+    peer_id: str | None = None
+    nickname: str | None = None
+
+    def is_expired(self, ttl: float = 30.0) -> bool:
+        """Return True if this peer advertisement record has expired."""
+        return (time.time() - self.last_seen) > ttl
