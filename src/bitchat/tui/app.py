@@ -249,7 +249,11 @@ class BitChatApp(App[None]):
         header = self.query_one(HeaderWidget)
         status_bar = self.query_one(StatusBar)
 
-        connected_addrs = self.coordinator.ble_manager.connected_peers
+        active_transport = self.coordinator.active_transport
+        trans_name = self.coordinator.active_transport_name
+        sidebar.active_transport = trans_name
+
+        connected_addrs = active_transport.connected_peers
         header.peer_count = len(connected_addrs)
 
         conn_display: dict[str, str] = {}
@@ -261,31 +265,48 @@ class BitChatApp(App[None]):
             conn_display[addr] = f"{nick} {sec_tag} ({addr})"
 
         sidebar.set_connected_peers(conn_display)
-        is_sc = self.coordinator.ble_manager.scanner.is_scanning
+        is_sc = getattr(active_transport, "is_scanning", False)
         is_off = self.coordinator.ble_status in (
             "unavailable",
             "disabled",
             "offline",
         )
         sidebar.set_discovered_peers(
-            self.coordinator.ble_manager.discovered_peers,
+            active_transport.discovered_peers,
             is_scanning=is_sc,
             is_offline=is_off,
+            transport=trans_name,
         )
 
-        # Truthful Bluetooth state reporting
+        # Truthful state reporting
         if connected_addrs:
+            medium_label = "LAN / Wi-Fi Mesh" if trans_name == "lan" else "Local Mesh"
             status_bar.mesh_status = (
-                f"● Connected ({len(connected_addrs)} peers) • Local Mesh"
+                f"● Connected ({len(connected_addrs)} peers) • {medium_label}"
             )
-        elif self.coordinator.ble_status in ("active", "scanning"):
-            status_bar.mesh_status = "● BitChat Ready • Local Mesh"
+        elif self.coordinator.ble_status in ("active", "ready", "scanning"):
+            status_lbl = (
+                "LAN / Wi-Fi Ready • Local Mesh"
+                if trans_name == "lan"
+                else "BitChat Ready • Local Mesh"
+            )
+            status_bar.mesh_status = f"● {status_lbl}"
         elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
-            status_bar.mesh_status = "✕ BLE Offline • Bluetooth Unavailable"
+            status_lbl = (
+                "LAN Offline • Network Unavailable"
+                if trans_name == "lan"
+                else "BLE Offline • Bluetooth Unavailable"
+            )
+            status_bar.mesh_status = f"✕ {status_lbl}"
         elif self.coordinator.ble_status in ("offline", "checking"):
-            status_bar.mesh_status = "◌ Initializing Mesh..."
+            status_bar.mesh_status = f"◌ Initializing {trans_name.upper()}..."
         else:
-            status_bar.mesh_status = "● BitChat Ready • Local Mesh"
+            status_lbl = (
+                "LAN / Wi-Fi Ready • Local Mesh"
+                if trans_name == "lan"
+                else "BitChat Ready • Local Mesh"
+            )
+            status_bar.mesh_status = f"● {status_lbl}"
 
         self._update_target_status()
 
@@ -298,7 +319,7 @@ class BitChatApp(App[None]):
             peer_nick = self.active_context[1:].strip()
             is_connected = False
             if self.coordinator:
-                for addr in self.coordinator.ble_manager.connected_peers:
+                for addr in self.coordinator.active_transport.connected_peers:
                     pid = self.coordinator.address_to_peer_id.get(addr, "")
                     nick = self.coordinator.peer_nicknames.get(
                         pid, pid[:8] if pid else addr
@@ -348,12 +369,12 @@ class BitChatApp(App[None]):
             return resolved
 
         # 2. Match exact address in discovered peers
-        if clean_target in self.coordinator.ble_manager.discovered_peers:
+        if clean_target in self.coordinator.active_transport.discovered_peers:
             return clean_target
 
-        # 3. Match unpunctuated MAC ONLY if it exists in discovered peers
+        # 3. Match unpunctuated MAC/IP ONLY if it exists in discovered peers
         unpunctuated = clean_lower.replace(":", "").replace("-", "")
-        for addr in self.coordinator.ble_manager.discovered_peers:
+        for addr in self.coordinator.active_transport.discovered_peers:
             if addr.replace(":", "").replace("-", "").lower() == unpunctuated:
                 return addr
 
@@ -458,7 +479,7 @@ class BitChatApp(App[None]):
         )
         is_enc = session.is_established if session else False
         is_conn = bool(
-            address and address in self.coordinator.ble_manager.connected_peers
+            address and address in self.coordinator.active_transport.connected_peers
         )
 
         self.push_screen(
@@ -534,6 +555,64 @@ class BitChatApp(App[None]):
             f"max_hops={event.max_hops}, delay={event.inter_fragment_delay_ms}ms, "
             f"keybindings={len(event.keybindings)} active"
         )
+
+        target_trans = getattr(event, "transport", "bluetooth")
+        curr_trans = (
+            self.coordinator.active_transport_name
+            if self.coordinator
+            else getattr(self.config, "transport", "bluetooth")
+        )
+        if target_trans != curr_trans:
+            self._handle_transport_switch(target_trans)
+
+    def _handle_transport_switch(self, target_transport: str) -> None:
+        """Switch active transport between Bluetooth and LAN."""
+        chat = self.query_one(ChatView)
+        target = target_transport.lower().strip()
+        if target not in ("bluetooth", "lan"):
+            chat.add_error_message(
+                f"Invalid transport: '{target}'. Supported: bluetooth, lan"
+            )
+            return
+
+        if not self.coordinator:
+            self.config.transport = target
+            with contextlib.suppress(Exception):
+                self.storage.save_config(self.config)
+            chat.add_system_message(f"Selected transport: {target.upper()}")
+            return
+
+        coord = self.coordinator
+
+        async def _do_switch() -> None:
+            success, msg = await coord.switch_transport(target)
+            if success:
+                if "Already active" in msg:
+                    chat.add_system_message(msg)
+                    return
+                self.config.transport = target
+                with contextlib.suppress(Exception):
+                    self.storage.save_config(self.config)
+
+                sidebar = self.query_one(PeerSidebar)
+                header = self.query_one(HeaderWidget)
+                sidebar.active_transport = target
+                sidebar.peer_id_hex = coord.local_identity.peer_id_hex
+                sidebar.fingerprint = coord.local_identity.fingerprint
+                sidebar.update_identity(coord.nickname)
+                header.peer_id_hex = coord.local_identity.peer_id_hex
+                header.fingerprint = coord.local_identity.fingerprint
+                header.nickname = coord.nickname
+                chat.add_system_message(
+                    f"Switched transport to {target.upper()}. "
+                    f"New secure chat session created. "
+                    f"New peer identity: {coord.local_identity.peer_id_hex[:8]}"
+                )
+            else:
+                chat.add_error_message(f"Transport switch failed: {msg}")
+            self._refresh_peer_lists()
+
+        self._spawn_task(_do_switch())
 
     def on_edit_theme_modal_theme_applied(
         self, event: EditThemeModal.ThemeApplied
@@ -616,14 +695,23 @@ class BitChatApp(App[None]):
                             (f"@{nick} ", f"Peer: {pid[:8]}... (Encrypted)")
                         )
             if not peer_items and self.coordinator:
-                for addr, peer in self.coordinator.ble_manager.discovered_peers.items():
-                    name = peer.name or addr
+                for (
+                    addr,
+                    peer,
+                ) in self.coordinator.active_transport.discovered_peers.items():
+                    name = (
+                        getattr(peer, "nickname", None)
+                        or getattr(peer, "name", None)
+                        or addr
+                    )
                     if (
                         not query
                         or name.lower().startswith(query)
                         or query in name.lower()
                     ):
-                        peer_items.append((f"@{name} ", f"{addr} ({peer.rssi} dBm)"))
+                        rssi = getattr(peer, "rssi", None)
+                        extra = f" ({rssi} dBm)" if rssi is not None else ""
+                        peer_items.append((f"@{name} ", f"{addr}{extra}"))
             palette.show_suggestions(peer_items, title="Peers (@mention / DM)")
             return
 
@@ -661,17 +749,26 @@ class BitChatApp(App[None]):
             query = tokens[1] if len(tokens) > 1 else ""
             addr_items: list[tuple[str, str]] = []
             if self.coordinator:
-                for addr, peer in self.coordinator.ble_manager.discovered_peers.items():
-                    name = peer.name or "Unknown"
+                coord = self.coordinator
+                for addr, peer in coord.active_transport.discovered_peers.items():
+                    name = (
+                        getattr(peer, "nickname", None)
+                        or getattr(peer, "name", None)
+                        or "Unknown"
+                    )
                     if (
                         not query
                         or query.lower() in addr.lower()
                         or query.lower() in name.lower()
                     ):
-                        addr_items.append(
-                            (f"/connect {addr}", f"{name} ({peer.rssi} dBm)")
-                        )
-            palette.show_suggestions(addr_items, title="Discovered BLE Peers")
+                        rssi = getattr(peer, "rssi", None)
+                        extra = f" ({rssi} dBm)" if rssi is not None else ""
+                        addr_items.append((f"/connect {addr}", f"{name}{extra}"))
+                trans_label = (
+                    "BLE" if coord.active_transport_name == "bluetooth" else "LAN"
+                )
+                title = f"Discovered {trans_label} Peers"
+                palette.show_suggestions(addr_items, title=title)
         else:
             palette.hide()
 
@@ -765,6 +862,26 @@ class BitChatApp(App[None]):
                 self.switch_conversation_context("#public")
                 chat.add_system_message("Switched to #public channel")
 
+            case CommandType.TRANSPORT:
+                if not cmd.args:
+                    curr = (
+                        self.coordinator.active_transport_name
+                        if self.coordinator
+                        else getattr(self.config, "transport", "bluetooth")
+                    )
+                    chat.add_system_message(f"Active transport medium: {curr.upper()}")
+                    chat.add_system_message(
+                        "Switch medium using: /transport bluetooth OR /transport lan"
+                    )
+                    return
+                target_trans = cmd.args[0].lower().strip()
+                if target_trans not in ("bluetooth", "lan"):
+                    chat.add_error_message(
+                        f"Unknown transport '{cmd.args[0]}'. Supported: bluetooth, lan"
+                    )
+                    return
+                self._handle_transport_switch(target_trans)
+
             case CommandType.STATUS:
                 self._display_status_diagnostics(chat)
 
@@ -775,60 +892,60 @@ class BitChatApp(App[None]):
                 self._spawn_task(self.action_quit())
 
             case CommandType.CONNECT:
+                if not self.coordinator:
+                    chat.add_system_message("Transport coordinator offline.")
+                    return
+                coord = self.coordinator
+                trans_name = coord.active_transport_name
+
                 if not cmd.args:
-                    if not self.coordinator:
-                        chat.add_system_message("BLE coordinator offline.")
-                        return
-                    discovered = self.coordinator.ble_manager.discovered_peers
+                    discovered = coord.active_transport.discovered_peers
                     if not discovered:
                         chat.add_system_message(
-                            "No peers discovered yet. "
-                            "Scanning for nearby BitChat peers..."
+                            f"No peers discovered yet. "
+                            f"Scanning for nearby BitChat {trans_name.upper()} peers..."
                         )
-                        self._spawn_task(self.coordinator.ble_manager.start_discovery())
+                        self._spawn_task(coord.active_transport.start_discovery())
                     else:
                         chat.add_system_message(
-                            f"Discovered BLE peers ({len(discovered)}):"
+                            f"Discovered {trans_name.upper()} peers "
+                            f"({len(discovered)}):"
                         )
                         for addr, peer in discovered.items():
-                            name = peer.name or "Unknown"
-                            chat.add_system_message(
-                                f"  • {addr} — {name} ({peer.rssi} dBm)"
+                            name = (
+                                getattr(peer, "nickname", None)
+                                or getattr(peer, "name", None)
+                                or "Unknown"
                             )
+                            rssi = getattr(peer, "rssi", None)
+                            extra = f" ({rssi} dBm)" if rssi is not None else ""
+                            chat.add_system_message(f"  • {addr} — {name}{extra}")
                         chat.add_system_message(
                             "Connect using: /connect <address_or_id>"
                         )
                     return
 
                 target = cmd.args[0]
-                resolved_addr = self._resolve_peer_address(target)
-                if not resolved_addr:
-                    chat.add_error_message(
-                        f"Peer '{target}' not discovered. "
-                        "Run /scan or wait for discovery."
-                    )
-                    return
-
-                target_addr = resolved_addr
+                resolved_addr = self._resolve_peer_address(target) or target
                 desc = f" ({target})" if resolved_addr != target else ""
-                chat.add_system_message(f"Connecting to peer at {target_addr}{desc}...")
-                if self.coordinator is not None:
-                    coord = self.coordinator
+                chat.add_system_message(
+                    f"Connecting to peer at {resolved_addr}{desc}..."
+                )
 
-                    async def _perform_connect(addr: str, description: str) -> None:
-                        try:
-                            await coord.ble_manager.connect_peer(addr, timeout=10.0)
-                            chat.add_system_message(
-                                f"Connected to peer at {addr}{description}."
-                            )
-                            self._refresh_peer_lists()
-                        except Exception as e:
-                            chat.add_error_message(
-                                f"Connection failed for {addr}{description}: {e}"
-                            )
-                            self._refresh_peer_lists()
+                async def _perform_connect(addr: str, description: str) -> None:
+                    try:
+                        await coord.connect_peer(addr, timeout=10.0)
+                        chat.add_system_message(
+                            f"Connected to peer at {addr}{description}."
+                        )
+                        self._refresh_peer_lists()
+                    except Exception as e:
+                        chat.add_error_message(
+                            f"Connection failed for {addr}{description}: {e}"
+                        )
+                        self._refresh_peer_lists()
 
-                    self._spawn_task(_perform_connect(target_addr, desc))
+                self._spawn_task(_perform_connect(resolved_addr, desc))
 
             case CommandType.DISCONNECT:
                 if self.coordinator is None:
@@ -841,7 +958,7 @@ class BitChatApp(App[None]):
 
                     async def _perform_disconnect(addr: str) -> None:
                         try:
-                            await coord.ble_manager.disconnect_peer(addr)
+                            await coord.disconnect_peer(addr)
                             chat.add_system_message(f"Disconnected from {addr}.")
                             self._refresh_peer_lists()
                         except Exception as e:
@@ -854,7 +971,9 @@ class BitChatApp(App[None]):
 
                     async def _perform_disconnect_all() -> None:
                         try:
-                            await coord.ble_manager.shutdown()
+                            for addr in list(coord.active_transport.connected_peers):
+                                with contextlib.suppress(Exception):
+                                    await coord.disconnect_peer(addr)
                             chat.add_system_message("All peers disconnected.")
                             self._refresh_peer_lists()
                         except Exception as e:
@@ -864,13 +983,16 @@ class BitChatApp(App[None]):
                     self._spawn_task(_perform_disconnect_all())
 
             case CommandType.SCAN:
-                chat.add_system_message("Starting BLE discovery scan...")
                 if self.coordinator is not None:
                     coord = self.coordinator
+                    trans_name = coord.active_transport_name
+                    chat.add_system_message(
+                        f"Starting {trans_name.upper()} discovery scan..."
+                    )
 
                     async def _perform_scan() -> None:
                         try:
-                            await coord.ble_manager.start_discovery()
+                            await coord.active_transport.start_discovery()
                             self._refresh_peer_lists()
                         except Exception as e:
                             chat.add_error_message(f"Scan failed: {e}")
@@ -880,15 +1002,16 @@ class BitChatApp(App[None]):
 
             case CommandType.ONLINE:
                 if not self.coordinator:
-                    chat.add_system_message("BLE coordinator offline.")
+                    chat.add_system_message("Coordinator offline.")
                     return
-                connected = self.coordinator.ble_manager.connected_peers
-                discovered = self.coordinator.ble_manager.discovered_peers
+                coord = self.coordinator
+                connected = coord.active_transport.connected_peers
+                discovered = coord.active_transport.discovered_peers
                 chat.add_system_message(f"Connected peers ({len(connected)}):")
                 if connected:
                     for addr in connected:
-                        pid = self.coordinator.address_to_peer_id.get(addr, "unknown")
-                        nick = self.coordinator.peer_nicknames.get(pid, "unknown")
+                        pid = coord.address_to_peer_id.get(addr, "unknown")
+                        nick = coord.peer_nicknames.get(pid, "unknown")
                         chat.add_system_message(
                             f"  • {addr} (Peer: {pid[:8]}, Nick: {nick})"
                         )
@@ -898,10 +1021,14 @@ class BitChatApp(App[None]):
                 chat.add_system_message(f"Discovered nearby peers ({len(discovered)}):")
                 if discovered:
                     for addr, peer in discovered.items():
-                        name = peer.name or "Unknown"
-                        chat.add_system_message(
-                            f"  • {addr} — {name} ({peer.rssi} dBm)"
+                        name = (
+                            getattr(peer, "nickname", None)
+                            or getattr(peer, "name", None)
+                            or "Unknown"
                         )
+                        rssi = getattr(peer, "rssi", None)
+                        extra = f" ({rssi} dBm)" if rssi is not None else ""
+                        chat.add_system_message(f"  • {addr} — {name}{extra}")
                 else:
                     chat.add_system_message(
                         "  (No nearby nodes found; type /scan to discover)"
@@ -1019,30 +1146,65 @@ class BitChatApp(App[None]):
     def _display_status_diagnostics(self, chat: ChatView) -> None:
         """Display operational diagnostics in chat."""
         if not self.coordinator:
-            chat.add_system_message("BitChat Status")
-            chat.add_system_message("Bluetooth Adapter: Unavailable")
-            chat.add_system_message("Bluetooth State:   Off")
-            chat.add_system_message("GATT Server:       Stopped")
-            chat.add_system_message("Scanner:           Stopped")
+            chat.add_system_message("BitChat Status: Coordinator Offline")
             return
 
         status = self.coordinator.get_detailed_status()
-        chat.add_system_message("══════════ BitChat Status ══════════")
-        ad_stat = "Available" if status["adapter_available"] else "Unavailable"
-        chat.add_system_message(f"Bluetooth Adapter: {ad_stat}")
-        chat.add_system_message(f"Bluetooth State:   {status['adapter_state']}")
-        chat.add_system_message(f"GATT Server:       {status['gatt_server_status']}")
-        chat.add_system_message(f"Scanner:           {status['scanner_status']}")
-        chat.add_system_message(
-            f"Discovered Peers:  {status['discovered_peers_count']}"
-        )
-        chat.add_system_message(f"Connected Peers:   {status['connected_peers_count']}")
-        chat.add_system_message(
-            f"Local Node:        {status['local_nickname']} "
-            f"(ID: {status['local_peer_id'][:12]})"
-        )
-        chat.add_system_message(f"Active Context:    {self.active_context}")
-        chat.add_system_message("════════════════════════════════════")
+        if status.get("transport") == "lan":
+            chat.add_system_message("══════════ BitChat LAN Status ══════════")
+            chat.add_system_message(
+                f"Transport:         LAN / Wi-Fi ({status.get('state', 'unknown')})"
+            )
+            chat.add_system_message(
+                f"Interface:         {status.get('interface', 'Unknown')}"
+            )
+            chat.add_system_message(f"Wi-Fi SSID:        {status.get('ssid') or 'N/A'}")
+            chat.add_system_message(
+                f"Local IP:          {status.get('local_ip', '127.0.0.1')}"
+            )
+            chat.add_system_message(
+                f"Listening Port:    {status.get('listening_port', 'N/A')}"
+            )
+            chat.add_system_message(
+                f"UDP Discovery:     {status.get('discovery', 'Stopped')}"
+            )
+            chat.add_system_message(
+                f"Discovered Peers:  {status.get('discovered_peers_count', 0)}"
+            )
+            chat.add_system_message(
+                f"Connected Peers:   {status.get('connected_peers_count', 0)}"
+            )
+            chat.add_system_message(
+                f"Local Node:        {status.get('local_nickname', 'Anonymous')} "
+                f"(ID: {status.get('local_peer_id', '')[:12]})"
+            )
+            chat.add_system_message(f"Active Context:    {self.active_context}")
+            chat.add_system_message("════════════════════════════════════════")
+        else:
+            chat.add_system_message("══════════ BitChat Status ══════════")
+            ad_stat = "Available" if status.get("adapter_available") else "Unavailable"
+            chat.add_system_message(f"Bluetooth Adapter: {ad_stat}")
+            chat.add_system_message(
+                f"Bluetooth State:   {status.get('adapter_state', 'Off')}"
+            )
+            chat.add_system_message(
+                f"GATT Server:       {status.get('gatt_server_status', 'Stopped')}"
+            )
+            chat.add_system_message(
+                f"Scanner:           {status.get('scanner_status', 'Stopped')}"
+            )
+            chat.add_system_message(
+                f"Discovered Peers:  {status.get('discovered_peers_count', 0)}"
+            )
+            chat.add_system_message(
+                f"Connected Peers:   {status.get('connected_peers_count', 0)}"
+            )
+            chat.add_system_message(
+                f"Local Node:        {status.get('local_nickname', 'Anonymous')} "
+                f"(ID: {status.get('local_peer_id', '')[:12]})"
+            )
+            chat.add_system_message(f"Active Context:    {self.active_context}")
+            chat.add_system_message("════════════════════════════════════")
 
     def action_clear_log(self) -> None:
         """Action handler to clear the log."""
@@ -1079,12 +1241,18 @@ class BitChatApp(App[None]):
         )
         hops = self.config.max_hops
         delay = self.config.inter_fragment_delay_ms
+        current_trans = (
+            self.coordinator.active_transport_name
+            if self.coordinator
+            else getattr(self.config, "transport", "bluetooth")
+        )
         self.push_screen(
             SettingsModal(
                 current_nickname=nick,
                 current_max_hops=hops,
                 current_delay_ms=delay,
                 current_keybindings=self.config.keybindings,
+                current_transport=current_trans,
             )
         )
 

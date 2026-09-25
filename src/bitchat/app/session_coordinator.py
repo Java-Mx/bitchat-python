@@ -1,33 +1,32 @@
-"""Session coordinator managing Noise sessions, BLE routing, and dispatch."""
+"""Session coordinator managing Noise sessions, transport routing, and dispatch."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from bitchat.crypto.identity import LocalIdentity
 from bitchat.crypto.noise import NoiseRole, NoiseSessionState
 from bitchat.crypto.sessions import NoiseSession
 from bitchat.exceptions import PacketDecodingError
 from bitchat.mesh.router import MeshRouter
+from bitchat.network.transport import LANTransport
 from bitchat.protocol.constants import MessageType
 from bitchat.protocol.decoder import decode_packet
-from bitchat.protocol.encoder import encode_packet
-from bitchat.protocol.fragmentation import (
-    fragment_encoded_packet,
-    should_fragment,
-)
 from bitchat.protocol.packet import BitchatPacket
 from bitchat.protocol.reassembly import FragmentReassembler
+from bitchat.transport.bluetooth import BluetoothTransport
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from bitchat.ble.manager import BLEManager
-    from bitchat.ble.models import DiscoveredPeer
     from bitchat.ble.server import BLEServer
-    from bitchat.crypto.identity import LocalIdentity
     from bitchat.storage.config import StorageInterface
+    from bitchat.transport.base import BaseTransport, TransportState
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +50,9 @@ class SessionCoordinator:
     def __init__(
         self,
         local_identity: LocalIdentity,
-        ble_manager: BLEManager,
-        ble_server: BLEServer,
+        ble_manager: BLEManager | None = None,
+        ble_server: BLEServer | None = None,
+        transport: BaseTransport | None = None,
         storage: StorageInterface | None = None,
         nickname: str = "Anonymous",
         on_message_received: Callable[[str, str, bool], None] | None = None,
@@ -60,10 +60,9 @@ class SessionCoordinator:
         on_handshake_completed: Callable[[str, str], None] | None = None,
         inter_fragment_delay: float = 0.02,
         mesh_router: MeshRouter | None = None,
+        initial_transport: str = "bluetooth",
     ) -> None:
         self.local_identity = local_identity
-        self.ble_manager = ble_manager
-        self.ble_server = ble_server
         self.storage = storage
         self.nickname = nickname
         self.inter_fragment_delay = inter_fragment_delay
@@ -89,6 +88,65 @@ class SessionCoordinator:
         self.server_reassembler = FragmentReassembler()
         self._is_running: bool = False
 
+        # Registered transports dictionary
+        self._transports: dict[str, BaseTransport] = {}
+        self.ble_manager: Any = ble_manager
+        self.ble_server: Any = ble_server
+
+        if ble_manager is not None and ble_server is not None:
+            bt_transport = BluetoothTransport(
+                ble_manager=ble_manager,
+                ble_server=ble_server,
+                inter_fragment_delay=inter_fragment_delay,
+            )
+            self._transports["bluetooth"] = bt_transport
+
+        if transport is not None:
+            self._transports[transport.transport_type.value] = transport
+            self.active_transport = transport
+            self.active_transport_name = transport.transport_type.value
+        else:
+            sel = initial_transport.lower()
+            if "bluetooth" not in self._transports:
+                self._transports["bluetooth"] = BluetoothTransport(
+                    ble_manager=ble_manager,  # type: ignore[arg-type]
+                    ble_server=ble_server,  # type: ignore[arg-type]
+                    inter_fragment_delay=inter_fragment_delay,
+                )
+            if "lan" not in self._transports:
+                self._transports["lan"] = LANTransport(
+                    local_peer_id=self.local_identity.peer_id_hex,
+                    local_nickname=self.nickname,
+                )
+
+            if sel == "lan":
+                self.active_transport = self._transports["lan"]
+                self.active_transport_name = "lan"
+            else:
+                self.active_transport = self._transports["bluetooth"]
+                self.active_transport_name = "bluetooth"
+
+        self._wire_transport_callbacks(self.active_transport)
+
+    def _wire_transport_callbacks(self, transport: BaseTransport) -> None:
+        """Attach session coordinator packet and state handlers to a transport."""
+        transport.on_packet_received = self._handle_incoming_packet
+        transport.on_peer_discovered = self._handle_peer_discovered
+        transport.on_peer_connected = self._handle_peer_connected
+        transport.on_peer_disconnected = self._handle_peer_disconnected
+        transport.on_state_changed = self._handle_transport_state_changed
+        transport.on_error = self._handle_transport_error
+
+    def _handle_transport_state_changed(self, state: TransportState) -> None:
+        self.ble_status = state.value
+        if self.on_peer_status_changed:
+            self.on_peer_status_changed("mesh", state.value)
+
+    def _handle_transport_error(self, err_msg: str) -> None:
+        self.ble_error_message = err_msg
+        if self.on_ble_error:
+            self.on_ble_error(err_msg)
+
     def _spawn_task(self, coro: Any) -> asyncio.Task[Any]:
         """Spawn background task and keep a reference until completion."""
         task = asyncio.create_task(coro)
@@ -111,39 +169,15 @@ class SessionCoordinator:
 
     def get_detailed_status(self) -> dict[str, Any]:
         """Return truthful telemetry dictionary for diagnostics."""
-        adapter = self.ble_manager.adapter_manager.current_info
-        connected_peers = self.ble_manager.connected_peers
-        discovered_peers = self.ble_manager.discovered_peers
-        server_telem = self.ble_server.get_telemetry()
-
-        if adapter.is_enabled:
-            adapter_state_str = "On"
-        elif adapter.radio_state in ("off", "disabled"):
-            adapter_state_str = "Off"
-        else:
-            adapter_state_str = "Unavailable"
-
-        return {
-            "adapter_available": adapter.is_available,
-            "adapter_state": adapter_state_str,
-            "radio_state": adapter.radio_state,
-            "gatt_server_status": "Advertising"
-            if server_telem.get("is_advertising")
-            else "Stopped",
-            "scanner_status": "Active"
-            if self.ble_manager.scanner.is_scanning
-            else "Stopped",
-            "discovered_peers_count": len(discovered_peers),
-            "connected_peers_count": len(connected_peers),
-            "connected_peers": connected_peers,
-            "discovered_peers": discovered_peers,
-            "local_nickname": self.nickname,
-            "local_peer_id": self.local_identity.peer_id_hex,
-            "local_fingerprint": self.local_identity.fingerprint,
-        }
+        telem = self.active_transport.get_telemetry()
+        telem["local_nickname"] = self.nickname
+        telem["local_peer_id"] = self.local_identity.peer_id_hex
+        telem["local_fingerprint"] = self.local_identity.fingerprint
+        telem["active_transport"] = self.active_transport_name
+        return telem
 
     def resolve_peer_address(self, target: str) -> str | None:
-        """Resolve nickname, peer ID prefix, or device to a BLE address."""
+        """Resolve nickname, peer ID prefix, or device to a transport address."""
         clean = target.strip().lstrip("@").lower()
 
         # 1. Exact or prefix match in peer_addresses
@@ -156,29 +190,34 @@ class SessionCoordinator:
             if nick.lower() == clean and pid in self.peer_addresses:
                 return self.peer_addresses[pid]
 
-        # 3. Discovered peer lookup
-        for addr, peer in self.ble_manager.discovered_peers.items():
-            if peer.peer_id and (
-                peer.peer_id.lower() == clean or peer.peer_id.lower().startswith(clean)
-            ):
-                return addr
-            if peer.name and (peer.name.lower() == clean or clean in peer.name.lower()):
-                return addr
-            clean_addr = addr.lower().replace(":", "").replace("-", "")
-            if addr.lower() == clean or clean_addr == clean.replace(":", "").replace(
-                "-", ""
-            ):
-                return addr
+        # 3. Direct lookup in active transport
+        direct_addr = self.active_transport.resolve_peer_id_to_address(target)
+        if direct_addr:
+            return direct_addr
 
-        # 4. Reverse lookup in address_to_peer_id
-        for addr, pid in self.address_to_peer_id.items():
+        # 4. Discovered peer lookup in active transport
+        for addr_key, peer in self.active_transport.discovered_peers.items():
+            pid = getattr(peer, "peer_id", None)
+            if pid and (pid.lower() == clean or pid.lower().startswith(clean)):
+                return addr_key
+            pname = getattr(peer, "name", None) or getattr(peer, "nickname", None)
+            if pname and (pname.lower() == clean or clean in pname.lower()):
+                return addr_key
+            clean_addr = addr_key.lower().replace(":", "").replace("-", "")
+            if addr_key.lower() == clean or clean_addr == clean.replace(
+                ":", ""
+            ).replace("-", ""):
+                return addr_key
+
+        # 5. Reverse lookup in address_to_peer_id
+        for addr_str, pid in self.address_to_peer_id.items():
             if pid.lower() == clean or pid.lower().startswith(clean):
-                return addr
+                return addr_str
 
         return None
 
     async def start(self) -> None:
-        """Initialize BLE server, callbacks, and start peer discovery."""
+        """Initialize active transport, callbacks, and start peer discovery."""
         if self._is_running:
             return
 
@@ -186,130 +225,41 @@ class SessionCoordinator:
         self.ble_status = "checking"
         self.ble_error_message = None
 
-        # Hook server callbacks
-        self.ble_server.on_data_received = self._handle_server_data_received
+        if self.ble_server:
+            self.ble_server.on_data_received = self._handle_server_data_received
 
-        # Hook manager callbacks
-        self.ble_manager.on_packet_received = self._handle_incoming_packet
-        self.ble_manager.on_peer_discovered = self._handle_peer_discovered
-        self.ble_manager.on_peer_connected = self._handle_peer_connected
-        self.ble_manager.on_peer_disconnected = self._handle_peer_disconnected
-        self.ble_manager.on_adapter_state_changed = self._handle_adapter_state_changed
-
-        # Update server advertised identity
-        self.ble_server.update_identity(self.local_identity.peer_id_hex, self.nickname)
-
-        # 1. Check adapter existence and power state (bypass if mock backend present)
-        is_mock = getattr(self.ble_server, "_custom_backend", None) is not None
-        if not is_mock:
-            adapter_info = await self.ble_manager.adapter_manager.check_adapter()
-            if not adapter_info.is_available:
-                self.ble_status = "unavailable"
-                self.ble_error_message = "Bluetooth hardware adapter is not detected."
-                if self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
-                return
-
-            if not adapter_info.is_enabled:
-                self.ble_status = "disabled"
-                self.ble_error_message = (
-                    "Bluetooth radio is turned off. "
-                    "Please enable Bluetooth in system settings."
-                )
-                if self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
-                await self.ble_manager.adapter_manager.start_monitoring(
-                    self._handle_adapter_state_changed
-                )
-                return
-
-            await self.ble_manager.adapter_manager.start_monitoring(
-                self._handle_adapter_state_changed
-            )
-
-        # 2. Start GATT server
-        try:
-            await self.ble_server.start()
-        except Exception as e:
-            logger.warning("Could not start BLE server: %s", e)
-            self.ble_status = "unavailable"
-            self.ble_error_message = f"GATT server failed: {e}"
-            if self.on_ble_error:
-                self.on_ble_error(self.ble_error_message)
-            return
-
-        # 3. Start discovery scanner
-        try:
-            await self.ble_manager.start_discovery()
-            self.ble_status = "scanning"
-        except Exception as e:
-            logger.warning("Could not start BLE discovery: %s", e)
-            self.ble_status = "unavailable"
-            self.ble_error_message = f"Bluetooth scan failed: {e}"
-            if self.on_ble_error:
-                self.on_ble_error(self.ble_error_message)
-            return
-
-        # 4. Broadcast initial presence announcement
-        await self.send_announce()
-
-    def _handle_adapter_state_changed(self, info: Any) -> None:
-        """Handle hardware Bluetooth adapter state changes (ON -> OFF -> ON)."""
-        logger.info(
-            "Coordinator observed adapter change: %s (enabled=%s)",
-            getattr(info, "radio_state", "unknown"),
-            getattr(info, "is_enabled", False),
+        self.active_transport.update_identity(
+            self.local_identity.peer_id_hex, self.nickname
         )
-        if not getattr(info, "is_enabled", False):
-            radio_st = getattr(info, "radio_state", "unknown")
-            self.ble_status = (
-                "disabled" if radio_st in ("off", "disabled") else "unavailable"
+        self._wire_transport_callbacks(self.active_transport)
+
+        try:
+            await self.active_transport.start()
+            self.ble_status = self.active_transport.state.value
+            await self.send_announce()
+        except Exception as e:
+            self._is_running = False
+            logger.warning(
+                "Could not start active transport %s: %s",
+                self.active_transport_name,
+                e,
             )
-            self.ble_error_message = f"Bluetooth adapter is {radio_st}."
+            self.ble_status = "unavailable"
+            self.ble_error_message = str(e)
             if self.on_ble_error:
                 self.on_ble_error(self.ble_error_message)
-            if self.on_peer_status_changed:
-                self.on_peer_status_changed("mesh", "offline")
-        else:
-            logger.info("Bluetooth adapter re-enabled, initiating recovery...")
-            self._spawn_task(self._handle_adapter_recovery())
-
-    async def _handle_adapter_recovery(self) -> None:
-        """Recover BLE services after Bluetooth is turned back ON."""
-        logger.info("Attempting automatic BLE recovery...")
-        await self.retry_ble()
 
     async def retry_ble(self) -> bool:
-        """Attempt to re-initialize BLE services after a failure or radio recovery."""
+        """Attempt to re-initialize active transport after a failure or recovery."""
         self.ble_status = "checking"
         self.ble_error_message = None
-
-        is_mock = getattr(self.ble_server, "_custom_backend", None) is not None
-        if not is_mock:
-            adapter_info = await self.ble_manager.adapter_manager.check_adapter()
-            if not adapter_info.is_available:
-                self.ble_status = "unavailable"
-                self.ble_error_message = "Bluetooth hardware adapter is not detected."
-                if self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
-                return False
-
-            if not adapter_info.is_enabled:
-                self.ble_status = "disabled"
-                self.ble_error_message = "Bluetooth radio is turned off."
-                if self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
-                return False
-
         try:
-            await self.ble_server.start()
-            await self.ble_manager.start_discovery()
-            self.ble_status = "scanning"
+            await self.active_transport.start()
+            self.ble_status = self.active_transport.state.value
             await self.send_announce()
-            logger.info("BLE services successfully recovered and active")
             return True
         except Exception as e:
-            logger.warning("Retry BLE failed: %s", e)
+            logger.warning("Retry active transport failed: %s", e)
             self.ble_status = "unavailable"
             self.ble_error_message = str(e)
             if self.on_ble_error:
@@ -317,10 +267,7 @@ class SessionCoordinator:
             return False
 
     async def stop(self) -> None:
-        """Shutdown coordinator, close sessions, and stop BLE services."""
-        if not self._is_running:
-            return
-
+        """Shutdown coordinator, close sessions, and stop all transports."""
         self._is_running = False
         self.ble_status = "offline"
         self.ble_error_message = None
@@ -331,13 +278,90 @@ class SessionCoordinator:
         self._pending_messages.clear()
         self._announced_peers.clear()
 
-        await self.ble_manager.shutdown()
-        await self.ble_server.stop()
+        for transport in self._transports.values():
+            with contextlib.suppress(Exception):
+                await transport.stop()
+
+    async def switch_transport(self, target_transport: str) -> tuple[bool, str]:
+        """Switch between Bluetooth and LAN with session teardown and fresh identity."""
+        target = target_transport.lower().strip()
+        if target not in ("bluetooth", "lan"):
+            return False, f"Unknown transport: {target}"
+
+        if target == self.active_transport_name and self.active_transport.is_running:
+            return True, f"Already active on {target} transport."
+
+        logger.info("Switching transport: %s -> %s", self.active_transport_name, target)
+
+        # 1. Stop old transport completely
+        await self.active_transport.stop()
+
+        # 2. Close active Noise sessions
+        for session in self._sessions.values():
+            session.close()
+        self._sessions.clear()
+
+        # 3. Clear active peer tables and pending messages
+        self.peer_addresses.clear()
+        self.address_to_peer_id.clear()
+        self.peer_nicknames.clear()
+        self._announced_peers.clear()
+        self._pending_messages.clear()
+
+        # 4. Generate fresh ephemeral transport identity
+        old_id = self.local_identity.peer_id_hex
+        self.local_identity = LocalIdentity.generate()
+        new_id = self.local_identity.peer_id_hex
+        self.mesh_router.local_peer_id = self.local_identity.peer_id
+        logger.info(
+            "Transport switch (%s -> %s): generated fresh identity %s (old: %s)",
+            self.active_transport_name,
+            target,
+            new_id,
+            old_id,
+        )
+
+        # 5. Switch active transport
+        if target == "lan":
+            if "lan" not in self._transports:
+                self._transports["lan"] = LANTransport(
+                    local_peer_id=new_id,
+                    local_nickname=self.nickname,
+                )
+            else:
+                self._transports["lan"].update_identity(new_id, self.nickname)
+            self.active_transport = self._transports["lan"]
+        else:
+            if "bluetooth" not in self._transports:
+                return False, "Bluetooth transport not available"
+            self._transports["bluetooth"].update_identity(new_id, self.nickname)
+            self.active_transport = self._transports["bluetooth"]
+
+        self.active_transport_name = target
+        self._wire_transport_callbacks(self.active_transport)
+
+        # 6. Start new transport
+        try:
+            await self.active_transport.start()
+            self.ble_status = self.active_transport.state.value
+            await self.send_announce()
+            display_name = "LAN / Wi-Fi" if target == "lan" else "Bluetooth"
+            return True, (
+                f"Switched transport to {display_name}. "
+                f"New secure chat session created. "
+                f"New peer identity: {new_id[:12]}"
+            )
+        except Exception as e:
+            logger.error("Failed starting %s transport: %s", target, e)
+            self.ble_status = "unavailable"
+            self.ble_error_message = str(e)
+            return False, f"Failed starting {target} transport: {e}"
 
     def set_nickname(self, nickname: str) -> None:
-        """Update local nickname."""
+        """Update local nickname across active transports."""
         self.nickname = nickname
-        self.ble_server.update_identity(self.local_identity.peer_id_hex, self.nickname)
+        for transport in self._transports.values():
+            transport.update_identity(self.local_identity.peer_id_hex, self.nickname)
 
     async def send_announce(self, nickname: str | None = None) -> None:
         """Broadcast an Announce packet to notify peers of our presence."""
@@ -398,69 +422,26 @@ class SessionCoordinator:
     async def _send_packet(
         self, target_peer_id_hex: str | None, packet: BitchatPacket
     ) -> None:
-        """Transmit packet via direct central transport or peripheral notification."""
+        """Transmit packet via direct transport connection or broadcast."""
         self.mesh_router.deduplicator.record(packet)
 
         target_addr = (
             self.peer_addresses.get(target_peer_id_hex) if target_peer_id_hex else None
         )
-        if target_addr and target_addr in self.ble_manager.connected_peers:
-            await self.ble_manager.send_to_peer(target_addr, packet)
+        if target_addr and target_addr in self.active_transport.connected_peers:
+            await self.active_transport.send_to_peer(target_addr, packet)
             return
 
-        if self.ble_manager.connected_peers:
-            await self.ble_manager.broadcast_packet(packet)
-
-        if self.ble_server.is_advertising:
-            encoded = encode_packet(packet, add_padding=True)
-            if should_fragment(encoded):
-                fragments = fragment_encoded_packet(
-                    encoded,
-                    sender_id=self.local_identity.peer_id,
-                    original_message_type=packet.message_type,
-                )
-                for i, frag in enumerate(fragments):
-                    frag_bytes = encode_packet(frag, add_padding=True)
-                    await self.ble_server.send_notification(frag_bytes)
-                    if i < len(fragments) - 1:
-                        await asyncio.sleep(self.inter_fragment_delay)
-            else:
-                await self.ble_server.send_notification(encoded)
+        await self.active_transport.broadcast_packet(packet)
 
     async def _broadcast_packet(
         self, packet: BitchatPacket, exclude_peer: str | None = None
     ) -> None:
-        """Broadcast packet over central connections and peripheral notifications."""
+        """Broadcast packet across all active transport peers."""
         self.mesh_router.deduplicator.record(packet)
-
-        tasks: list[Any] = []
-        if self.ble_manager.connected_peers:
-            tasks.append(
-                self.ble_manager.broadcast_packet(packet, exclude_address=exclude_peer)
-            )
-
-        if self.ble_server.is_advertising and exclude_peer != "server":
-            encoded = encode_packet(packet, add_padding=True)
-            if should_fragment(encoded):
-                fragments = fragment_encoded_packet(
-                    encoded,
-                    sender_id=self.local_identity.peer_id,
-                    original_message_type=packet.message_type,
-                )
-
-                async def _send_frags() -> None:
-                    for i, frag in enumerate(fragments):
-                        frag_bytes = encode_packet(frag, add_padding=True)
-                        await self.ble_server.send_notification(frag_bytes)
-                        if i < len(fragments) - 1:
-                            await asyncio.sleep(self.inter_fragment_delay)
-
-                tasks.append(_send_frags())
-            else:
-                tasks.append(self.ble_server.send_notification(encoded))
-
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.active_transport.broadcast_packet(
+            packet, exclude_address=exclude_peer
+        )
 
     def _handle_server_data_received(self, raw_bytes: bytes, client_id: str) -> None:
         """Process incoming raw bytes from GATT server write."""
@@ -536,11 +517,11 @@ class SessionCoordinator:
                 target_addr = self.peer_addresses.get(target_peer_id_hex)
                 if (
                     target_addr
-                    and target_addr in self.ble_manager.connected_peers
+                    and target_addr in self.active_transport.connected_peers
                     and target_addr != exclude_ingress
                 ):
                     try:
-                        await self.ble_manager.send_to_peer(target_addr, packet)
+                        await self.active_transport.send_to_peer(target_addr, packet)
                         return
                     except Exception as e:
                         logger.warning(
@@ -689,7 +670,7 @@ class SessionCoordinator:
         for text in pending:
             self._spawn_task(self.send_direct_message(remote_peer_id_hex, text))
 
-    def _handle_peer_discovered(self, peer: DiscoveredPeer) -> None:
+    def _handle_peer_discovered(self, peer: Any) -> None:
         """Callback when scanner detects a BitChat BLE peer."""
         if peer.peer_id:
             clean_pid = peer.peer_id.lower()
@@ -716,7 +697,9 @@ class SessionCoordinator:
                 peer_id
             )
             for pending in pending_pkts:
-                self._spawn_task(self.ble_manager.send_to_peer(peer_address, pending))
+                self._spawn_task(
+                    self.active_transport.send_to_peer(peer_address, pending)
+                )
 
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Callback when peer disconnects."""
@@ -725,3 +708,13 @@ class SessionCoordinator:
             self.peer_addresses.pop(peer_id, None)
         if self.on_peer_status_changed:
             self.on_peer_status_changed(peer_address, "Disconnected")
+
+    async def connect_peer(self, target: str, timeout: float = 10.0) -> Any:
+        """Establish connection to a target peer ID, nickname, or address."""
+        resolved = self.resolve_peer_address(target) or target
+        return await self.active_transport.connect_peer(resolved, timeout=timeout)
+
+    async def disconnect_peer(self, target: str) -> None:
+        """Disconnect a specific peer by ID, nickname, or address."""
+        resolved = self.resolve_peer_address(target) or target
+        await self.active_transport.disconnect_peer(resolved)

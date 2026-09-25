@@ -237,3 +237,21 @@ class TestCommandParser:
         c_info_err = parser.parse("/info")
         assert c_info_err.command_type == CommandType.INFO
         assert c_info_err.error_message is not None
+
+    def test_phase11_transport_command(self, parser: CommandParser) -> None:
+        """Phase 11 /transport command and aliases."""
+        c1 = parser.parse("/transport")
+        assert c1.command_type == CommandType.TRANSPORT
+        assert c1.args == []
+
+        c2 = parser.parse("/transport lan")
+        assert c2.command_type == CommandType.TRANSPORT
+        assert c2.args == ["lan"]
+
+        c3 = parser.parse("/transport bluetooth")
+        assert c3.command_type == CommandType.TRANSPORT
+        assert c3.args == ["bluetooth"]
+
+        c4 = parser.parse("/medium lan")
+        assert c4.command_type == CommandType.TRANSPORT
+        assert c4.args == ["lan"]

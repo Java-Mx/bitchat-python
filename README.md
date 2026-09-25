@@ -1,11 +1,11 @@
 <!-- Logo Placeholder -->
 <div align="center">
   <h1>BitChat Python</h1>
-  <p>Python terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE)</p>
+  <p>Python terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE) and Local Area Network (LAN / Wi-Fi)</p>
   <p>
-    <img src="https://img.shields.io/badge/Status-Phase%2010%20(TUI%20Harden%20%26%20Integration)-blue" alt="Status" />
+    <img src="https://img.shields.io/badge/Status-Phase%2011%20(Transport%20Abstraction%20%26%20LAN%20Chat)-blue" alt="Status" />
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
-    <img src="https://img.shields.io/badge/Tests-563%20Passing-brightgreen" alt="Tests" />
+    <img src="https://img.shields.io/badge/Tests-594%20Passing-brightgreen" alt="Tests" />
     <img src="https://img.shields.io/badge/Type%20Check-Pyright%20Strict-blue" alt="Type Check" />
   </p>
 </div>
@@ -13,6 +13,7 @@
 ## Table of Contents
 - [Overview](#overview)
 - [Architecture Overview](#architecture-overview)
+- [Transport Architecture: Bluetooth & LAN / Wi-Fi](#transport-architecture-bluetooth--lan--wi-fi)
 - [Prerequisites & System Requirements](#prerequisites--system-requirements)
 - [Download & Installation](#download--installation)
   - [Method 1: Fast Setup with `uv` (Recommended)](#method-1-fast-setup-with-uv-recommended)
@@ -23,22 +24,23 @@
 - [Step-by-Step Usage Guide](#step-by-step-usage-guide)
   - [1. User Interface Layout](#1-user-interface-layout)
   - [2. Setting Your Nickname](#2-setting-your-nickname)
-  - [3. Discovering Nearby BLE Nodes](#3-discovering-nearby-ble-nodes)
-  - [4. Connecting to a Peer](#4-connecting-to-a-peer)
-  - [5. Public Mesh Broadcasting](#5-public-mesh-broadcasting)
-  - [6. Encrypted Direct Messaging (Noise XX)](#6-encrypted-direct-messaging-noise-xx)
-  - [7. Switching Conversation Contexts](#7-switching-conversation-contexts)
-  - [8. Command Palette & Autocomplete](#8-command-palette--autocomplete)
-  - [9. Appearance & Theme Customization (F2)](#9-appearance--theme-customization-f2)
-  - [10. Dynamic Keybindings & Settings (F3)](#10-dynamic-keybindings--settings-f3)
+  - [3. Switching Network Transports (Bluetooth / LAN)](#3-switching-network-transports-bluetooth--lan)
+  - [4. Discovering Nearby BLE / LAN Nodes](#4-discovering-nearby-ble--lan-nodes)
+  - [5. Connecting to a Peer](#5-connecting-to-a-peer)
+  - [6. Public Mesh Broadcasting](#6-public-mesh-broadcasting)
+  - [7. Encrypted Direct Messaging (Noise XX)](#7-encrypted-direct-messaging-noise-xx)
+  - [8. Switching Conversation Contexts](#8-switching-conversation-contexts)
+  - [9. Command Palette & Autocomplete](#9-command-palette--autocomplete)
+  - [10. Appearance & Theme Customization (F2)](#10-appearance--theme-customization-f2)
+  - [11. Dynamic Keybindings & Settings (F3)](#11-dynamic-keybindings--settings-f3)
 - [Keyboard Shortcuts Reference](#keyboard-shortcuts-reference)
 - [Slash Commands Reference](#slash-commands-reference)
-- [OS-Specific Bluetooth Setup & Troubleshooting](#os-specific-bluetooth-setup--troubleshooting)
+- [OS-Specific Bluetooth & Network Setup](#os-specific-bluetooth--network-setup)
   - [Windows](#windows)
   - [Linux (Ubuntu / Debian / Arch)](#linux-ubuntu--debian--arch)
   - [macOS](#macos)
 - [Feature Status](#feature-status)
-- [Hardware & Two-PC BLE Validation Status](#hardware--two-pc-ble-validation-status)
+- [Hardware & Two-PC Validation Status](#hardware--two-pc-validation-status)
 - [Development & Testing](#development--testing)
 - [Reference Implementation](#reference-implementation)
 - [Security Notice](#security-notice)
@@ -47,9 +49,9 @@
 ---
 
 ## Overview
-BitChat Python is an asynchronous terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE). It aims to be fully protocol-compatible with the Rust reference implementation.
+BitChat Python is an asynchronous terminal client implementing the BitChat protocol over Bluetooth Low Energy (BLE) and Local Area Network (LAN / Wi-Fi). It aims to be fully protocol-compatible with the Rust reference implementation.
 
-**Current Status:** Phase 10 — Strict Functional Repair, TUI Interaction Hardening, and Full-System Integration complete and verified. Features an edge-to-edge terminal dashboard composition utilizing 100% of the viewport, an authoritative dynamic keybinding subsystem with atomic configuration persistence, runtime appearance customization (density, timestamps, accent palettes), centered panel titles, non-shifting borderless buttons, standard IDE-style command completion, natural `@peer` direct messaging / context switching, multi-hop mesh routing with store-and-forward delivery, and 563 passing automated tests.
+**Current Status:** Phase 11 — Transport Abstraction Layer & LAN/Wi-Fi Chat complete and verified. Introduces an abstract transport boundary (`BaseTransport`) enabling seamless runtime switching between Bluetooth Low Energy and high-performance local network sockets (UDP broadcast discovery on port 41234 + framed TCP streaming on port 41235). Features transport-independent Noise XX encryption, multi-hop mesh routing, automatic Windows adapter & Wi-Fi SSID telemetry, fresh ephemeral identity generation upon transport change to preserve cryptographic unlinkability, and 594 passing automated tests with zero linter or type-checking diagnostics.
 
 ---
 
@@ -71,11 +73,31 @@ Security & Cryptography (Noise XX, Ed25519, X25519, AES-256-GCM, HKDF)
 Protocol Layer (BitchatPacket, Encoder, Decoder, Fragmenter, Reassembler)
   │
   ▼
-BLE Transport (BLEManager, BLEScanner, BLEConnection, BLETransport, BLEServer)
-  │
-  ▼
-Operating System Bluetooth APIs (WinRT / Bleak)
+Transport Abstraction Layer (BaseTransport)
+  ├── Bluetooth Low Energy (BLEManager, BLEServer via Bleak/WinRT)
+  └── LAN / Wi-Fi (UDP Discovery 41234 + Framed TCP Streaming 41235)
 ```
+
+---
+
+## Transport Architecture: Bluetooth & LAN / Wi-Fi
+
+BitChat implements a pluggable transport architecture under `bitchat.transport.base.BaseTransport`, enabling zero-duplication protocol and crypto operations across distinct communication media:
+
+1. **Bluetooth Low Energy (BLE)**:
+   * **GATT Peripheral Server & Advertiser**: Advertises BitChat service UUID (`F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C`) and receives inbound framed writes.
+   * **Central Scanner & Client**: Discovers nearby BitChat nodes and establishes point-to-point BLE links.
+   * **Automatic MTU Fragmentation & Pacing**: Splits packets >500 bytes into <=150-byte fragments paced at 20ms intervals.
+
+2. **Local Area Network (LAN / Wi-Fi)**:
+   * **Zero-Config UDP Discovery (Port 41234)**: Broadcasts compact JSON beacons (`BC_DISCOVER_V1`) carrying node nickname, peer ID, TCP port, and Wi-Fi SSID. Includes 10 pkts/s per-IP rate limiting and 30-second TTL peer table pruning.
+   * **Framed TCP Streaming (Port 41235)**: Direct point-to-point peer links framed with an 8-byte header (`BC\x01\x00` magic + 4-byte big-endian payload length) and bounded 64KB frame limits.
+   * **Adapter & Wi-Fi Telemetry**: Detects active network interfaces, local non-loopback IPv4 addresses, and real-time Windows Wi-Fi SSIDs (`netsh wlan show interfaces`).
+
+3. **Runtime Transport Switching & Privacy Guarantees**:
+   * Switch transports instantly using `/transport [bluetooth|lan]` or via the **Settings Modal (`F3`)**.
+   * **Fresh Ephemeral Identity**: Switching transport completely terminates active connections, tears down open Noise XX sessions, clears in-memory peer routing tables, and generates a **fresh transport-scoped identity** (`LocalIdentity.generate()`).
+   * Permanent disk storage (`~/.bitchat/identity.json`) is never modified or leaked across transports, preventing identity tracking across Bluetooth and Wi-Fi networks.
 
 ---
 
@@ -85,13 +107,13 @@ Before downloading and installing BitChat Python, ensure your system satisfies:
 
 1. **Python 3.12 or Higher:**
    - Check with: `python --version` or `python3 --version`.
-2. **Bluetooth 4.2+ / 5.0+ Hardware Adapter:**
-   - Must support BLE (Bluetooth Low Energy) Central and Peripheral roles.
-   - Bluetooth must be powered on in your operating system settings.
+2. **Network or Bluetooth Adapter:**
+   - **LAN / Wi-Fi Mode:** Any standard Wi-Fi or Ethernet adapter connected to a local subnet. (No Bluetooth required!)
+   - **Bluetooth Mode:** Bluetooth 4.2+ / 5.0+ adapter supporting BLE Central and Peripheral roles.
 3. **Operating System Support:**
-   - **Windows 10 / 11:** Uses Windows WinRT APIs (no external Bluetooth daemons needed).
-   - **Linux:** Requires BlueZ (`bluez`, `dbus`, `bluetoothd`) and a running Bluetooth service.
-   - **macOS (12+):** Requires Bluetooth permission granted to your Terminal / iTerm.
+   - **Windows 10 / 11:** Native WinRT APIs for BLE; native async sockets for LAN.
+   - **Linux:** BlueZ (`bluez`, `dbus`, `bluetoothd`) for BLE; native sockets for LAN.
+   - **macOS (12+):** Terminal Bluetooth permission for BLE; native sockets for LAN.
 4. **Git:**
    - Check with: `git --version`.
 
@@ -218,36 +240,54 @@ Your initial identity generates a cryptographic Ed25519 keypair and a default ni
 * **Option B (Settings Modal):** Press `F3`, edit the **Nickname** input field, and click **Save Settings**.
 * Your new nickname is broadcast over the BLE mesh to announce your node to neighbors.
 
-### 3. Discovering Nearby BLE Nodes
-* BitChat automatically scans in the background upon launch.
+### 3. Switching Network Transports (Bluetooth / LAN)
+You can switch between Bluetooth Low Energy and Local Area Network (Wi-Fi / Ethernet) modes at any time:
+* **Option A (Command):**
+  ```text
+  /transport lan        # Switch to Local Area Network (Wi-Fi) mode
+  /transport bluetooth  # Switch to Bluetooth Low Energy mode
+  ```
+* **Option B (Settings Modal):**
+  Press `F3` (or click `Settings`), scroll to **Transport Selection**, select **Bluetooth** or **LAN / Wi-Fi**, and click **Save Settings**.
+* When switching transport, BitChat displays:
+  `Switched transport to LAN / WI-FI. New secure chat session created. New peer identity: <new_peer_id>`
+  The sidebar header dynamically changes to `Peers (LAN / Wi-Fi)` or `Peers (BLE Mesh)`.
+
+### 4. Discovering Nearby BLE / LAN Nodes
+* BitChat runs discovery continuously in the background upon launch.
+* In **LAN / Wi-Fi mode**, nodes multicast UDP discovery beacons (`BC_DISCOVER_V1`) on port `41234`.
+* In **Bluetooth mode**, nodes scan for the BitChat GATT service UUID.
 * To explicitly trigger a discovery cycle, type:
   ```text
   /scan
   ```
-* Nearby BitChat nodes will appear in the `Peers (BLE Mesh)` sidebar.
+* Discovered nodes will automatically appear in the left sidebar with their nickname, network endpoint (`ip:port`), or RSSI signal strength.
 
-### 4. Connecting to a Peer
-* To list discovered peers and their signal strengths in the chat view:
+### 5. Connecting to a Peer
+* To list discovered peers in the active transport:
   ```text
   /connect
   ```
-* To establish a direct BLE connection:
+* To establish a direct connection:
   ```text
   # Connect by nickname:
   /connect Bob
 
-  # Connect by BLE MAC / device address:
+  # Connect by LAN IP and port:
+  /connect 192.168.1.45:41235
+
+  # Connect by BLE MAC address:
   /connect 11:22:33:44:55:66
   ```
 
-### 5. Public Mesh Broadcasting
+### 6. Public Mesh Broadcasting
 * To broadcast a message across the entire local mesh room:
   ```text
   Hello everyone on the mesh!
   ```
 * Messages sent to `#public` are relayed hop-by-hop up to TTL 7 with anti-looping deduplication and 10–50ms randomized jitter. If intermediate nodes are offline, the Store-and-Forward queue holds packets until routes become available.
 
-### 6. Encrypted Direct Messaging (Noise XX)
+### 7. Encrypted Direct Messaging (Noise XX)
 Send private, end-to-end encrypted messages to any peer using either syntax:
 * **Inline Syntax:**
   ```text
@@ -259,7 +299,7 @@ Send private, end-to-end encrypted messages to any peer using either syntax:
   ```
 * Messages are authenticated using Ed25519 signatures, encrypted with ChaCha20-Poly1305, and protected by a 1024-entry replay window.
 
-### 7. Switching Conversation Contexts
+### 8. Switching Conversation Contexts
 * To switch your active focus to a private 1-on-1 room with a peer without sending an immediate message, type:
   ```text
   @Bob
@@ -270,13 +310,13 @@ Send private, end-to-end encrypted messages to any peer using either syntax:
   /public
   ```
 
-### 8. Command Palette & Autocomplete
+### 9. Command Palette & Autocomplete
 * Type `/` to open the command palette above the prompt.
 * Use `Up` and `Down` arrow keys to browse commands.
 * Press `Tab` or `Enter` to complete the command into the input box.
 * Type `@` to view suggestions for online and known peers, and press `Tab` to complete their name.
 
-### 9. Appearance & Theme Customization (F2)
+### 10. Appearance & Theme Customization (F2)
 Press `F2` (or click `Edit Theme` or type `/edit`) to open the theme dialogue:
 * **Display Density:**
   * **Comfortable:** Default multi-line layout with generous spacing.
@@ -291,8 +331,9 @@ Press `F2` (or click `Edit Theme` or type `/edit`) to open the theme dialogue:
   * **Amethyst Purple** (`#bc8cff`)
 * Click **Apply Theme** to save changes immediately to `~/.bitchat/config.json`.
 
-### 10. Dynamic Keybindings & Settings (F3)
+### 11. Dynamic Keybindings & Settings (F3)
 Press `F3` (or click `Settings` or type `/settings`) to configure:
+* **Transport Selection:** Toggle active transport medium between **Bluetooth** and **LAN / Wi-Fi**.
 * **Node Parameters:** Nickname, channel, and BLE advertisement state.
 * **Dynamic Keybindings:** Reassign any of the 7 application actions:
   * Help
@@ -330,7 +371,8 @@ Press `F3` (or click `Settings` or type `/settings`) to configure:
 
 | Command | Usage | Description | Category |
 |---|---|---|---|
-| `/connect` | `/connect [address\|peer]` | Connect to peer BLE address or list discovered peers | Network |
+| `/transport` | `/transport [bluetooth\|lan]` | Switch network medium and generate fresh peer identity | Network |
+| `/connect` | `/connect [address\|peer]` | Connect to peer address or list discovered peers | Network |
 | `/disconnect` | `/disconnect [address]` | Disconnect from peer or all connected peers | Network |
 | `/scan` | `/scan` | Trigger active scan for nearby BitChat nodes | Network |
 | `/online` | `/online` | List connected and known mesh peers | Network |
@@ -418,17 +460,22 @@ Press `F3` (or click `Settings` or type `/settings`) to configure:
 - ✅ Implemented: IDE-style anchored command palette (`AutocompletePalette`) with non-submitting Tab/Enter completion, prefix filtering, and contextual peer suggestions
 - ✅ Implemented: Conversation context switching (`@peer` with no message) and direct encrypted messaging (`@peer <message>`)
 - ✅ Implemented: Safe peer address and nickname resolution supporting 16-hex peer IDs and BLE MAC prefixes
-- ✅ Implemented: 563 automated test cases covering protocol, crypto, fragmentation, mesh routing, store-and-forward, BLE mocks, and full interactive TUI lifecycle
+- ✅ Implemented: Transport abstraction (`BaseTransport`) decoupling application, protocol, and crypto layers from physical link media
+- ✅ Implemented: Local Area Network (LAN / Wi-Fi) transport backend (`LANTransport`) with zero-configuration UDP discovery (port 41234) and framed TCP streaming (port 41235)
+- ✅ Implemented: Length-prefixed streaming framer (`StreamFramer`) with 8-byte header (`BC\x01\x00` magic + length) and bounded buffer validation
+- ✅ Implemented: Live Windows network interface, IP address, and Wi-Fi SSID telemetry (`NetworkAdapterManager`)
+- ✅ Implemented: Dynamic transport switching (`/transport`, Settings `F3`) with automatic session teardown and fresh ephemeral identity generation
+- ✅ Implemented: 594 automated test cases covering protocol, crypto, fragmentation, mesh routing, store-and-forward, BLE mocks, LAN discovery, TCP framing, and full interactive TUI lifecycle
 - 🚧 Planned: Persistent message database (SQLite)
-- 🚧 Planned: Physical multi-PC over-the-air validation on two real Bluetooth machines
+- 🚧 Planned: Physical multi-PC validation across two distinct physical machines
 
 ---
 
-## Hardware & Two-PC BLE Validation Status
-- **Automated Integration:** 100% automated integration and end-to-end suite passing (563 tests, including two-node Noise XX and three-node multi-hop mesh relay).
-- **Windows (WinRT):** GATT Server creation and BLE service advertisement verified on host hardware.
-- **Linux / macOS:** Central scanning and client transport implemented via Bleak; peripheral advertising pending platform-specific daemon bindings.
-- **Physical Hardware Status:** *"Automated integration, simulated multi-node mesh tests, and interactive TUI lifecycle probes are 100% passing. Real two-PC physical over-the-air BLE validation remains UNVERIFIED pending availability of a second physical machine."*
+## Hardware & Two-PC Validation Status
+- **Automated Integration:** 100% automated integration and end-to-end suite passing (594 tests, including two-node Noise XX over BLE and two-node Noise XX over framed TCP LAN).
+- **Windows (WinRT):** GATT Server creation, BLE service advertisement, and local Wi-Fi SSID queries verified on host hardware.
+- **LAN / Wi-Fi Localhost & Local Subnet:** Fully verified. UDP discovery beacons and point-to-point framed TCP connections establish encrypted Noise XX handshakes and route messages cleanly.
+- **Physical Two-PC Status:** *"Automated integration, simulated multi-node mesh tests, and interactive TUI lifecycle probes are 100% passing. Real two-PC physical over-the-air validation on two separate physical hardware machines remains UNVERIFIED pending availability of a second physical machine."*
 
 ---
 

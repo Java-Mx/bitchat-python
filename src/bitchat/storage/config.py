@@ -11,6 +11,7 @@ from bitchat.exceptions import ConfigurationError
 
 VALID_DENSITIES: frozenset[str] = frozenset({"comfortable", "compact"})
 VALID_ACCENTS: frozenset[str] = frozenset({"blue", "cyan", "emerald", "purple"})
+VALID_TRANSPORTS: frozenset[str] = frozenset({"bluetooth", "lan"})
 
 DEFAULT_KEYBINDINGS: dict[str, str] = {
     "help": "f1",
@@ -74,6 +75,7 @@ class AppConfig:
     density: str = "comfortable"
     show_timestamps: bool = True
     accent: str = "blue"
+    transport: str = "bluetooth"
     max_hops: int = 3
     inter_fragment_delay_ms: int = 20
     keybindings: dict[str, str] = field(
@@ -85,6 +87,8 @@ class AppConfig:
             self.density = "comfortable"
         if self.accent not in VALID_ACCENTS:
             self.accent = "blue"
+        if self.transport not in VALID_TRANSPORTS:
+            self.transport = "bluetooth"
         try:
             self.max_hops = max(1, min(7, int(self.max_hops)))
         except (ValueError, TypeError):
@@ -135,6 +139,15 @@ class AppConfig:
         if accent not in VALID_ACCENTS:
             accent = "blue"
 
+        transport_val = data.get("transport")
+        transport = (
+            str(transport_val).lower()
+            if isinstance(transport_val, str)
+            else "bluetooth"
+        )
+        if transport not in VALID_TRANSPORTS:
+            transport = "bluetooth"
+
         try:
             hops = int(data.get("max_hops", 3))
             max_hops = max(1, min(7, hops))
@@ -155,6 +168,7 @@ class AppConfig:
             density=density,
             show_timestamps=show_timestamps,
             accent=accent,
+            transport=transport,
             max_hops=max_hops,
             inter_fragment_delay_ms=inter_fragment_delay_ms,
             keybindings=keybindings,

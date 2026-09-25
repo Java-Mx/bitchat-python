@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, ClassVar
 
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 
 from bitchat.storage.config import DEFAULT_KEYBINDINGS
 
@@ -64,12 +65,14 @@ class SettingsModal(ModalScreen[None]):
             max_hops: int,
             inter_fragment_delay_ms: int,
             keybindings: dict[str, str] | None = None,
+            transport: str = "bluetooth",
         ) -> None:
             super().__init__()
             self.nickname = nickname
             self.max_hops = max_hops
             self.inter_fragment_delay_ms = inter_fragment_delay_ms
             self.keybindings = keybindings or DEFAULT_KEYBINDINGS.copy()
+            self.transport = transport
 
     def __init__(
         self,
@@ -77,6 +80,7 @@ class SettingsModal(ModalScreen[None]):
         current_max_hops: int = 3,
         current_delay_ms: int = 20,
         current_keybindings: dict[str, str] | None = None,
+        current_transport: str = "bluetooth",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -88,6 +92,7 @@ class SettingsModal(ModalScreen[None]):
             if current_keybindings
             else DEFAULT_KEYBINDINGS.copy()
         )
+        self.current_transport = current_transport
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
@@ -98,6 +103,19 @@ class SettingsModal(ModalScreen[None]):
 
             with Vertical(id="settings-form"):
                 yield Label("Node Parameters:", classes="settings-field-label")
+                yield Label("Transport Medium:")
+                with RadioSet(id="settings-radio-transport"):
+                    yield RadioButton(
+                        "Bluetooth",
+                        value=(self.current_transport == "bluetooth"),
+                        id="radio-transport-bluetooth",
+                    )
+                    yield RadioButton(
+                        "LAN / Wi-Fi",
+                        value=(self.current_transport == "lan"),
+                        id="radio-transport-lan",
+                    )
+
                 yield Label("Local Nickname:")
                 yield Input(
                     value=self.current_nickname,
@@ -167,6 +185,9 @@ class SettingsModal(ModalScreen[None]):
         for action, default_key in DEFAULT_KEYBINDINGS.items():
             inp = self.query_one(f"#settings-kb-{action}", Input)
             inp.value = default_key
+        with contextlib.suppress(Exception):
+            radio_btn = self.query_one("#radio-transport-bluetooth", RadioButton)
+            radio_btn.value = True
         hint = self.query_one("#settings-hint", Static)
         hint.update(
             "[bold #58a6ff]Keybindings restored to defaults. "
@@ -188,6 +209,17 @@ class SettingsModal(ModalScreen[None]):
             delay = max(5, min(500, int(delay_input)))
         except ValueError:
             delay = self.current_delay_ms
+
+        selected_transport = self.current_transport
+        with contextlib.suppress(Exception):
+            radio_set = self.query_one("#settings-radio-transport", RadioSet)
+            if (
+                radio_set.pressed_button
+                and radio_set.pressed_button.id == "radio-transport-lan"
+            ):
+                selected_transport = "lan"
+            else:
+                selected_transport = "bluetooth"
 
         # Validate keybindings
         keybindings: dict[str, str] = {}
@@ -217,7 +249,9 @@ class SettingsModal(ModalScreen[None]):
             assigned_keys[raw_key] = label
             keybindings[action] = raw_key
 
-        msg = self.SettingsSaved(nick, hops, delay, keybindings)
+        msg = self.SettingsSaved(
+            nick, hops, delay, keybindings, transport=selected_transport
+        )
         self.app.post_message(msg)
         self.post_message(msg)
         self.dismiss()

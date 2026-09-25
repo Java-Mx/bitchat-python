@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     from textual import events
     from textual.app import ComposeResult
 
-    from bitchat.ble.models import DiscoveredPeer
-
 
 class PeerListItem(ListItem):
     """Custom list item carrying peer address and name metadata."""
@@ -43,6 +41,7 @@ class PeerSidebar(Widget):
     nickname: reactive[str] = reactive("Anonymous")
     peer_id_hex: reactive[str] = reactive("")
     fingerprint: reactive[str] = reactive("")
+    active_transport: reactive[str] = reactive("bluetooth")
 
     class PeerSelected(Message):
         """Emitted when user selects a peer to switch conversation context."""
@@ -75,8 +74,17 @@ class PeerSidebar(Widget):
         self._discovered_peers: dict[str, str] = {}  # addr -> label
         self._addr_to_name: dict[str, str] = {}
 
+    def watch_active_transport(self, new_val: str) -> None:
+        self.border_title = (
+            "Peers (LAN / Wi-Fi)" if new_val == "lan" else "Peers (BLE Mesh)"
+        )
+
     def on_mount(self) -> None:
-        self.border_title = "Peers (BLE Mesh)"
+        self.border_title = (
+            "Peers (LAN / Wi-Fi)"
+            if self.active_transport == "lan"
+            else "Peers (BLE Mesh)"
+        )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="identity-card"):
@@ -143,49 +151,97 @@ class PeerSidebar(Widget):
 
     def set_discovered_peers(
         self,
-        peers: dict[str, DiscoveredPeer],
+        peers: dict[str, Any],
         is_scanning: bool = True,
         is_offline: bool = False,
+        transport: str = "bluetooth",
     ) -> None:
         """Update discovered peers list."""
-        self._discovered_peers = {
-            addr: f"{p.name or 'Unknown'} ({p.rssi} dBm)" for addr, p in peers.items()
-        }
+        self._discovered_peers = {}
+        for addr, p in peers.items():
+            if getattr(p, "transport", "bluetooth") == "lan":
+                nick = (
+                    getattr(p, "nickname", None)
+                    or getattr(p, "name", None)
+                    or "Unknown"
+                )
+                self._discovered_peers[addr] = f"{nick} ({getattr(p, 'ip', addr)})"
+            else:
+                p_name = getattr(p, "name", None) or "Unknown"
+                rssi_str = getattr(p, "rssi", "")
+                self._discovered_peers[addr] = f"{p_name} ({rssi_str} dBm)"
+
         with contextlib.suppress(Exception):
             view = self.query_one("#discovered-peers-list", ListView)
             view.clear()
             if is_offline:
-                view.append(ListItem(Label("[dim red]Bluetooth Unavailable[/dim red]")))
+                unavail = (
+                    "LAN / Wi-Fi Unavailable"
+                    if transport == "lan"
+                    else "Bluetooth Unavailable"
+                )
+                view.append(ListItem(Label(f"[dim red]{unavail}[/dim red]")))
             elif not self._discovered_peers:
                 if is_scanning:
-                    view.append(
-                        ListItem(Label("[dim]Scanning for BitChat peers...[/dim]"))
+                    scanning_msg = (
+                        "Searching local network for peers..."
+                        if transport == "lan"
+                        else "Scanning for BitChat peers..."
                     )
+                    view.append(ListItem(Label(f"[dim]{scanning_msg}[/dim]")))
                 else:
-                    view.append(
-                        ListItem(Label("[dim]No BitChat peers discovered[/dim]"))
+                    no_peers_msg = (
+                        "No BitChat peers on local network"
+                        if transport == "lan"
+                        else "No BitChat peers discovered"
                     )
+                    view.append(ListItem(Label(f"[dim]{no_peers_msg}[/dim]")))
             else:
                 for addr, p in peers.items():
-                    name = p.name or (
-                        f"Peer {p.peer_id[:8]}" if p.peer_id else "BitChat Node"
+                    is_lan = (
+                        getattr(p, "transport", "bluetooth") == "lan"
+                        or transport == "lan"
                     )
+                    p_id = getattr(p, "peer_id", None)
+                    p_name = getattr(p, "nickname", None) or getattr(p, "name", None)
+                    name = p_name or (f"Peer {p_id[:8]}" if p_id else "BitChat Node")
                     color = get_peer_color(name)
-                    rssi_str = f"{p.rssi} dBm" if p.rssi is not None else "Nearby"
                     id_line = (
-                        f"  [dim #8b949e]ID: {p.peer_id[:12]}[/dim #8b949e]\n"
-                        if p.peer_id
+                        f"  [dim #8b949e]ID: {p_id[:12]}[/dim #8b949e]\n"
+                        if p_id
                         else ""
                     )
-                    item = PeerListItem(
-                        Label(
-                            f"[{color}]○ {name}[/{color}]\n"
-                            f"{id_line}"
-                            f"  [dim #8b949e]{rssi_str} • {addr}[/dim #8b949e]"
-                        ),
-                        peer_address=addr,
-                        peer_name=name,
-                    )
+                    if is_lan:
+                        ip_val = getattr(p, "ip", "")
+                        port_val = getattr(p, "port", "")
+                        ip_port = (
+                            f"{ip_val}:{port_val}" if ip_val and port_val else addr
+                        )
+                        ssid = getattr(p, "ssid", None)
+                        net_str = f"Network: {ssid} • " if ssid else ""
+                        item = PeerListItem(
+                            Label(
+                                f"[{color}]○ {name}[/{color}]\n"
+                                f"{id_line}"
+                                f"  [dim #8b949e]{net_str}{ip_port}[/dim #8b949e]"
+                            ),
+                            peer_address=addr,
+                            peer_name=name,
+                        )
+                    else:
+                        rssi_val = getattr(p, "rssi", None)
+                        rssi_str = (
+                            f"{rssi_val} dBm" if rssi_val is not None else "Nearby"
+                        )
+                        item = PeerListItem(
+                            Label(
+                                f"[{color}]○ {name}[/{color}]\n"
+                                f"{id_line}"
+                                f"  [dim #8b949e]{rssi_str} • {addr}[/dim #8b949e]"
+                            ),
+                            peer_address=addr,
+                            peer_name=name,
+                        )
                     view.append(item)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

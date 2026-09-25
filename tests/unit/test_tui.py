@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
-from textual.widgets import Button, Input, RichLog, Static
+from textual.widgets import Button, Input, RadioButton, RichLog, Static
 
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.ble.manager import BLEManager
@@ -1171,3 +1171,43 @@ async def test_phase10_connect_command_peer_resolution_and_discovery(
             "Connecting to peer at 11:22:33:44:55:66 (BitChat-Remote)" in m.text
             for m in chat._message_history
         )
+
+
+@pytest.mark.asyncio
+async def test_phase11_settings_transport_selection_and_switch(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Settings modal transport selection switches coordinator transport
+    and updates sidebar.
+    """
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        sidebar = app.query_one(PeerSidebar)
+        assert "BLE Mesh" in sidebar.border_title
+        assert test_coordinator.active_transport_name == "bluetooth"
+
+        # 1. Open settings modal
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        settings_modal = app.screen
+
+        # Select LAN transport
+        lan_radio = settings_modal.query_one("#radio-transport-lan", RadioButton)
+        lan_radio.value = True
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+        assert not isinstance(app.screen, SettingsModal)
+
+        # Verify switched to LAN
+        assert test_coordinator.active_transport_name == "lan"
+        assert "LAN / Wi-Fi" in sidebar.border_title
+
+        # 2. Switch back to bluetooth via command line
+        inp = app.query_one(MessageInput)
+        inp.value = "/transport bluetooth"
+        await inp.action_submit()
+        await pilot.pause()
+
+        assert test_coordinator.active_transport_name == "bluetooth"
+        assert "BLE Mesh" in sidebar.border_title

@@ -26,6 +26,9 @@ class Peer:
     fingerprint: str | None = None
     last_seen: datetime | None = None
     connection_state: PeerConnectionState = PeerConnectionState.DISCONNECTED
+    transport: str = "bluetooth"
+    address: str = ""
+    ssid: str | None = None
 
     @property
     def is_online(self) -> bool:

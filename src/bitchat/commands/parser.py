@@ -23,6 +23,7 @@ class CommandType(StrEnum):
     STATUS = "status"
     INFO = "info"
     PUBLIC = "public"
+    TRANSPORT = "transport"
     EMPTY = "empty"
     UNKNOWN = "unknown"
 
@@ -83,6 +84,13 @@ COMMAND_REGISTRY: list[CommandSpec] = [
         usage="/public",
         description="Switch active conversation to #public",
         category="Chat",
+    ),
+    CommandSpec(
+        name="/transport",
+        usage="/transport [bluetooth|lan]",
+        description="Switch active transport medium (bluetooth or lan)",
+        category="Network",
+        arg_type="transport_medium",
     ),
     CommandSpec(
         name="/info",
@@ -334,6 +342,13 @@ class CommandParser:
         if first_token in ("public", "/public", "channel", "/channel"):
             return Command(
                 command_type=CommandType.PUBLIC,
+                raw_input=text,
+                args=tokens[1:],
+            )
+
+        if first_token in ("transport", "/transport", "medium", "/medium"):
+            return Command(
+                command_type=CommandType.TRANSPORT,
                 raw_input=text,
                 args=tokens[1:],
             )

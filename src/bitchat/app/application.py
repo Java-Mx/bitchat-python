@@ -217,7 +217,10 @@ class Application:
         self.stdout.flush()
 
         coord = self._ensure_coordinator()
-        self._run_async(coord.ble_manager.connect_peer(target_address))
+        if coord.ble_manager:
+            self._run_async(coord.ble_manager.connect_peer(target_address))
+        else:
+            self._run_async(coord.active_transport.connect_peer(target_address))
         return True
 
     def _handle_disconnect(self, command: Command) -> bool:
@@ -229,10 +232,18 @@ class Application:
         if command.args:
             target = command.args[0]
             self.stdout.write(f"Disconnecting from {target}...\n")
-            self._run_async(self.coordinator.ble_manager.disconnect_peer(target))
+            if self.coordinator.ble_manager:
+                self._run_async(self.coordinator.ble_manager.disconnect_peer(target))
+            else:
+                self._run_async(
+                    self.coordinator.active_transport.disconnect_peer(target)
+                )
         else:
             self.stdout.write("Disconnecting all peers...\n")
-            self._run_async(self.coordinator.ble_manager.shutdown())
+            if self.coordinator.ble_manager:
+                self._run_async(self.coordinator.ble_manager.shutdown())
+            else:
+                self._run_async(self.coordinator.active_transport.stop())
         self.stdout.flush()
         return True
 
@@ -241,11 +252,16 @@ class Application:
             self._handle_initialize_chat(command)
 
         coord = self._ensure_coordinator()
-        discovered = coord.ble_manager.discovered_peers
+        discovered = (
+            coord.ble_manager.discovered_peers
+            if coord.ble_manager
+            else coord.active_transport.discovered_peers
+        )
         self.stdout.write(f"Discovered {len(discovered)} BitChat peer(s):\n")
         for addr, peer in discovered.items():
-            name = peer.name or "Unknown"
-            self.stdout.write(f"  - {addr} ({name}, {peer.rssi} dBm)\n")
+            name = getattr(peer, "name", None) or "Unknown"
+            rssi = getattr(peer, "rssi", "")
+            self.stdout.write(f"  - {addr} ({name}, {rssi} dBm)\n")
         self.stdout.flush()
         return True
 
@@ -255,7 +271,11 @@ class Application:
             self.stdout.flush()
             return True
 
-        connected = self.coordinator.ble_manager.connected_peers
+        connected = (
+            self.coordinator.ble_manager.connected_peers
+            if self.coordinator.ble_manager
+            else self.coordinator.active_transport.connected_peers
+        )
         self.stdout.write(f"Connected peers ({len(connected)}):\n")
         for addr in connected:
             peer_id = self.coordinator.address_to_peer_id.get(addr, "unknown")

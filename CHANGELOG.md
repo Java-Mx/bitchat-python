@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 11: Transport Abstraction Layer & Local Area Network (LAN / Wi-Fi) Chat (`bitchat.transport`, `bitchat.network`):
+  - Abstract base class `BaseTransport` (`bitchat.transport.base`) defining standard transport lifecycle (`start`, `stop`, `start_discovery`, `stop_discovery`), messaging (`send_to_peer`, `broadcast_packet`), peer connections (`connect_peer`, `disconnect_peer`), identity propagation (`update_identity`, `resolve_peer_id_to_address`), and live telemetry (`get_telemetry`).
+  - Concrete `BluetoothTransport` bridging existing `BLEManager` and `BLEServer` to `BaseTransport` with complete null-safety for mock and headless environments.
+  - High-performance LAN/Wi-Fi transport (`LANTransport`):
+    - Zero-configuration UDP broadcast discovery on port 41234 (`LANDiscovery`) broadcasting bounded JSON beacons (`BC_DISCOVER_V1`) carrying peer ID, nickname, TCP port, and Wi-Fi SSID, with per-IP rate limiting (10 pkts/s) and 30-second TTL peer table pruning.
+    - Robust 8-byte length-prefixed TCP streaming framing (`StreamFramer`, `encode_frame`) utilizing `BC\x01\x00` magic and 4-byte big-endian payload lengths, enforcing 65,536-byte max frame limits with full chunk fragmentation and concatenation assembly.
+    - Asynchronous TCP client connection (`LANConnection`) with connect timeouts, send queues, reader loops, and safe proactor loop close handling.
+    - Concurrent TCP listener (`LANServer`) supporting up to 32 concurrent peer links with ephemeral port fallback.
+    - Real-time Windows network adapter telemetry (`NetworkAdapterManager`): detects active network interfaces, local non-loopback IPv4 addresses, and Windows Wi-Fi SSIDs (`netsh wlan show interfaces`) with background polling and state transition events.
+  - Ephemeral transport switching with privacy guarantees:
+    - `SessionCoordinator.switch_transport()` stops active transport, terminates all existing Noise XX sessions, and generates a fresh transport-scoped identity (`LocalIdentity.generate()`) with a new Peer ID; permanent disk storage (`identity.json`) is never modified or leaked across transports.
+    - In-app notification informs user of the new peer identity and fresh cryptographic context.
+  - User interface and command updates:
+    - Added `/transport [bluetooth|lan]` slash command with autocomplete suggestions and input validation.
+    - Added `Transport Selection:` radio button set (`Bluetooth`, `LAN / Wi-Fi`) to Settings modal (`F3`).
+    - Dynamic sidebar border title updating between `Peers (BLE Mesh)` and `Peers (LAN / Wi-Fi)` with LAN peer indicators showing Wi-Fi SSID and `ip:port` endpoints.
+    - Transport-aware autocomplete and `/status` diagnostics.
+  - Expanded test suite to 594 passing tests with 100% pass rate.
 - Phase 9.3 Addendum: UI Functional Completeness Audit & Real Settings Implementation (`bitchat.storage`, `bitchat.tui`):
   - Real display density switching: `Comfortable` mode (multi-line structured message bubbles, spacious 32-col sidebar) vs `Compact` mode (dense single-line chat messages, 25-col sidebar, compact message input) dynamically updates root CSS classes and re-renders full message history.
   - Dynamic message timestamp toggling: `Show Timestamps` vs `Hide Timestamps` dynamically controls timestamp rendering on incoming messages and retroactively re-renders structured history with or without timestamps.

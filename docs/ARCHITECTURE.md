@@ -13,9 +13,9 @@ Mesh Router (Relay, Dedup, Store & Forward)
  ↓
 Protocol / Crypto / Storage
  ↓
-BLE Transport (Bleak)
- ↓
-OS Bluetooth APIs
+Transport Abstraction Layer (BaseTransport)
+ ├── Bluetooth Low Energy (BLEManager, BLEServer via Bleak/WinRT)
+ └── LAN / Wi-Fi (UDP Discovery 41234 + Framed TCP Streaming 41235)
 ```
 
 ## Module Responsibilities
@@ -66,6 +66,16 @@ OS Bluetooth APIs
   - `transport.py`: `BLETransport` integrating packet serialization, conditional fragmentation (>500B), 20ms pacing, bounded reception queue, and fragment reassembly.
   - `server.py`: `BLEServer` GATT peripheral server advertising BitChat service UUID, receiving write-without-response frames, and sending notifications.
   - `manager.py`: `BLEManager` high-level coordinator managing scanner lifecycle, multiple active peer connections, direct sending, and broadcast.
+- **`transport/`**: Common transport abstraction (`BaseTransport`, `TransportType`, `TransportState`, `TransportPeer`). Establishes a uniform interface for all network backends, enabling zero-duplication protocol handling and seamless runtime transport switching.
+  - `base.py`: Abstract `BaseTransport` contract defining discovery, messaging, telemetry, and connection lifecycles.
+  - `bluetooth.py`: `BluetoothTransport` bridging existing `BLEManager` and `BLEServer` to `BaseTransport`.
+- **`network/`**: High-performance Local Area Network (LAN / Wi-Fi) transport backend.
+  - `discovery.py`: `LANDiscovery` UDP broadcast daemon on port 41234 transmitting and receiving `BC_DISCOVER_V1` beacons with per-IP rate limiting and TTL pruning.
+  - `framing.py`: Length-prefixed stream framer (`StreamFramer`, `encode_frame`) with 8-byte header (`BC\x01\x00` magic + 4-byte payload length) and chunk assembly.
+  - `connection.py`: `LANConnection` handling async TCP peer connections, dedicated send queues, reader loops, and graceful teardown.
+  - `server.py`: `LANServer` asynchronous TCP listener supporting up to 32 concurrent links with dynamic port fallback.
+  - `adapter.py`: `NetworkAdapterManager` detecting active Windows interfaces, local IPv4 addresses, and Wi-Fi SSIDs (`netsh wlan show interfaces`).
+  - `transport.py`: `LANTransport` unifying discovery, server listening, and connection management into a single `BaseTransport` implementation.
 - **`models/`**: Shared data types (independent, leaf dependency).
 - **`utils/`**: Shared utilities (independent, leaf dependency).
 - **`commands/`**: CLI command definitions (depends on `app`).
@@ -157,6 +167,46 @@ Persistent node configuration and user preferences are decoupled into `bitchat.s
 - **`StorageInterface` / `FileConfigStorage`**: Atomic JSON persistence under `~/.bitchat/config.json`.
 - **Decoupled Appearance Settings**: Appearance parameters (`density: "comfortable" | "compact"`, `show_timestamps: bool`, `accent: "blue" | "cyan" | "emerald" | "purple"`) and node operational parameters (`nickname`, `max_hops`, `inter_fragment_delay_ms`) are saved to storage without storing sensitive keys.
 - **TUI Synchronization**: TUI screens (`EditThemeModal`, `SettingsModal`) post typed messages to the application root, which updates reactive CSS classes, triggers structured history re-rendering in `ChatView`, and updates persistent storage.
+
+## Transport Abstraction & Dual-Transport Architecture
+
+BitChat decouples high-level messaging, routing, and cryptography from network transport media through `BaseTransport`:
+
+```
+                           SessionCoordinator
+                                   │
+              ┌────────────────────┴────────────────────┐
+              ▼                                         ▼
+      BluetoothTransport                           LANTransport
+      (BLEManager + BLEServer)             (Discovery + TCP Server)
+              │                                         │
+        Bleak / WinRT                        Asyncio UDP + Framed TCP
+              │                                         │
+     Bluetooth 4.2+ Mesh                     LAN / Wi-Fi (802.11 / Eth)
+```
+
+### Transport Contract
+All transports implement `BaseTransport` (`bitchat.transport.base`):
+- **Lifecycle**: `start()`, `stop()`, `start_discovery()`, `stop_discovery()`
+- **Transmission**: `send_to_peer(address, packet)`, `broadcast_packet(packet, exclude_address)`
+- **Connections**: `connect_peer(address)`, `disconnect_peer(address)`
+- **Identity & Resolution**: `update_identity(peer_id, nickname)`, `resolve_peer_id_to_address(target)`
+- **Telemetry**: `get_telemetry() -> dict[str, Any]`
+
+### LAN / Wi-Fi Backend Protocol
+1. **UDP Discovery (Port 41234)**:
+   - Nodes broadcast JSON discovery beacons (`BC_DISCOVER_V1`) carrying `peer_id`, `nickname`, `port`, and `ssid`.
+   - Packets are bounded to 1,024 bytes with strict schema validation.
+   - Per-IP rate limiting (10 beacons/s) prevents amplification or discovery flooding.
+   - Discovered peers expire automatically after 30 seconds without beacon refresh.
+2. **Framed TCP Streaming (Port 41235)**:
+   - Connections use 8-byte length-prefixed streaming frames:
+     `[ 4B Magic (0x42 0x43 0x01 0x00) ] [ 4B Big-Endian Length ] [ Payload ]`
+   - Bounded buffer limits (65,536 bytes) prevent memory exhaustion.
+   - Handles TCP segmentation, chunk fragmentation, and concatenated frame delivery transparently.
+3. **Transport Switching & Ephemeral Identity**:
+   - Switching between Bluetooth and LAN (`/transport` or Settings modal `F3`) immediately terminates active connections, tears down existing Noise XX sessions, and generates a fresh transport-scoped identity (`LocalIdentity.generate()`).
+   - Permanent identity storage (`~/.bitchat/identity.json`) is never overwritten, guaranteeing cryptographic privacy across transport boundaries.
 
 ## Dependency Rules
 - Higher layers depend on lower layers, never the reverse.
