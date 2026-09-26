@@ -582,6 +582,38 @@ async def test_tui_ble_truthful_state_and_error_modal(
 
 
 @pytest.mark.asyncio
+async def test_tui_lan_status_uses_real_network_values_only(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """LAN diagnostics must never default to localhost or synthetic loopback values."""
+    app = BitChatApp(coordinator=test_coordinator)
+    test_coordinator.active_transport_name = "lan"
+    test_coordinator.ble_status = "scanning"
+    test_coordinator.get_detailed_status = lambda: {
+        "transport": "lan",
+        "state": "scanning",
+        "interface": "Wi-Fi",
+        "ssid": "OfficeNet",
+        "local_ip": "",
+        "listening_port": 41235,
+        "discovery": "Active",
+        "discovered_peers_count": 0,
+        "connected_peers_count": 0,
+        "local_nickname": "Alice",
+        "local_peer_id": "01" * 8,
+    }
+
+    async with app.run_test() as pilot:
+        chat = app.query_one(ChatView)
+        app._display_status_diagnostics(chat)
+        await pilot.pause()
+        rendered = "\n".join(str(line) for line in chat.rich_log.lines)
+        assert "127.0.0.1" not in rendered
+        assert "unavailable" in rendered.lower()
+        assert "OfficeNet" in rendered
+
+
+@pytest.mark.asyncio
 async def test_tui_phase93_footer_2_2_2_structure_and_actions(
     test_coordinator: SessionCoordinator,
 ) -> None:

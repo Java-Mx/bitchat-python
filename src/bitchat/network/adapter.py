@@ -42,7 +42,7 @@ def get_local_ip() -> str:
     except Exception:
         pass
 
-    return "127.0.0.1"
+    return ""
 
 
 def get_wifi_ssid_and_state() -> tuple[str | None, str | None]:

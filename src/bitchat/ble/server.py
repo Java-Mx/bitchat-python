@@ -83,7 +83,7 @@ class BLEServer:
             if self._custom_backend is not None:
                 await self._custom_backend.start(self)
                 self._is_advertising = True
-                logger.info("BLEServer started using custom/mock backend")
+                logger.info("BLEServer started using injected test backend")
                 return
 
             if os.name == "nt":
@@ -104,7 +104,7 @@ class BLEServer:
             if self._custom_backend is not None:
                 await self._custom_backend.stop()
                 self._is_advertising = False
-                logger.info("BLEServer stopped using custom/mock backend")
+                logger.info("BLEServer stopped using injected test backend")
                 return
 
             if os.name == "nt":

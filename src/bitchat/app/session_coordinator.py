@@ -17,6 +17,7 @@ from bitchat.protocol.constants import MessageType
 from bitchat.protocol.decoder import decode_packet
 from bitchat.protocol.packet import BitchatPacket
 from bitchat.protocol.reassembly import FragmentReassembler
+from bitchat.transport.base import BaseTransport, TransportState
 from bitchat.transport.bluetooth import BluetoothTransport
 
 if TYPE_CHECKING:
@@ -25,7 +26,6 @@ if TYPE_CHECKING:
     from bitchat.ble.manager import BLEManager
     from bitchat.ble.server import BLEServer
     from bitchat.storage.config import StorageInterface
-    from bitchat.transport.base import BaseTransport, TransportState
 
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,7 @@ class SessionCoordinator:
         self.peer_nicknames: dict[str, str] = {}
         self._announced_peers: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._retry_lock = asyncio.Lock()
 
         self.server_reassembler = FragmentReassembler()
         self._is_running: bool = False
@@ -167,6 +168,10 @@ class SessionCoordinator:
             self._sessions[remote_peer_id_hex] = session
         return session
 
+    def get_session(self, remote_peer_id_hex: str) -> NoiseSession | None:
+        """Return an existing Noise session without creating one."""
+        return self._sessions.get(remote_peer_id_hex)
+
     def get_detailed_status(self) -> dict[str, Any]:
         """Return truthful telemetry dictionary for diagnostics."""
         telem = self.active_transport.get_telemetry()
@@ -249,22 +254,66 @@ class SessionCoordinator:
             if self.on_ble_error:
                 self.on_ble_error(self.ble_error_message)
 
-    async def retry_ble(self) -> bool:
-        """Attempt to re-initialize active transport after a failure or recovery."""
-        self.ble_status = "checking"
-        self.ble_error_message = None
-        try:
-            await self.active_transport.start()
-            self.ble_status = self.active_transport.state.value
-            await self.send_announce()
-            return True
-        except Exception as e:
-            logger.warning("Retry active transport failed: %s", e)
-            self.ble_status = "unavailable"
-            self.ble_error_message = str(e)
-            if self.on_ble_error:
-                self.on_ble_error(self.ble_error_message)
+    def _transport_is_operational(self) -> bool:
+        """Return True only if the active transport is actually usable."""
+        state = self.active_transport.state
+        if state in (
+            TransportState.UNAVAILABLE,
+            TransportState.DISABLED,
+            TransportState.ERROR,
+            TransportState.OFFLINE,
+            TransportState.CHECKING,
+        ):
             return False
+        telem = self.active_transport.get_telemetry()
+        if self.active_transport_name == "bluetooth":
+            if telem.get("adapter_state") != "On":
+                if self._uses_injected_ble_backend():
+                    return telem.get("scanner_status") == "Active"
+                return False
+            return telem.get("scanner_status") == "Active"
+        if self.active_transport_name == "lan":
+            return (
+                telem.get("status") == "Connected"
+                and telem.get("discovery") == "Active"
+                and telem.get("listening") == "Active"
+            )
+        return True
+
+    def _uses_injected_ble_backend(self) -> bool:
+        ble = self._transports.get("bluetooth")
+        if ble is None:
+            return False
+        checker = getattr(ble, "_uses_injected_test_backend", None)
+        return bool(checker()) if callable(checker) else False
+
+    async def retry_ble(self) -> bool:
+        """Re-initialize the active transport after failure. Success is operational."""
+        async with self._retry_lock:
+            self.ble_status = "checking"
+            self.ble_error_message = None
+            with contextlib.suppress(Exception):
+                await self.active_transport.stop()
+            try:
+                await self.active_transport.start()
+                self._is_running = True
+                self.ble_status = self.active_transport.state.value
+                if not self._transport_is_operational():
+                    self.ble_status = self.active_transport.state.value
+                    self.ble_error_message = (
+                        self.active_transport.get_telemetry().get("error_message")
+                        or "Transport is not operational"
+                    )
+                    return False
+                await self.send_announce()
+                return True
+            except Exception as e:
+                logger.warning("Retry active transport failed: %s", e)
+                self.ble_status = "unavailable"
+                self.ble_error_message = str(e)
+                if self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
+                return False
 
     async def stop(self) -> None:
         """Shutdown coordinator, close sessions, and stop all transports."""

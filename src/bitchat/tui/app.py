@@ -1158,10 +1158,16 @@ class BitChatApp(App[None]):
             chat.add_system_message(
                 f"Interface:         {status.get('interface', 'Unknown')}"
             )
-            chat.add_system_message(f"Wi-Fi SSID:        {status.get('ssid') or 'N/A'}")
             chat.add_system_message(
-                f"Local IP:          {status.get('local_ip', '127.0.0.1')}"
+                f"Wi-Fi SSID:        {status.get('ssid') or 'unavailable'}"
             )
+            local_ip = status.get("local_ip")
+            display_ip = (
+                local_ip
+                if local_ip and not local_ip.startswith("127.")
+                else "unavailable"
+            )
+            chat.add_system_message(f"Local IP:          {display_ip}")
             chat.add_system_message(
                 f"Listening Port:    {status.get('listening_port', 'N/A')}"
             )

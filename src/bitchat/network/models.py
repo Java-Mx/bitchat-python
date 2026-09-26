@@ -17,17 +17,18 @@ class NetworkInfo:
     status: str = "Disconnected"  # "Connected", "Disconnected"
     interface: str = "Unavailable"  # "Wi-Fi", "Ethernet", "Loopback", "Unavailable"
     ssid: str = "unavailable"
-    local_ip: str = "127.0.0.1"
+    local_ip: str = ""
     listening_address: str = "0.0.0.0"
     listening_port: int = 0
     discovery_active: bool = False
 
     @property
     def is_connected(self) -> bool:
-        return self.status == "Connected" and self.local_ip not in (
-            "127.0.0.1",
-            "0.0.0.0",
-            "",
+        return (
+            self.status == "Connected"
+            and bool(self.local_ip)
+            and not self.local_ip.startswith("127.")
+            and self.local_ip not in ("0.0.0.0", "::1")
         )
 
 

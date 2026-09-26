@@ -10,6 +10,7 @@ import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
+from bitchat.network.adapter import get_local_ip
 from bitchat.network.models import DiscoveryPacket, LANDiscoveredPeer
 
 if TYPE_CHECKING:
@@ -56,6 +57,10 @@ class LANDiscovery:
         return self._is_running
 
     @property
+    def is_listening(self) -> bool:
+        return self._is_running and self._listen_sock is not None
+
+    @property
     def discovered_peers(self) -> dict[str, LANDiscoveredPeer]:
         return self._discovered_peers.copy()
 
@@ -75,8 +80,6 @@ class LANDiscovery:
         if self._is_running:
             return
 
-        self._is_running = True
-
         # 1. Setup send socket
         try:
             send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -86,7 +89,7 @@ class LANDiscovery:
         except Exception as e:
             logger.warning("Failed creating UDP discovery send socket: %s", e)
 
-        # 2. Setup listen socket
+        # 2. Setup listen socket (required for real discovery)
         try:
             listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -94,13 +97,18 @@ class LANDiscovery:
             listen_sock.setblocking(False)
             listen_sock.bind(("0.0.0.0", self.discovery_port))
             self._listen_sock = listen_sock
-            self._listen_task = asyncio.create_task(self._listen_loop())
         except Exception as e:
-            logger.warning(
-                "Could not bind UDP discovery listen socket on port %d: %s",
-                self.discovery_port,
-                e,
-            )
+            if self._send_sock:
+                with contextlib.suppress(Exception):
+                    self._send_sock.close()
+                self._send_sock = None
+            raise RuntimeError(
+                f"Could not bind UDP discovery listen socket on port "
+                f"{self.discovery_port}: {e}"
+            ) from e
+
+        self._is_running = True
+        self._listen_task = asyncio.create_task(self._listen_loop())
 
         # 3. Launch periodic broadcaster
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
@@ -150,8 +158,13 @@ class LANDiscovery:
             )
             raw = beacon.to_bytes()
             loop = asyncio.get_running_loop()
-            # Send to both general broadcast and standard LAN subnets
-            for target_ip in ("255.255.255.255", "127.0.0.1"):
+            targets = ["255.255.255.255"]
+            local_ip = get_local_ip()
+            if local_ip and not local_ip.startswith("127."):
+                parts = local_ip.split(".")
+                if len(parts) == 4:
+                    targets.append(f"{parts[0]}.{parts[1]}.{parts[2]}.255")
+            for target_ip in dict.fromkeys(targets):
                 with contextlib.suppress(Exception):
                     await loop.sock_sendto(
                         self._send_sock, raw, (target_ip, self.discovery_port)
@@ -197,6 +210,10 @@ class LANDiscovery:
             return None
 
         if packet.peer_id == self.local_peer_id:
+            return None
+
+        if sender_ip.startswith("127.") or sender_ip in ("localhost", "::1"):
+            logger.debug("Ignoring loopback discovery packet from %s", sender_ip)
             return None
 
         endpoint = f"{sender_ip}:{packet.port}"

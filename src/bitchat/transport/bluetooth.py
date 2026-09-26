@@ -14,6 +14,7 @@ from bitchat.transport.base import (
     BaseTransport,
     TransportState,
     TransportType,
+    format_connection_failure,
 )
 
 if TYPE_CHECKING:
@@ -56,6 +57,8 @@ class BluetoothTransport(BaseTransport):
         self._is_running: bool = False
         self._state: TransportState = TransportState.OFFLINE
         self._error_message: str | None = None
+        self._start_lock = asyncio.Lock()
+        self._halt_task: asyncio.Task[Any] | None = None
 
         # Wire up internal callbacks
         if self.ble_manager is not None:
@@ -89,6 +92,12 @@ class BluetoothTransport(BaseTransport):
     @property
     def discovered_peers(self) -> dict[str, Any]:
         return self.ble_manager.discovered_peers if self.ble_manager else {}
+
+    @property
+    def is_scanning(self) -> bool:
+        if not self.ble_manager:
+            return False
+        return bool(self.ble_manager.scanner.is_scanning)
 
     def _set_state(self, new_state: TransportState) -> None:
         if self._state != new_state:
@@ -134,87 +143,123 @@ class BluetoothTransport(BaseTransport):
                 else TransportState.UNAVAILABLE
             )
             self._set_state(st)
-            self._error_message = f"Bluetooth adapter is {info.radio_state}."
+            if info.radio_state in ("off", "disabled"):
+                self._error_message = "Bluetooth disabled"
+            else:
+                self._error_message = "Bluetooth unavailable"
+            self._is_running = False
             if self.on_error:
                 self.on_error(self._error_message)
-        else:
-            if self._state in (TransportState.DISABLED, TransportState.UNAVAILABLE):
-                self._set_state(TransportState.READY)
+            self._schedule_halt()
+        # Radio returning to on does not claim READY until retry restarts workers.
+
+    def _schedule_halt(self) -> None:
+        """Stop BLE workers after adapter loss without composing UI widgets."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._halt_task is not None and not self._halt_task.done():
+            return
+        self._halt_task = loop.create_task(self._halt_ble_workers())
+
+    async def _halt_ble_workers(self) -> None:
+        """Stop scanner, server, and peer links after Bluetooth failure."""
+        with contextlib.suppress(Exception):
+            await self.ble_manager.scanner.stop()
+        transports = list(getattr(self.ble_manager, "_transports", {}).values())
+        self.ble_manager._transports.clear()
+        for transport in transports:
+            with contextlib.suppress(Exception):
+                await transport.stop()
+        with contextlib.suppress(Exception):
+            await self.ble_server.stop()
+
+    def _uses_injected_test_backend(self) -> bool:
+        """True only when tests explicitly inject BLE backends. Never auto-selected."""
+        server_injected = getattr(self.ble_server, "_custom_backend", None) is not None
+        adapter_injected = (
+            getattr(self.ble_manager.adapter_manager, "_custom_backend", None)
+            is not None
+        )
+        return server_injected or adapter_injected
 
     async def start(self) -> None:
         """Start adapter checks, GATT server, and BLE scanner."""
-        if self._is_running:
-            return
+        async with self._start_lock:
+            if self._is_running:
+                return
 
-        self._is_running = True
-        self._set_state(TransportState.CHECKING)
-        self._error_message = None
+            self._is_running = True
+            self._set_state(TransportState.CHECKING)
+            self._error_message = None
 
-        try:
-            is_mock = getattr(self.ble_server, "_custom_backend", None) is not None
-            if not is_mock:
-                adapter_info = await self.ble_manager.adapter_manager.check_adapter()
-                if not adapter_info.is_available:
-                    self._set_state(TransportState.UNAVAILABLE)
-                    self._error_message = "Bluetooth hardware adapter is not detected."
-                    if self.on_error:
-                        self.on_error(self._error_message)
-                    raise RuntimeError(self._error_message)
-
-                if not adapter_info.is_enabled:
-                    self._set_state(TransportState.DISABLED)
-                    self._error_message = (
-                        "Bluetooth radio is turned off. "
-                        "Please enable Bluetooth in system settings."
+            try:
+                if not self._uses_injected_test_backend():
+                    adapter_info = (
+                        await self.ble_manager.adapter_manager.check_adapter()
                     )
-                    if self.on_error:
-                        self.on_error(self._error_message)
+                    if not adapter_info.is_available:
+                        self._set_state(TransportState.UNAVAILABLE)
+                        self._error_message = "Bluetooth unavailable"
+                        if self.on_error:
+                            self.on_error(self._error_message)
+                        raise RuntimeError(self._error_message)
+
+                    if not adapter_info.is_enabled:
+                        self._set_state(TransportState.DISABLED)
+                        self._error_message = "Bluetooth disabled"
+                        if self.on_error:
+                            self.on_error(self._error_message)
+                        await self.ble_manager.adapter_manager.start_monitoring(
+                            self._handle_adapter_state_changed
+                        )
+                        raise RuntimeError(self._error_message)
+
                     await self.ble_manager.adapter_manager.start_monitoring(
                         self._handle_adapter_state_changed
                     )
-                    raise RuntimeError(self._error_message)
 
-                await self.ble_manager.adapter_manager.start_monitoring(
-                    self._handle_adapter_state_changed
-                )
+                try:
+                    await self.ble_server.start()
+                except Exception as e:
+                    logger.warning("Could not start BLE server: %s", e)
+                    self._set_state(TransportState.UNAVAILABLE)
+                    self._error_message = f"GATT server failed: {e}"
+                    if self.on_error:
+                        self.on_error(self._error_message)
+                    raise RuntimeError(self._error_message) from e
 
-            try:
-                await self.ble_server.start()
-            except Exception as e:
-                logger.warning("Could not start BLE server: %s", e)
-                self._set_state(TransportState.UNAVAILABLE)
-                self._error_message = f"GATT server failed: {e}"
-                if self.on_error:
-                    self.on_error(self._error_message)
-                raise RuntimeError(self._error_message) from e
-
-            try:
-                await self.ble_manager.start_discovery()
-                self._set_state(TransportState.SCANNING)
-            except Exception as e:
-                logger.warning("Could not start BLE discovery: %s", e)
-                self._set_state(TransportState.UNAVAILABLE)
-                self._error_message = f"Bluetooth scan failed: {e}"
-                if self.on_error:
-                    self.on_error(self._error_message)
-                raise RuntimeError(self._error_message) from e
-        except Exception:
-            self._is_running = False
-            raise
+                try:
+                    await self.ble_manager.start_discovery()
+                    self._set_state(TransportState.SCANNING)
+                except Exception as e:
+                    logger.warning("Could not start BLE discovery: %s", e)
+                    self._set_state(TransportState.UNAVAILABLE)
+                    self._error_message = f"Bluetooth scan failed: {e}"
+                    if self.on_error:
+                        self.on_error(self._error_message)
+                    raise RuntimeError(self._error_message) from e
+            except Exception:
+                self._is_running = False
+                raise
 
     async def stop(self) -> None:
         """Stop BLE server, discovery scanner, and disconnect all peers."""
-        if not self._is_running:
-            return
+        async with self._start_lock:
+            self._is_running = False
+            if self._halt_task is not None and not self._halt_task.done():
+                self._halt_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._halt_task
+            self._halt_task = None
+            self._set_state(TransportState.OFFLINE)
+            self._error_message = None
 
-        self._is_running = False
-        self._set_state(TransportState.OFFLINE)
-        self._error_message = None
-
-        with contextlib.suppress(Exception):
-            await self.ble_manager.shutdown()
-        with contextlib.suppress(Exception):
-            await self.ble_server.stop()
+            with contextlib.suppress(Exception):
+                await self.ble_manager.shutdown()
+            with contextlib.suppress(Exception):
+                await self.ble_server.stop()
 
     async def start_discovery(self) -> None:
         await self.ble_manager.start_discovery()
@@ -226,18 +271,25 @@ class BluetoothTransport(BaseTransport):
             self._set_state(TransportState.READY)
 
     async def connect_peer(self, address: str, timeout: float = 10.0) -> Any:
+        if self._state in (
+            TransportState.UNAVAILABLE,
+            TransportState.DISABLED,
+            TransportState.OFFLINE,
+            TransportState.ERROR,
+        ):
+            raise RuntimeError("Connection failed: transport unavailable")
         self._set_state(TransportState.CONNECTING)
         try:
             transport = await self.ble_manager.connect_peer(address, timeout=timeout)
             self._set_state(TransportState.CONNECTED)
             return transport
-        except Exception:
+        except Exception as e:
             self._set_state(
                 TransportState.SCANNING
                 if self.ble_manager.scanner.is_scanning
                 else TransportState.READY
             )
-            raise
+            raise RuntimeError(format_connection_failure(e)) from e
 
     async def disconnect_peer(self, address: str) -> None:
         await self.ble_manager.disconnect_peer(address)

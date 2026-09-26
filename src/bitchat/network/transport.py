@@ -15,6 +15,7 @@ from bitchat.transport.base import (
     BaseTransport,
     TransportState,
     TransportType,
+    format_connection_failure,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +86,10 @@ class LANTransport(BaseTransport):
     def discovered_peers(self) -> dict[str, Any]:
         return self.discovery.discovered_peers
 
+    @property
+    def is_scanning(self) -> bool:
+        return self.discovery.is_running and self.discovery.is_listening
+
     def _set_state(self, new_state: TransportState) -> None:
         if self._state != new_state:
             self._state = new_state
@@ -148,59 +153,92 @@ class LANTransport(BaseTransport):
             self._error_message = "Local network is disconnected."
             if self.on_error:
                 self.on_error(self._error_message)
+            self._spawn_task(self._pause_lan_services())
         else:
             if self._state in (TransportState.UNAVAILABLE, TransportState.ERROR):
-                self._set_state(TransportState.READY)
-                # Restart discovery beacon
-                self._spawn_task(self.discovery.send_broadcast_now())
+                self._spawn_task(self._resume_lan_services())
+
+    async def _pause_lan_services(self) -> None:
+        """Stop discovery and listening when the host network is gone."""
+        with contextlib.suppress(Exception):
+            await self.discovery.stop()
+        with contextlib.suppress(Exception):
+            await self.server.stop()
+
+    async def _resume_lan_services(self) -> None:
+        """Restart LAN sockets after the host network returns."""
+        try:
+            if not self.server.is_listening:
+                await self.server.start()
+                self.discovery.update_listening_port(self.server.bound_port)
+            if not self.discovery.is_running:
+                await self.discovery.start()
+            self._error_message = None
+            self._set_state(TransportState.SCANNING)
+        except Exception as e:
+            self._set_state(TransportState.ERROR)
+            self._error_message = f"LAN recovery failed: {e}"
+            if self.on_error:
+                self.on_error(self._error_message)
 
     async def start(self) -> None:
         """Start network adapter monitoring, TCP server, and discovery beacon."""
-        if self._is_running:
-            return
+        async with self._lock:
+            if self._is_running:
+                return
 
-        self._is_running = True
-        self._set_state(TransportState.CHECKING)
-        self._error_message = None
+            self._is_running = True
+            self._set_state(TransportState.CHECKING)
+            self._error_message = None
 
-        # 1. Inspect network environment
-        info = self.adapter_manager.refresh()
-        self.discovery.ssid = info.ssid
+            # 1. Inspect network environment
+            info = self.adapter_manager.refresh()
+            self.discovery.ssid = info.ssid
 
-        # 2. Start TCP server
-        try:
-            await self.server.start()
-            self.discovery.update_listening_port(self.server.bound_port)
-        except Exception as e:
-            logger.warning("Could not start LAN TCP server: %s", e)
-            self._set_state(TransportState.ERROR)
-            self._error_message = f"LAN server failed: {e}"
-            if self.on_error:
-                self.on_error(self._error_message)
-            raise RuntimeError(self._error_message) from e
+            if not info.is_connected:
+                await self.adapter_manager.start_monitoring(
+                    listening_port=0, discovery_active=False
+                )
+                self._is_running = False
+                self._set_state(TransportState.UNAVAILABLE)
+                self._error_message = "Local network is disconnected."
+                if self.on_error:
+                    self.on_error(self._error_message)
+                raise RuntimeError(self._error_message)
 
-        # 3. Start discovery
-        try:
-            await self.discovery.start()
+            # 2. Start TCP server
+            try:
+                await self.server.start()
+                self.discovery.update_listening_port(self.server.bound_port)
+            except Exception as e:
+                self._is_running = False
+                logger.warning("Could not start LAN TCP server: %s", e)
+                self._set_state(TransportState.ERROR)
+                self._error_message = f"LAN server failed: {e}"
+                if self.on_error:
+                    self.on_error(self._error_message)
+                raise RuntimeError(self._error_message) from e
+
+            # 3. Start discovery
+            try:
+                await self.discovery.start()
+            except Exception as e:
+                self._is_running = False
+                logger.warning("Could not start LAN discovery: %s", e)
+                self._set_state(TransportState.ERROR)
+                self._error_message = f"LAN discovery failed: {e}"
+                if self.on_error:
+                    self.on_error(self._error_message)
+                raise RuntimeError(self._error_message) from e
+
+            # 4. Start network adapter monitor
+            await self.adapter_manager.start_monitoring(
+                listening_port=self.server.bound_port, discovery_active=True
+            )
             self._set_state(TransportState.SCANNING)
-        except Exception as e:
-            logger.warning("Could not start LAN discovery: %s", e)
-            self._set_state(TransportState.ERROR)
-            self._error_message = f"LAN discovery failed: {e}"
-            if self.on_error:
-                self.on_error(self._error_message)
-            raise RuntimeError(self._error_message) from e
-
-        # 4. Start network adapter monitor
-        await self.adapter_manager.start_monitoring(
-            listening_port=self.server.bound_port, discovery_active=True
-        )
 
     async def stop(self) -> None:
         """Cleanly stop discovery, TCP server, and disconnect all peers."""
-        if not self._is_running:
-            return
-
         self._is_running = False
         self._set_state(TransportState.OFFLINE)
         self._error_message = None
@@ -232,6 +270,13 @@ class LANTransport(BaseTransport):
 
     async def connect_peer(self, address: str, timeout: float = 10.0) -> LANConnection:
         """Connect to peer at 'ip:port' or return existing connection."""
+        if self._state in (
+            TransportState.UNAVAILABLE,
+            TransportState.DISABLED,
+            TransportState.OFFLINE,
+            TransportState.ERROR,
+        ):
+            raise RuntimeError("Connection failed: transport unavailable")
         self._set_state(TransportState.CONNECTING)
 
         async with self._lock:
@@ -254,7 +299,7 @@ class LANTransport(BaseTransport):
             if self.on_peer_connected:
                 self.on_peer_connected(address)
             return conn
-        except Exception:
+        except Exception as e:
             async with self._lock:
                 self._connections.pop(address, None)
             self._set_state(
@@ -262,7 +307,7 @@ class LANTransport(BaseTransport):
                 if self.discovery.is_running
                 else TransportState.READY
             )
-            raise
+            raise RuntimeError(format_connection_failure(e)) from e
 
     async def disconnect_peer(self, address: str) -> None:
         async with self._lock:
@@ -322,16 +367,22 @@ class LANTransport(BaseTransport):
 
     def get_telemetry(self) -> dict[str, Any]:
         info = self.adapter_manager.current_info
+        network_ok = info.is_connected
         return {
             "transport": "lan",
             "state": self._state.value,
             "status": info.status,
             "interface": info.interface,
-            "ssid": info.ssid,
-            "local_ip": info.local_ip,
+            "ssid": info.ssid if info.ssid else "unavailable",
+            "local_ip": info.local_ip if info.local_ip else "unavailable",
             "listening_address": f"0.0.0.0:{self.server.bound_port}",
             "listening_port": self.server.bound_port,
-            "discovery": "Active" if self.discovery.is_running else "Stopped",
+            "discovery": "Active"
+            if (self.discovery.is_running and network_ok)
+            else "Stopped",
+            "listening": "Active"
+            if (self.server.is_listening and network_ok)
+            else "Stopped",
             "discovered_peers_count": len(self.discovered_peers),
             "connected_peers_count": len(self.connected_peers),
             "connected_peers": self.connected_peers,

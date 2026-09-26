@@ -41,6 +41,7 @@ class BLEAdapterManager:
         on_state_changed: Callable[[AdapterInfo], None] | None = None,
         custom_backend: Any | None = None,
     ) -> None:
+        # custom_backend is test-only injection. Production startup never sets this.
         self.on_state_changed = on_state_changed
         self._custom_backend = custom_backend
         self._current_info = AdapterInfo()

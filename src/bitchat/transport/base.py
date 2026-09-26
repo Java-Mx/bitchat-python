@@ -21,6 +21,33 @@ class TransportType(StrEnum):
     LAN = "lan"
 
 
+def format_connection_failure(exc: BaseException) -> str:
+    """Map a connection exception to a bounded, user-visible terminal reason."""
+    if isinstance(exc, TimeoutError):
+        return "Connection failed: timeout"
+    if isinstance(exc, ConnectionRefusedError):
+        return "Connection failed: refused"
+
+    errno = getattr(exc, "errno", None)
+    if errno in {111, 10061}:
+        return "Connection failed: refused"
+    if errno in {101, 113, 10051, 10065}:
+        return "Connection failed: unreachable"
+    if errno in {110, 10060}:
+        return "Connection failed: timeout"
+
+    text = str(exc).lower()
+    if "timed out" in text or "timeout" in text:
+        return "Connection failed: timeout"
+    if "refused" in text:
+        return "Connection failed: refused"
+    if "unreachable" in text or "no route" in text:
+        return "Connection failed: unreachable"
+    if "unavailable" in text or "disabled" in text or "offline" in text:
+        return "Connection failed: transport unavailable"
+    return f"Connection failed: {exc}"
+
+
 class TransportState(StrEnum):
     """High-level transport lifecycle and connectivity states."""
 
