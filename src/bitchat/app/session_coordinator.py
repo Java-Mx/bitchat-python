@@ -779,7 +779,7 @@ class SessionCoordinator:
             self._spawn_task(self.send_direct_message(remote_peer_id_hex, text))
 
     def _handle_peer_discovered(self, peer: Any) -> None:
-        """Callback when scanner detects a BitChat BLE peer."""
+        """Record a peer discovered by the active transport."""
         if peer.peer_id:
             clean_pid = peer.peer_id.lower()
             self.peer_addresses[clean_pid] = peer.address
@@ -788,10 +788,12 @@ class SessionCoordinator:
                 self.peer_nicknames[clean_pid] = peer.nickname
 
         if self.on_peer_status_changed:
-            name = peer.name or "Unknown"
-            self.on_peer_status_changed(
-                peer.address, f"Discovered: {name} ({peer.rssi} dBm)"
-            )
+            name = getattr(peer, "name", None) or getattr(peer, "nickname", None)
+            status = f"Discovered: {name or 'Unknown'}"
+            rssi = getattr(peer, "rssi", None)
+            if rssi is not None:
+                status += f" ({rssi} dBm)"
+            self.on_peer_status_changed(peer.address, status)
 
     def _handle_peer_connected(self, peer_address: str) -> None:
         """Callback when a central connection to peer is established."""
@@ -812,8 +814,21 @@ class SessionCoordinator:
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Callback when peer disconnects."""
         peer_id = self.address_to_peer_id.pop(peer_address, None)
-        if peer_id and self.peer_addresses.get(peer_id) == peer_address:
-            self.peer_addresses.pop(peer_id, None)
+        if peer_id:
+            if self.peer_addresses.get(peer_id) == peer_address:
+                self.peer_addresses.pop(peer_id, None)
+
+            peer_still_connected = any(
+                address in self.active_transport.connected_peers
+                for address, mapped_peer_id in self.address_to_peer_id.items()
+                if mapped_peer_id == peer_id
+            )
+            if not peer_still_connected:
+                self._cancel_handshake_timeout(peer_id)
+                session = self._sessions.pop(peer_id, None)
+                if session is not None:
+                    session.close()
+                self._pending_messages.pop(peer_id, None)
         if self.on_peer_status_changed:
             self.on_peer_status_changed(peer_address, "Disconnected")
 
