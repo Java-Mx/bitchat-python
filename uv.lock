@@ -22,17 +22,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bleak", specifier = ">=0.22.0" },
-    { name = "cryptography", specifier = ">=44.0.0" },
-    { name = "textual", specifier = ">=3.0.0" },
+    { name = "bleak", specifier = ">=3.0.2" },
+    { name = "cryptography", specifier = ">=50.0.1" },
+    { name = "textual", specifier = ">=8.2.8" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pyright", specifier = ">=1.1.390" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.25.0" },
-    { name = "ruff", specifier = ">=0.9.0" },
+    { name = "pyright", specifier = ">=1.1.414" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "ruff", specifier = ">=0.16.8" },
 ]
 
 [[package]]
