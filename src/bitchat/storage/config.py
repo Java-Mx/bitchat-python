@@ -1,7 +1,10 @@
 import contextlib
+import ctypes
 import json
 import os
+import tempfile
 from abc import ABC, abstractmethod
+from ctypes import wintypes
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -240,24 +243,173 @@ class InMemoryStorage(StorageInterface):
 
 
 def _atomic_write_json(
-    target_path: Path, data: dict[str, Any], chmod_mode: int | None = None
+    target_path: Path,
+    data: dict[str, Any],
+    chmod_mode: int | None = None,
+    restrict_to_current_user: bool = False,
 ) -> None:
-    """Safely persist JSON data via temp file, flush, fsync, and atomic replace."""
+    """Persist JSON atomically, applying requested permissions before writing."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = target_path.with_suffix(f".tmp.{os.getpid()}.{id(data)}")
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".tmp",
+        dir=target_path.parent,
+    )
+    temp_file = Path(temp_name)
     try:
-        with open(temp_file, "w", encoding="utf-8") as f:
+        if chmod_mode is not None and os.name == "posix":
+            os.fchmod(fd, chmod_mode)
+        if restrict_to_current_user and os.name == "nt":
+            _restrict_windows_file_acl(temp_file)
+
+        file_obj = os.fdopen(fd, "w", encoding="utf-8")
+        fd = -1
+        with file_obj as f:
             json.dump(data, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        if chmod_mode is not None and os.name == "posix":
-            os.chmod(temp_file, chmod_mode)
         temp_file.replace(target_path)
-    except Exception:
-        if temp_file.exists():
-            with contextlib.suppress(OSError):
-                temp_file.unlink()
-        raise
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            temp_file.unlink()
+
+
+def _restrict_windows_file_acl(path: Path) -> None:
+    """Set a protected DACL granting full access only to the current user."""
+    if os.name != "nt":
+        raise OSError("Windows ACL protection is available only on Windows")
+
+    token_query = 0x0008
+    token_user_information = 1
+    acl_revision = 2
+    file_all_access = 0x001F01FF
+    security_information = 0x00000001 | 0x00000004 | 0x80000000
+
+    class SidAndAttributes(ctypes.Structure):
+        _fields_ = [("sid", wintypes.LPVOID), ("attributes", wintypes.DWORD)]
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.GetLengthSid.argtypes = [wintypes.LPVOID]
+    advapi32.GetLengthSid.restype = wintypes.DWORD
+    advapi32.CopySid.argtypes = [
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+    ]
+    advapi32.CopySid.restype = wintypes.BOOL
+    advapi32.InitializeAcl.argtypes = [
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    advapi32.InitializeAcl.restype = wintypes.BOOL
+    advapi32.AddAccessAllowedAceEx.argtypes = [
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+    ]
+    advapi32.AddAccessAllowedAceEx.restype = wintypes.BOOL
+    advapi32.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+    ]
+    advapi32.SetNamedSecurityInfoW.restype = wintypes.DWORD
+
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(
+        kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    try:
+        required_size = wintypes.DWORD()
+        if advapi32.GetTokenInformation(
+            token,
+            token_user_information,
+            None,
+            0,
+            ctypes.byref(required_size),
+        ):
+            raise OSError("Windows returned an empty token-user buffer size")
+        if not required_size.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        user_buffer = ctypes.create_string_buffer(required_size.value)
+        if not advapi32.GetTokenInformation(
+            token,
+            token_user_information,
+            user_buffer,
+            required_size,
+            ctypes.byref(required_size),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        token_user = ctypes.cast(user_buffer, ctypes.POINTER(SidAndAttributes)).contents
+        sid_size = advapi32.GetLengthSid(token_user.sid)
+        if not sid_size:
+            raise ctypes.WinError(ctypes.get_last_error())
+        sid_buffer = ctypes.create_string_buffer(sid_size)
+        if not advapi32.CopySid(sid_size, sid_buffer, token_user.sid):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        acl_size = 16 + sid_size
+        acl_buffer = ctypes.create_string_buffer(acl_size)
+        if not advapi32.InitializeAcl(acl_buffer, acl_size, acl_revision):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not advapi32.AddAccessAllowedAceEx(
+            acl_buffer, acl_revision, 0, file_all_access, sid_buffer
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        result = advapi32.SetNamedSecurityInfoW(
+            str(path),
+            1,
+            security_information,
+            sid_buffer,
+            None,
+            acl_buffer,
+            None,
+        )
+        if result:
+            raise ctypes.WinError(result)
+    finally:
+        if not kernel32.CloseHandle(token):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _restrict_existing_identity_file(path: Path) -> None:
+    """Tighten access to legacy identity files before reading private keys."""
+    if os.name == "posix":
+        os.chmod(path, 0o600)
+    elif os.name == "nt":
+        _restrict_windows_file_acl(path)
 
 
 class FileConfigStorage(StorageInterface):
@@ -314,6 +466,7 @@ class FileConfigStorage(StorageInterface):
         if not self.identity_path.exists():
             return None
         try:
+            _restrict_existing_identity_file(self.identity_path)
             with open(self.identity_path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
@@ -342,7 +495,12 @@ class FileConfigStorage(StorageInterface):
                 "fingerprint": identity.fingerprint,
                 "peer_id": identity.peer_id.hex(),
             }
-            _atomic_write_json(self.identity_path, payload, chmod_mode=0o600)
+            _atomic_write_json(
+                self.identity_path,
+                payload,
+                chmod_mode=0o600,
+                restrict_to_current_user=True,
+            )
         except OSError as e:
             raise ConfigurationError(
                 f"Failed to write identity to {self.identity_path}: {e}"

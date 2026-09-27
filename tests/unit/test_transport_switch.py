@@ -4,17 +4,20 @@ generation, and peer state teardown.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.crypto.identity import LocalIdentity
 from bitchat.mesh.router import MeshRouter
 from bitchat.network.models import LANDiscoveredPeer
 from bitchat.network.transport import LANTransport
-from bitchat.storage.config import AppConfig, InMemoryStorage
+from bitchat.storage.config import AppConfig, FileConfigStorage
 from bitchat.transport.base import TransportState
 
 
@@ -24,17 +27,19 @@ def test_identity() -> LocalIdentity:
 
 
 @pytest.fixture
-def mock_storage(test_identity: LocalIdentity) -> InMemoryStorage:
-    storage = InMemoryStorage(
-        initial_config=AppConfig(nickname="AliceNode", transport="bluetooth"),
-        initial_identity=test_identity,
+def mock_storage(test_identity: LocalIdentity, tmp_path: Path) -> FileConfigStorage:
+    storage = FileConfigStorage(
+        config_path=tmp_path / "config.json",
+        identity_path=tmp_path / "identity.json",
     )
+    storage.save_config(AppConfig(nickname="AliceNode", transport="bluetooth"))
+    storage.save_identity(test_identity)
     return storage
 
 
 @pytest.mark.asyncio
 async def test_transport_switching_lifecycle(
-    test_identity: LocalIdentity, mock_storage: InMemoryStorage
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
 ) -> None:
     original_peer_id = test_identity.peer_id_hex
 
@@ -43,6 +48,7 @@ async def test_transport_switching_lifecycle(
         local_identity=test_identity,
         mesh_router=mesh_router,
         nickname="AliceNode",
+        storage=mock_storage,
     )
 
     async def mock_bt_start() -> None:
