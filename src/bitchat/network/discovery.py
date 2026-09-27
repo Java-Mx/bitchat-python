@@ -66,6 +66,8 @@ class LANDiscovery:
 
     def update_identity(self, peer_id: str, nickname: str, ssid: str = "") -> None:
         """Update identity advertised in outgoing beacons."""
+        if peer_id != self.local_peer_id:
+            self._discovered_peers.clear()
         self.local_peer_id = peer_id
         self.local_nickname = nickname
         if ssid:

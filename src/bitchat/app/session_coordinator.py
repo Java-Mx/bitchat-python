@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+NOISE_HANDSHAKE_TIMEOUT_SECONDS: float = 10.0
 
 
 def _decode_chat_payload(payload_bytes: bytes) -> str:
@@ -84,6 +85,7 @@ class SessionCoordinator:
         self.peer_nicknames: dict[str, str] = {}
         self._announced_peers: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._handshake_timeout_tasks: dict[str, asyncio.Task[Any]] = {}
         self._retry_lock = asyncio.Lock()
 
         self.server_reassembler = FragmentReassembler()
@@ -154,6 +156,49 @@ class SessionCoordinator:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
         return task
+
+    def _schedule_handshake_timeout(self, peer_id: str, session: NoiseSession) -> None:
+        if peer_id in self._handshake_timeout_tasks:
+            return
+
+        async def expire_handshake() -> None:
+            try:
+                await asyncio.sleep(NOISE_HANDSHAKE_TIMEOUT_SECONDS)
+                if (
+                    self._sessions.get(peer_id) is session
+                    and session.state == NoiseSessionState.HANDSHAKING
+                ):
+                    logger.warning("Noise handshake with %s timed out", peer_id)
+                    session.close()
+                    self._sessions.pop(peer_id, None)
+                    self._pending_messages.pop(peer_id, None)
+            finally:
+                if self._handshake_timeout_tasks.get(peer_id) is asyncio.current_task():
+                    self._handshake_timeout_tasks.pop(peer_id, None)
+
+        self._handshake_timeout_tasks[peer_id] = self._spawn_task(expire_handshake())
+
+    def _cancel_handshake_timeout(self, peer_id: str) -> None:
+        task = self._handshake_timeout_tasks.pop(peer_id, None)
+        if task is not None:
+            task.cancel()
+
+    async def _cancel_handshake_timeouts(self) -> None:
+        tasks = list(self._handshake_timeout_tasks.values())
+        self._handshake_timeout_tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _discard_failed_session(self, peer_id: str, session: NoiseSession) -> None:
+        if session.state != NoiseSessionState.FAILED:
+            return
+        self._cancel_handshake_timeout(peer_id)
+        session.close()
+        if self._sessions.get(peer_id) is session:
+            self._sessions.pop(peer_id, None)
+        self._pending_messages.pop(peer_id, None)
 
     @property
     def is_running(self) -> bool:
@@ -321,6 +366,7 @@ class SessionCoordinator:
         self.ble_status = "offline"
         self.ble_error_message = None
 
+        await self._cancel_handshake_timeouts()
         for session in self._sessions.values():
             session.close()
         self._sessions.clear()
@@ -346,6 +392,7 @@ class SessionCoordinator:
         await self.active_transport.stop()
 
         # 2. Close active Noise sessions
+        await self._cancel_handshake_timeouts()
         for session in self._sessions.values():
             session.close()
         self._sessions.clear()
@@ -362,6 +409,8 @@ class SessionCoordinator:
         self.local_identity = LocalIdentity.generate()
         new_id = self.local_identity.peer_id_hex
         self.mesh_router.local_peer_id = self.local_identity.peer_id
+        for transport in self._transports.values():
+            transport.update_identity(new_id, self.nickname)
         logger.info(
             "Transport switch (%s -> %s): generated fresh identity %s (old: %s)",
             self.active_transport_name,
@@ -377,13 +426,10 @@ class SessionCoordinator:
                     local_peer_id=new_id,
                     local_nickname=self.nickname,
                 )
-            else:
-                self._transports["lan"].update_identity(new_id, self.nickname)
             self.active_transport = self._transports["lan"]
         else:
             if "bluetooth" not in self._transports:
                 return False, "Bluetooth transport not available"
-            self._transports["bluetooth"].update_identity(new_id, self.nickname)
             self.active_transport = self._transports["bluetooth"]
 
         self.active_transport_name = target
@@ -441,6 +487,7 @@ class SessionCoordinator:
                 if session.role == NoiseRole.INITIATOR:
                     init_payload = session.start_handshake()
                     if init_payload is not None:
+                        self._schedule_handshake_timeout(target_peer_id_hex, session)
                         packet = BitchatPacket.create(
                             message_type=MessageType.NoiseHandshakeInit,
                             sender_id=self.local_identity.peer_id,
@@ -595,8 +642,12 @@ class SessionCoordinator:
         """Handle incoming packet state transitions, crypto, and callbacks."""
         sender_hex = packet.sender_id.hex()
         if peer_address:
-            self.peer_addresses[sender_hex] = peer_address
             self.address_to_peer_id[peer_address] = sender_hex
+            is_inbound_lan = isinstance(
+                self.active_transport, LANTransport
+            ) and self.active_transport.is_inbound_connection(peer_address)
+            if not is_inbound_lan:
+                self.peer_addresses[sender_hex] = peer_address
 
         match packet.message_type:
             case MessageType.Announce:
@@ -627,6 +678,7 @@ class SessionCoordinator:
                 ):
                     init_payload = session.start_handshake()
                     if init_payload is not None:
+                        self._schedule_handshake_timeout(sender_hex, session)
                         resp_pkt = BitchatPacket.create(
                             message_type=MessageType.NoiseHandshakeInit,
                             sender_id=self.local_identity.peer_id,
@@ -643,8 +695,11 @@ class SessionCoordinator:
                     logger.warning(
                         "NoiseHandshakeInit failed from %s: %s", sender_hex, e
                     )
+                    self._discard_failed_session(sender_hex, session)
                     return
 
+                if session.state == NoiseSessionState.HANDSHAKING:
+                    self._schedule_handshake_timeout(sender_hex, session)
                 if resp_payload is not None:
                     resp_pkt = BitchatPacket.create(
                         message_type=MessageType.NoiseHandshakeResp,
@@ -671,8 +726,11 @@ class SessionCoordinator:
                     logger.warning(
                         "NoiseHandshakeResp failed from %s: %s", sender_hex, e
                     )
+                    self._discard_failed_session(sender_hex, session)
                     return
 
+                if session.state == NoiseSessionState.HANDSHAKING:
+                    self._schedule_handshake_timeout(sender_hex, session)
                 if resp_payload is not None:
                     resp_pkt = BitchatPacket.create(
                         message_type=MessageType.NoiseHandshakeResp,
@@ -711,6 +769,7 @@ class SessionCoordinator:
         self, remote_peer_id_hex: str, session: NoiseSession
     ) -> None:
         """Trigger completion callback and flush queued messages."""
+        self._cancel_handshake_timeout(remote_peer_id_hex)
         fingerprint = session.remote_fingerprint or ""
         if self.on_handshake_completed:
             self.on_handshake_completed(remote_peer_id_hex, fingerprint)
@@ -753,7 +812,7 @@ class SessionCoordinator:
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Callback when peer disconnects."""
         peer_id = self.address_to_peer_id.pop(peer_address, None)
-        if peer_id:
+        if peer_id and self.peer_addresses.get(peer_id) == peer_address:
             self.peer_addresses.pop(peer_id, None)
         if self.on_peer_status_changed:
             self.on_peer_status_changed(peer_address, "Disconnected")

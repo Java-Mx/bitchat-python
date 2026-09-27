@@ -82,7 +82,7 @@ def detect_network_info(
 
     is_loopback = local_ip.startswith("127.") or local_ip in ("0.0.0.0", "")
 
-    if wifi_state == "connected" and ssid:
+    if not is_loopback and wifi_state == "connected" and ssid:
         status = "Connected"
         interface = "Wi-Fi"
         active_ssid = ssid

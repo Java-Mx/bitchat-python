@@ -15,8 +15,11 @@ from tests.ble.mocks import (
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.ble.manager import BLEManager
 from bitchat.ble.server import BLEServer
+from bitchat.crypto import ed25519
 from bitchat.crypto.identity import LocalIdentity
 from bitchat.crypto.noise import NoiseSessionState
+from bitchat.protocol.constants import MessageType
+from bitchat.protocol.packet import BitchatPacket
 
 
 def _create_linked_pair() -> tuple[
@@ -84,6 +87,81 @@ def _create_linked_pair() -> tuple[
 
 
 class TestSessionCoordinator:
+    @pytest.mark.parametrize(
+        "signature_kind",
+        [
+            "unsigned",
+            "valid",
+            "modified_payload",
+            "wrong_signing_key",
+            "sender_key_mismatch",
+            "invalid_signature_bytes",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_public_message_does_not_authenticate_sender_from_signature(
+        self, signature_kind: str
+    ) -> None:
+        sender = LocalIdentity.generate()
+        signing_identity = (
+            LocalIdentity.generate()
+            if signature_kind in ("wrong_signing_key", "sender_key_mismatch")
+            else sender
+        )
+        payload = b"original public message"
+        signed_payload = payload
+        signature: bytes | None
+        if signature_kind == "unsigned":
+            signature = None
+        elif signature_kind == "invalid_signature_bytes":
+            signature = b"\x00" * 64
+        else:
+            if signature_kind == "modified_payload":
+                signed_payload = b"original public message before alteration"
+            signature = ed25519.sign(signing_identity.ed25519_private, signed_payload)
+        if signature_kind == "modified_payload":
+            payload = b"modified public message"
+
+        received: list[tuple[str, str, bool]] = []
+        coordinator = SessionCoordinator(
+            local_identity=LocalIdentity.generate(),
+            on_message_received=lambda peer_id, text, encrypted: received.append(
+                (peer_id, text, encrypted)
+            ),
+        )
+        packet = BitchatPacket.create(
+            message_type=MessageType.Message,
+            sender_id=sender.peer_id,
+            payload=payload,
+            signature=signature,
+        )
+
+        await coordinator._process_packet_async(packet)
+
+        assert received == [(sender.peer_id_hex, payload.decode(), False)]
+
+    @pytest.mark.asyncio
+    async def test_incomplete_noise_handshake_times_out_and_is_removed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "bitchat.app.session_coordinator.NOISE_HANDSHAKE_TIMEOUT_SECONDS",
+            0.01,
+        )
+        coord_a, coord_b, _, _ = _create_linked_pair()
+        remote_peer_id = coord_b.local_identity.peer_id_hex
+        session = coord_a.get_or_create_session(remote_peer_id)
+        session.start_handshake()
+
+        coord_a._schedule_handshake_timeout(remote_peer_id, session)
+        await asyncio.sleep(0.05)
+
+        assert coord_a.get_session(remote_peer_id) is None
+        assert session.state == NoiseSessionState.CLOSED
+        assert not coord_a._handshake_timeout_tasks
+        await coord_a.stop()
+        await coord_b.stop()
+
     @pytest.mark.asyncio
     async def test_coordinator_initialization(self) -> None:
         id_a = LocalIdentity.generate()

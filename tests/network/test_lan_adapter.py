@@ -15,6 +15,7 @@ from bitchat.network.adapter import (
     get_local_ip,
     get_wifi_ssid_and_state,
 )
+from bitchat.network.models import NetworkInfo
 
 
 def test_get_local_ip_returns_valid_ipv4() -> None:
@@ -34,6 +35,38 @@ def test_detect_network_info_real_or_fallback() -> None:
     assert info.interface in ("Wi-Fi", "Ethernet", "Loopback", "Unavailable")
     assert isinstance(info.local_ip, str)
     assert len(info.local_ip.split(".")) == 4
+
+
+def test_detect_network_info_reports_loopback_as_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bitchat.network.adapter.get_local_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        "bitchat.network.adapter.get_wifi_ssid_and_state",
+        lambda: ("Home", "connected"),
+    )
+
+    info = detect_network_info()
+
+    assert info.status == "Disconnected"
+    assert info.interface == "Unavailable"
+    assert not info.is_connected
+
+
+def test_detect_network_info_reports_active_wifi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bitchat.network.adapter.get_local_ip", lambda: "192.168.1.40")
+    monkeypatch.setattr(
+        "bitchat.network.adapter.get_wifi_ssid_and_state",
+        lambda: ("Home", "connected"),
+    )
+
+    info = detect_network_info()
+
+    assert info.status == "Connected"
+    assert info.interface == "Wi-Fi"
+    assert info.local_ip == "192.168.1.40"
 
 
 def test_get_wifi_ssid_parsing_connected() -> None:
@@ -103,3 +136,39 @@ async def test_network_adapter_manager_lifecycle() -> None:
     await asyncio.sleep(0.2)
     await manager.stop()
     assert not manager.is_running
+
+
+@pytest.mark.asyncio
+async def test_network_adapter_manager_reports_changed_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = NetworkInfo(
+        status="Connected",
+        interface="Ethernet",
+        local_ip="192.168.1.10",
+    )
+    changed = NetworkInfo(
+        status="Connected",
+        interface="Ethernet",
+        local_ip="192.168.1.20",
+    )
+    snapshots = iter((original, original, changed))
+    monkeypatch.setattr(
+        "bitchat.network.adapter.detect_network_info",
+        lambda **kwargs: next(snapshots),
+    )
+    events: list[NetworkInfo] = []
+    manager = NetworkAdapterManager(
+        on_network_changed=events.append,
+        poll_interval=0.01,
+    )
+
+    await manager.start_monitoring()
+    for _ in range(20):
+        if events:
+            break
+        await asyncio.sleep(0.01)
+    await manager.stop_monitoring()
+
+    assert events == [changed]
+    assert manager.current_info.local_ip == "192.168.1.20"
