@@ -464,6 +464,19 @@ async def test_tui_peer_info_modal_security_and_display(
 
 
 @pytest.mark.asyncio
+async def test_opening_peer_info_does_not_create_noise_session(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    peer_id = LocalIdentity.generate().peer_id_hex
+    test_coordinator.peer_nicknames[peer_id] = "Bob"
+    app = BitChatApp(coordinator=test_coordinator)
+
+    async with app.run_test():
+        app._open_peer_info("Bob")
+        assert test_coordinator.get_session(peer_id) is None
+
+
+@pytest.mark.asyncio
 async def test_tui_context_switching_and_at_syntax(
     test_coordinator: SessionCoordinator,
 ) -> None:

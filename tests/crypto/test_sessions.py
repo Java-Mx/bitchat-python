@@ -8,6 +8,7 @@ from bitchat.crypto.identity import LocalIdentity
 from bitchat.crypto.noise import NoiseRole, NoiseSessionState
 from bitchat.crypto.sessions import NoiseSession
 from bitchat.exceptions import (
+    AuthenticationError,
     DecryptionError,
     NoiseStateError,
     ReplayError,
@@ -22,17 +23,11 @@ def _make_session_pair() -> tuple[NoiseSession, NoiseSession]:
     """Create Alice (initiator) and Bob (responder) sessions."""
     alice = LocalIdentity.generate()
     bob = LocalIdentity.generate()
-    # Force Alice to be initiator by using peer IDs that satisfy the tie-break
-    alice_id = "0000000000000000"  # Always lower
-    bob_id = "ffffffffffffffff"  # Always higher
-    # Override peer IDs by using custom identities with known hex IDs
-    # We'll just set remote peer IDs such that the role is deterministic
-    session_a = NoiseSession(alice, bob_id)  # alice_id < bob_id → initiator
-    session_b = NoiseSession(bob, alice_id)  # bob_id > alice_id → responder
+    session_a = NoiseSession(alice, bob.peer_id_hex)
+    session_b = NoiseSession(bob, alice.peer_id_hex)
 
-    # Verify roles
-    assert session_a.role == NoiseRole.INITIATOR
-    assert session_b.role == NoiseRole.RESPONDER
+    if session_a.role == NoiseRole.RESPONDER:
+        session_a, session_b = session_b, session_a
     return session_a, session_b
 
 
@@ -170,6 +165,41 @@ class TestNoiseSessionHandshake:
         # Both sides should agree on the handshake hash
         assert session_a.handshake_hash == session_b.handshake_hash
 
+    def test_rejects_static_key_that_does_not_match_claimed_peer_id(self) -> None:
+        receiver = LocalIdentity.generate()
+        attacker = LocalIdentity.generate()
+        victim = LocalIdentity.generate()
+        while (receiver.peer_id_hex < attacker.peer_id_hex) != (
+            receiver.peer_id_hex < victim.peer_id_hex
+        ):
+            attacker = LocalIdentity.generate()
+            victim = LocalIdentity.generate()
+
+        receiver_session = NoiseSession(receiver, victim.peer_id_hex)
+        attacker_session = NoiseSession(attacker, receiver.peer_id_hex)
+        if receiver_session.role == NoiseRole.INITIATOR:
+            initiator, responder = receiver_session, attacker_session
+        else:
+            initiator, responder = attacker_session, receiver_session
+
+        msg1 = initiator.start_handshake()
+        assert msg1 is not None
+        msg2 = responder.process_handshake_message(msg1)
+        assert msg2 is not None
+
+        if receiver_session is initiator:
+            with pytest.raises(AuthenticationError, match="does not match"):
+                receiver_session.process_handshake_message(msg2)
+        else:
+            msg3 = initiator.process_handshake_message(msg2)
+            assert msg3 is not None
+            with pytest.raises(AuthenticationError, match="does not match"):
+                receiver_session.process_handshake_message(msg3)
+
+        assert receiver_session.state == NoiseSessionState.FAILED
+        with pytest.raises(NoiseStateError):
+            receiver_session.encrypt(b"application data")
+
 
 # ---------------------------------------------------------------------------
 # Responder auto-init
@@ -181,9 +211,10 @@ class TestResponderAutoInit:
         """Responder can process the first message without calling start_handshake."""
         alice = LocalIdentity.generate()
         bob = LocalIdentity.generate()
-        # Alice is initiator
-        session_a = NoiseSession(alice, "ffffffffffffffff")
-        session_b = NoiseSession(bob, "0000000000000000")
+        session_a = NoiseSession(alice, bob.peer_id_hex)
+        session_b = NoiseSession(bob, alice.peer_id_hex)
+        if session_a.role == NoiseRole.RESPONDER:
+            session_a, session_b = session_b, session_a
 
         msg1 = session_a.start_handshake()
         assert msg1 is not None

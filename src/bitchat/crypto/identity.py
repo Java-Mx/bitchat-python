@@ -6,12 +6,15 @@ single BitChat session:
   - X25519 static key pair (key agreement, Noise static key)
   - Ed25519 key pair (message signing / verification)
 
-The fingerprint and peer_id are both derived from the X25519 public key,
-matching the Rust reference:
+The fingerprint and peer_id are derived from the X25519 public key:
   - ``get_identity_fingerprint`` in ``noise_session.rs`` line 628-631:
     ``SHA-256(X25519_public_key.to_bytes())`` → full hex string
   - Peer ID: first 8 bytes of SHA-256(X25519_public_key) → used for BLE
-    identification (matching how peer IDs are derived in the protocol)
+    identification in this Python implementation.
+
+The Rust TUI reference currently generates its peer ID separately and does not
+bind it to the Noise static key, so the Python post-handshake binding check is
+stricter and will reject Rust peers using that independent ID.
 
 The combined public key (96 bytes) for wire exchange matches Rust
 ``get_combined_public_key_data`` (``encryption.rs`` lines 77-83):
@@ -49,7 +52,7 @@ class LocalIdentity:
         ed25519_private: 32-byte Ed25519 signing key (private seed).
         ed25519_public: 32-byte Ed25519 verifying key (public).
         peer_id: 8-byte peer identifier derived as first 8 bytes of
-            SHA-256(x25519_public).
+            SHA-256(x25519_public) in this Python implementation.
         fingerprint: 64-character hex string: SHA-256(x25519_public).hex().
     """
 

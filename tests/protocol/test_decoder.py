@@ -182,6 +182,16 @@ class TestDecoderErrors:
         with pytest.raises(PacketDecodingError, match="shorter than expected"):
             decode_packet(raw)
 
+    def test_short_signature_is_rejected(self) -> None:
+        """A signature field one byte shorter than Ed25519's wire size is rejected."""
+        raw = (
+            struct.pack(">BBBQBH", 1, 1, 7, 0, FLAG_HAS_SIGNATURE, 0)
+            + b"\x00" * 8
+            + b"\x00" * 63
+        )
+        with pytest.raises(PacketDecodingError, match="shorter than expected"):
+            decode_packet(raw)
+
     def test_malformed_padding_last_byte_zero(self) -> None:
         """Padded packet where last byte is 0 raises PacketDecodingError."""
         base = struct.pack(">BBBQBH", 1, 1, 7, 0, 0, 0) + b"\x00" * 8  # 22 bytes

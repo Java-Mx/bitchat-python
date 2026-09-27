@@ -21,6 +21,9 @@ Reference: Rust ``noise_session.rs`` ``NoiseSession`` (lines 56-426).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 from bitchat.crypto.identity import LocalIdentity, calculate_fingerprint
 from bitchat.crypto.noise import (
     NoiseCipherState,
@@ -30,6 +33,7 @@ from bitchat.crypto.noise import (
     determine_handshake_role,
 )
 from bitchat.exceptions import (
+    AuthenticationError,
     NoiseError,
     NoiseStateError,
 )
@@ -50,7 +54,7 @@ class NoiseSession:
 
     Args:
         local_identity: Local cryptographic identity (holds static X25519 key).
-        remote_peer_id: Remote peer ID as a hex string (for tie-breaking).
+        remote_peer_id: Remote peer ID used for role tie-breaking and key binding.
     """
 
     def __init__(
@@ -204,15 +208,38 @@ class NoiseSession:
     def _finalise_handshake(self) -> None:
         """Extract transport ciphers and transition to ESTABLISHED."""
         assert self._handshake_state is not None
+        remote_static_public = self._handshake_state.get_remote_static_public_key()
+        if remote_static_public is None:
+            self._state = NoiseSessionState.FAILED
+            self._handshake_state = None
+            raise AuthenticationError(
+                "Noise handshake did not authenticate a remote key"
+            )
+        try:
+            if len(self._remote_peer_id) != 16:
+                raise ValueError("Remote peer ID must be 16 hexadecimal characters")
+            claimed_peer_id = bytes.fromhex(self._remote_peer_id)
+        except ValueError as err:
+            self._state = NoiseSessionState.FAILED
+            self._handshake_state = None
+            raise AuthenticationError(
+                "Remote peer ID is not valid hexadecimal"
+            ) from err
+        authenticated_peer_id = hashlib.sha256(remote_static_public).digest()[:8]
+        if len(claimed_peer_id) != len(
+            authenticated_peer_id
+        ) or not hmac.compare_digest(authenticated_peer_id, claimed_peer_id):
+            self._state = NoiseSessionState.FAILED
+            self._handshake_state = None
+            raise AuthenticationError(
+                "Authenticated Noise static key does not match claimed peer ID"
+            )
         send_cipher, recv_cipher = self._handshake_state.get_transport_ciphers()
         self._send_cipher = send_cipher
         self._recv_cipher = recv_cipher
-        self._remote_static_public = (
-            self._handshake_state.get_remote_static_public_key()
-        )
+        self._remote_static_public = remote_static_public
         self._handshake_hash = self._handshake_state.get_handshake_hash()
-        if self._remote_static_public is not None:
-            self._remote_fingerprint = calculate_fingerprint(self._remote_static_public)
+        self._remote_fingerprint = calculate_fingerprint(remote_static_public)
         self._handshake_state = None  # Clear handshake state (Rust line 292)
         self._state = NoiseSessionState.ESTABLISHED
 

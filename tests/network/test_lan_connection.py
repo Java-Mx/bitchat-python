@@ -8,8 +8,10 @@ import pytest
 
 from bitchat.network.connection import LANConnection
 from bitchat.network.server import LANServer
+from bitchat.network.transport import LANTransport
 from bitchat.protocol.constants import MessageType
 from bitchat.protocol.packet import BitchatPacket
+from bitchat.transport.base import TransportState
 
 
 @pytest.mark.asyncio
@@ -105,3 +107,73 @@ async def test_lan_connection_disconnect_callback() -> None:
         assert f"127.0.0.1:{server_port}" in disconnected_addrs
     finally:
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_lan_connection_closes_after_idle_read_timeout() -> None:
+    accepted: list[LANConnection] = []
+    server = LANServer(
+        host="127.0.0.1",
+        port=0,
+        on_connection_accepted=accepted.append,
+        read_timeout=0.05,
+    )
+    await server.start()
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", server.bound_port)
+    try:
+        assert await asyncio.wait_for(reader.read(), timeout=1.0) == b""
+        assert not server._connections
+        assert len(accepted) == 1
+        for _ in range(20):
+            if accepted[0]._read_task and accepted[0]._read_task.done():
+                break
+            await asyncio.sleep(0.01)
+        assert accepted[0]._read_task is not None
+        assert accepted[0]._read_task.done()
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_lan_server_bounds_concurrent_connections_and_cleans_them_up() -> None:
+    server = LANServer(host="127.0.0.1", port=0, max_connections=1)
+    await server.start()
+
+    first_reader, first_writer = await asyncio.open_connection(
+        "127.0.0.1", server.bound_port
+    )
+    second_reader, second_writer = await asyncio.open_connection(
+        "127.0.0.1", server.bound_port
+    )
+    try:
+        assert await asyncio.wait_for(second_reader.read(), timeout=1.0) == b""
+        assert len(server._connections) == 1
+
+        first_writer.close()
+        await first_writer.wait_closed()
+        assert await asyncio.wait_for(first_reader.read(), timeout=1.0) == b""
+        for _ in range(20):
+            if not server._connections:
+                break
+            await asyncio.sleep(0.01)
+        assert not server._connections
+    finally:
+        second_writer.close()
+        await second_writer.wait_closed()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_lan_transport_bounds_outbound_connections() -> None:
+    transport = LANTransport(
+        local_peer_id="00" * 8,
+        max_connections=1,
+    )
+    transport._state = TransportState.READY
+    transport._connections["127.0.0.1:1"] = LANConnection("127.0.0.1:1")
+
+    with pytest.raises(RuntimeError, match="Maximum LAN connection limit"):
+        await transport.connect_peer("127.0.0.1:2")

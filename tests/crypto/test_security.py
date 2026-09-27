@@ -131,8 +131,10 @@ class TestHandshakeReplaysBlocked:
         """A replayed handshake init to established session must be handled."""
         alice = LocalIdentity.generate()
         bob = LocalIdentity.generate()
-        session_a = NoiseSession(alice, "ffffffffffffffff")
-        session_b = NoiseSession(bob, "0000000000000000")
+        session_a = NoiseSession(alice, bob.peer_id_hex)
+        session_b = NoiseSession(bob, alice.peer_id_hex)
+        if session_a.role == NoiseRole.RESPONDER:
+            session_a, session_b = session_b, session_a
 
         msg1 = session_a.start_handshake()
         assert msg1 is not None

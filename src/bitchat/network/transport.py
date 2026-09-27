@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from bitchat.network.adapter import NetworkAdapterManager
 from bitchat.network.connection import LANConnection
 from bitchat.network.discovery import LANDiscovery
-from bitchat.network.server import LANServer
+from bitchat.network.server import MAX_CONCURRENT_CONNECTIONS, LANServer
 from bitchat.transport.base import (
     BaseTransport,
     TransportState,
@@ -37,12 +37,14 @@ class LANTransport(BaseTransport):
         tcp_port: int = 41235,
         discovery_port: int = 41234,
         adapter_manager: NetworkAdapterManager | None = None,
+        max_connections: int = MAX_CONCURRENT_CONNECTIONS,
     ) -> None:
         super().__init__()
         self.local_peer_id = local_peer_id
         self.local_nickname = local_nickname
         self.tcp_port = tcp_port
         self.discovery_port = discovery_port
+        self.max_connections = max_connections
 
         self.adapter_manager = adapter_manager or NetworkAdapterManager(
             on_network_changed=self._handle_network_changed
@@ -50,6 +52,7 @@ class LANTransport(BaseTransport):
         self.server = LANServer(
             port=tcp_port,
             on_connection_accepted=self._handle_inbound_connection,
+            max_connections=max_connections,
         )
         self.discovery = LANDiscovery(
             local_peer_id=local_peer_id,
@@ -113,13 +116,31 @@ class LANTransport(BaseTransport):
         """Wire up callbacks for an inbound TCP peer connection
         accepted by LANServer.
         """
+        if len(self._connections) >= self.max_connections:
+            self._spawn_task(connection.close())
+            return
+
         connection.on_packet_received = self._handle_packet_received
-        connection.on_disconnected = self._handle_peer_disconnected
+        server_disconnected = connection.on_disconnected
+
+        def handle_disconnected(peer_address: str) -> None:
+            try:
+                if server_disconnected:
+                    server_disconnected(peer_address)
+            finally:
+                self._handle_peer_disconnected(peer_address)
+
+        connection.on_disconnected = handle_disconnected
 
         self._connections[connection.peer_address] = connection
         self._set_state(TransportState.CONNECTED)
         if self.on_peer_connected:
             self.on_peer_connected(connection.peer_address)
+
+    def is_inbound_connection(self, peer_address: str) -> bool:
+        """Return whether an active connection was accepted by this listener."""
+        connection = self._connections.get(peer_address)
+        return connection is not None and connection.is_inbound
 
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Handle peer disconnection from either inbound or outbound socket."""
@@ -284,6 +305,13 @@ class LANTransport(BaseTransport):
             if existing and existing.is_ready:
                 self._set_state(TransportState.CONNECTED)
                 return existing
+            if len(self._connections) >= self.max_connections:
+                self._set_state(
+                    TransportState.CONNECTED
+                    if self._connections
+                    else TransportState.READY
+                )
+                raise RuntimeError("Maximum LAN connection limit reached")
 
             conn = LANConnection(
                 peer_address=address,

@@ -69,7 +69,7 @@ async def test_two_node_lan_tcp_e2e_communication() -> None:
 
         # Alice connects to Bob via TCP
         bob_endpoint = f"127.0.0.1:{bob_port}"
-        await alice_coord.connect_peer(bob_endpoint, timeout=5.0)
+        alice_connection = await alice_coord.connect_peer(bob_endpoint, timeout=5.0)
 
         # Exchange announcements so they know each other's peer IDs
         await alice_coord.send_announce()
@@ -79,6 +79,9 @@ async def test_two_node_lan_tcp_e2e_communication() -> None:
 
         # Verify peer address mappings
         assert bob_identity.peer_id_hex in alice_coord.peer_addresses
+        assert alice_coord.peer_addresses[bob_identity.peer_id_hex] == bob_endpoint
+        assert alice_identity.peer_id_hex not in bob_coord.peer_addresses
+        assert alice_identity.peer_id_hex in bob_coord.address_to_peer_id.values()
 
         # 3. Test public broadcast message
         public_text = "Hello everyone on the local network!"
@@ -126,6 +129,13 @@ async def test_two_node_lan_tcp_e2e_communication() -> None:
         assert sender == bob_identity.peer_id_hex
         assert text == reply_text
         assert is_enc is True
+
+        await alice_connection.close()
+        for _ in range(20):
+            if not bob_transport.server._connections:
+                break
+            await asyncio.sleep(0.01)
+        assert not bob_transport.server._connections
 
     finally:
         await alice_coord.stop()
