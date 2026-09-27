@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from rich.text import Text
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import RichLog
@@ -90,11 +91,6 @@ class ChatView(Widget):
         ts_str = time.strftime("%H:%M", time.localtime(record.timestamp))
         match record.kind:
             case "chat":
-                ts_part = (
-                    f" [dim #57606a]• {ts_str}[/dim #57606a]"
-                    if self.show_timestamps
-                    else ""
-                )
                 if record.is_self:
                     sender_color = COLOR_SELF_IDENTITY
                     sender_name = "You"
@@ -103,18 +99,58 @@ class ChatView(Widget):
                     sender_name = record.sender
 
                 if record.is_encrypted:
-                    type_tag = "[bold #bc8cff][🔒 DM][/bold #bc8cff]"
+                    type_tag = ("[🔒 DM]", "bold #bc8cff")
                 else:
-                    type_tag = "[dim #57606a][Public][/dim #57606a]"
+                    type_tag = ("[Public]", "dim #57606a")
 
-                header_line = (
-                    f"[bold {sender_color}]{sender_name}[/bold {sender_color}] "
-                    f"{type_tag}{ts_part}"
+                header = Text()
+                header.append(sender_name, style=f"bold {sender_color}")
+                header.append(" ")
+                header.append(*type_tag)
+                if self.show_timestamps:
+                    header.append(f" • {ts_str}", style="dim #57606a")
+
+                width = max(1, self.rich_log.scrollable_content_region.width)
+                prefix_width = header.cell_len + 2
+                header_wraps = prefix_width >= width
+                continuation_indent = " " * min(
+                    2 if header_wraps else prefix_width, width - 1
                 )
-                if self.compact_mode:
-                    self.rich_log.write(f"{header_line}: {record.text}")
-                else:
-                    self.rich_log.write(f"{header_line}\n  {record.text}")
+                body_width = max(1, width - len(continuation_indent))
+                wrapped_lines = (
+                    list(header.wrap(self.app.console, width, overflow="fold"))
+                    if header_wraps
+                    else []
+                )
+                first_line = not header_wraps
+                for logical_line in record.text.split("\n"):
+                    body_lines = (
+                        Text(logical_line).wrap(
+                            self.app.console, body_width, overflow="fold"
+                        )
+                        if logical_line
+                        else [Text()]
+                    )
+                    for body_line in body_lines:
+                        line = Text()
+                        if first_line and prefix_width < width:
+                            line.append_text(header)
+                            line.append(": ")
+                        else:
+                            line.append(continuation_indent)
+                        line.append_text(body_line)
+                        wrapped_lines.append(line)
+                        first_line = False
+
+                aligned_message = Text(
+                    justify="right" if record.is_self else "left",
+                    overflow="fold",
+                )
+                for index, line in enumerate(wrapped_lines):
+                    if index:
+                        aligned_message.append("\n")
+                    aligned_message.append_text(line)
+                self.rich_log.write(aligned_message, width=width)
 
             case "system":
                 ts_part = (
