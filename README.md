@@ -98,6 +98,7 @@ BitChat implements a pluggable transport architecture under `bitchat.transport.b
    * Switch transports instantly using `/transport [bluetooth|lan]` or via the **Settings Modal (`F3`)**.
    * **Fresh Ephemeral Identity**: Switching transport completely terminates active connections, tears down open Noise XX sessions, clears in-memory peer routing tables, and generates a **fresh transport-scoped identity** (`LocalIdentity.generate()`).
    * Permanent disk storage (`~/.bitchat/identity.json`) is never modified or leaked across transports, preventing identity tracking across Bluetooth and Wi-Fi networks.
+   * The persistent identity JSON format remains compatible and stores private keys as plaintext hex. POSIX files are restricted to mode `0600`; Windows files use a protected ACL granting access only to the current user. This is access control, not encryption.
 
 ---
 

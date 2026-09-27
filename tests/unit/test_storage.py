@@ -1,10 +1,17 @@
 """Unit tests for BitChat storage implementations."""
 
+import getpass
+import json
+import os
+import stat
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from bitchat.exceptions import ConfigurationError
+from bitchat.storage import config as storage_module
 from bitchat.storage.config import AppConfig, FileConfigStorage, InMemoryStorage
 
 
@@ -113,6 +120,208 @@ class TestStorage:
         assert loaded.fingerprint == identity.fingerprint
         assert loaded.x25519_private == identity.x25519_private
         assert loaded.ed25519_private == identity.ed25519_private
+
+    def test_identity_file_is_restricted_before_private_keys_are_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Identity file and temp file are owner-only before key material is written."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        if os.name != "posix":
+            pytest.skip("POSIX file modes are unavailable")
+
+        id_file = tmp_path / "identity.json"
+        storage = FileConfigStorage(identity_path=id_file)
+        original_dump = storage_module.json.dump
+
+        def assert_restricted_dump(data: Any, file_obj: Any, **kwargs: Any) -> None:
+            temporary_files = list(tmp_path.glob(".identity.json.*.tmp"))
+            assert len(temporary_files) == 1
+            assert stat.S_IMODE(temporary_files[0].stat().st_mode) == 0o600
+            original_dump(data, file_obj, **kwargs)
+
+        monkeypatch.setattr(storage_module.json, "dump", assert_restricted_dump)
+        storage.save_identity(LocalIdentity.generate())
+
+        assert stat.S_IMODE(id_file.stat().st_mode) == 0o600
+        assert list(tmp_path.glob(".identity.json.*.tmp")) == []
+
+    def test_legacy_identity_file_loads_and_is_restricted(self, tmp_path: Path) -> None:
+        """Existing plaintext JSON identity files remain readable and are hardened."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        identity = LocalIdentity.generate()
+        id_file = tmp_path / "identity.json"
+        id_file.write_text(
+            json.dumps(
+                {
+                    "x25519_private": identity.x25519_private.hex(),
+                    "ed25519_private": identity.ed25519_private.hex(),
+                    "fingerprint": identity.fingerprint,
+                    "peer_id": identity.peer_id.hex(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        if os.name == "posix":
+            id_file.chmod(0o644)
+
+        loaded = FileConfigStorage(identity_path=id_file).load_identity()
+
+        assert loaded is not None
+        assert loaded.peer_id == identity.peer_id
+        assert loaded.x25519_private == identity.x25519_private
+        assert loaded.ed25519_private == identity.ed25519_private
+        if os.name == "posix":
+            assert stat.S_IMODE(id_file.stat().st_mode) == 0o600
+
+    def test_failed_identity_write_preserves_file_and_cleans_temporary_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed atomic write leaves the old identity and no temp file."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        id_file = tmp_path / "identity.json"
+        storage = FileConfigStorage(identity_path=id_file)
+        storage.save_identity(LocalIdentity.generate())
+        previous_contents = id_file.read_bytes()
+
+        def fail_dump(*args: Any, **kwargs: Any) -> None:
+            raise OSError("simulated write failure")
+
+        monkeypatch.setattr(storage_module.json, "dump", fail_dump)
+        with pytest.raises(ConfigurationError, match="simulated write failure"):
+            storage.save_identity(LocalIdentity.generate())
+
+        assert id_file.read_bytes() == previous_contents
+        assert list(tmp_path.glob(".identity.json.*.tmp")) == []
+
+    def test_failed_atomic_replace_preserves_file_and_cleans_temporary_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed replace does not damage the existing identity file."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        id_file = tmp_path / "identity.json"
+        storage = FileConfigStorage(identity_path=id_file)
+        storage.save_identity(LocalIdentity.generate())
+        previous_contents = id_file.read_bytes()
+
+        def fail_replace(_source: Path, _target: Path) -> None:
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr(Path, "replace", fail_replace)
+        with pytest.raises(ConfigurationError, match="simulated replace failure"):
+            storage.save_identity(LocalIdentity.generate())
+
+        assert id_file.read_bytes() == previous_contents
+        assert list(tmp_path.glob(".identity.json.*.tmp")) == []
+
+    def test_identity_repr_str_and_logging_do_not_expose_private_keys(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Normal identity representations and logging omit private key bytes."""
+        import logging
+
+        from bitchat.crypto.identity import LocalIdentity
+
+        identity = LocalIdentity.generate()
+        private_values = (
+            identity.x25519_private.hex(),
+            identity.ed25519_private.hex(),
+        )
+        with caplog.at_level(logging.INFO):
+            logging.getLogger("bitchat.storage.test").info(
+                "identity=%s repr=%r", identity, identity
+            )
+
+        for private_value in private_values:
+            assert private_value not in repr(identity)
+            assert private_value not in str(identity)
+            assert private_value not in caplog.text
+        assert "x25519_private" not in caplog.text
+        assert "ed25519_private" not in caplog.text
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs are only available there")
+    def test_windows_identity_acl_is_current_user_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows ACL protection is applied to the empty temp file before writing."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        original_restrict = storage_module._restrict_windows_file_acl
+
+        def verify_empty_then_restrict(path: Path) -> None:
+            assert path.stat().st_size == 0
+            original_restrict(path)
+
+        monkeypatch.setattr(
+            storage_module, "_restrict_windows_file_acl", verify_empty_then_restrict
+        )
+        id_file = tmp_path / "identity.json"
+        identity = LocalIdentity.generate()
+        FileConfigStorage(identity_path=id_file).save_identity(identity)
+
+        def assert_current_user_acl(path: Path) -> None:
+            result = subprocess.run(
+                ["icacls", str(path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            acl_entries = [
+                line.strip()
+                for line in result.stdout.splitlines()
+                if ":(" in line and ")" in line
+            ]
+            assert len(acl_entries) == 1
+            assert getpass.getuser().casefold() in acl_entries[0].casefold()
+            assert ":(F)" in acl_entries[0]
+            assert "(I)" not in acl_entries[0]
+
+        assert_current_user_acl(id_file)
+
+        legacy_file = tmp_path / "legacy_identity.json"
+        legacy_file.write_text(
+            json.dumps(
+                {
+                    "x25519_private": identity.x25519_private.hex(),
+                    "ed25519_private": identity.ed25519_private.hex(),
+                    "fingerprint": identity.fingerprint,
+                    "peer_id": identity.peer_id.hex(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            storage_module, "_restrict_windows_file_acl", original_restrict
+        )
+        loaded = FileConfigStorage(identity_path=legacy_file).load_identity()
+        assert loaded is not None
+        assert loaded.peer_id == identity.peer_id
+        assert_current_user_acl(legacy_file)
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs are only available there")
+    def test_windows_acl_failure_preserves_identity_and_cleans_temp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ACL failure aborts persistence without leaving private-key data."""
+        from bitchat.crypto.identity import LocalIdentity
+
+        id_file = tmp_path / "identity.json"
+        storage = FileConfigStorage(identity_path=id_file)
+        storage.save_identity(LocalIdentity.generate())
+        previous_contents = id_file.read_bytes()
+
+        def fail_acl(_path: Path) -> None:
+            raise OSError("simulated ACL failure")
+
+        monkeypatch.setattr(storage_module, "_restrict_windows_file_acl", fail_acl)
+        with pytest.raises(ConfigurationError, match="simulated ACL failure"):
+            storage.save_identity(LocalIdentity.generate())
+
+        assert id_file.read_bytes() == previous_contents
+        assert list(tmp_path.glob(".identity.json.*.tmp")) == []
 
     def test_file_identity_corrupted_raises(self, tmp_path: Path) -> None:
         """Corrupted identity JSON raises ConfigurationError."""
