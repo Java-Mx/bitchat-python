@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
+from textual.command import CommandPalette
 from textual.widgets import Button, Input, RadioButton, RichLog, Static
 
 from bitchat.app.session_coordinator import SessionCoordinator
@@ -13,7 +14,11 @@ from bitchat.ble.manager import BLEManager
 from bitchat.ble.models import DiscoveredPeer
 from bitchat.ble.server import BLEServer
 from bitchat.crypto.identity import LocalIdentity
-from bitchat.storage.config import AppConfig, InMemoryStorage
+from bitchat.storage.config import (
+    DEFAULT_KEYBINDINGS,
+    AppConfig,
+    InMemoryStorage,
+)
 from bitchat.tui.app import BitChatApp
 from bitchat.tui.screens.ble_error import BLEErrorModal
 from bitchat.tui.screens.edit_theme import EditThemeModal
@@ -67,7 +72,7 @@ async def test_tui_mount_and_widgets(test_coordinator: SessionCoordinator) -> No
 
         log = app.query_one("#chat-log", RichLog)
         assert log is not None
-        assert any("Welcome to BitChat" in str(line) for line in log.lines)
+        assert any("Welcome to BitChat" in line.text for line in log.lines)
 
         await pilot.pause()
 
@@ -85,7 +90,8 @@ async def test_tui_send_chat_message(test_coordinator: SessionCoordinator) -> No
 
         assert inp.value == ""
         log = app.query_one("#chat-log", RichLog)
-        assert any("Hello world from modern TUI!" in str(line) for line in log.lines)
+        rendered = " ".join(" ".join(line.text for line in log.lines).split())
+        assert "Hello world from modern TUI!" in rendered
 
 
 @pytest.mark.asyncio
@@ -208,8 +214,210 @@ async def test_tui_inbound_message_display(
         await pilot.pause()
 
         log = app.query_one("#chat-log", RichLog)
-        assert any("Encrypted secret message" in str(line) for line in log.lines)
-        assert any("DM" in str(line) for line in log.lines)
+        rendered = " ".join(" ".join(line.text for line in log.lines).split())
+        assert "Encrypted secret message" in rendered
+        assert "DM" in rendered
+
+
+@pytest.mark.asyncio
+async def test_chat_messages_render_metadata_and_text_on_one_aligned_row(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 40)) as pilot:
+        chat = app.query_one(ChatView)
+        chat.clear_log()
+        chat.add_chat_message("Alice", "short outgoing", False, is_self=True)
+        chat.add_chat_message("PeerB", "short incoming", False)
+        chat.add_chat_message("PeerC", "private incoming", True)
+        chat.add_chat_message("Alice", "private outgoing", True, is_self=True)
+        await pilot.pause()
+
+        lines = [line.text.rstrip() for line in chat.rich_log.lines]
+        assert len(lines) == 4
+        assert lines[0].lstrip().startswith("You [Public] • ")
+        assert ": short outgoing" in lines[0]
+        assert lines[0].startswith(" ")
+        assert lines[1].startswith("PeerB [Public] • ")
+        assert ": short incoming" in lines[1]
+        assert lines[2].startswith("PeerC [🔒 DM] • ")
+        assert ": private incoming" in lines[2]
+        assert lines[3].lstrip().startswith("You [🔒 DM] • ")
+        assert ": private outgoing" in lines[3]
+
+
+@pytest.mark.asyncio
+async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(110, 36)) as pilot:
+        chat = app.query_one(ChatView)
+        log = chat.rich_log
+        width = log.scrollable_content_region.width
+        chat.clear_log()
+
+        long_text = (
+            "this is a very long message that should wrap safely without "
+            "horizontal overflow " * 4
+        )
+        chat.add_chat_message("Alice", long_text, False, is_self=True)
+        await pilot.pause()
+        outgoing_lines = [line.text.rstrip() for line in log.lines]
+        assert len(outgoing_lines) > 1
+        assert outgoing_lines[0].lstrip().startswith("You [Public] • ")
+        assert ": this is a very long message" in outgoing_lines[0]
+        assert all(line.cell_length <= width for line in log.lines)
+        assert all(line.startswith(" ") for line in outgoing_lines[1:])
+        assert "horizontal overflow" in "".join(outgoing_lines)
+
+        chat.clear_log()
+        chat.add_chat_message("PeerB", long_text, False)
+        await pilot.pause()
+        incoming_lines = [line.text.rstrip() for line in log.lines]
+        assert len(incoming_lines) > 1
+        assert incoming_lines[0].startswith("PeerB [Public] • ")
+        assert ": this is a very long message" in incoming_lines[0]
+        assert all(line.cell_length <= width for line in log.lines)
+        assert all(line.startswith(" ") for line in incoming_lines[1:])
+        assert "horizontal overflow" in "".join(incoming_lines)
+
+        chat.clear_log()
+        chat.add_chat_message(
+            "Alice", "first line\nsecond line\nthird line", True, is_self=True
+        )
+        await pilot.pause()
+        outgoing_multiline = [line.text.rstrip() for line in log.lines]
+        assert len(outgoing_multiline) == 3
+        assert outgoing_multiline[0].lstrip().endswith(": first line")
+        assert outgoing_multiline[1].lstrip() == "second line"
+        assert outgoing_multiline[2].lstrip() == "third line"
+        assert all(line.startswith(" ") for line in outgoing_multiline[1:])
+
+        chat.clear_log()
+        chat.add_chat_message("PeerB", "first line\nsecond line", False)
+        await pilot.pause()
+        incoming_multiline = [line.text.rstrip() for line in log.lines]
+        assert len(incoming_multiline) == 2
+        assert incoming_multiline[0].startswith("PeerB [Public] • ")
+        assert incoming_multiline[0].endswith(": first line")
+        assert incoming_multiline[1].lstrip() == "second line"
+        assert incoming_multiline[1].startswith(" ")
+
+
+@pytest.mark.asyncio
+async def test_chat_scrolls_after_many_single_row_messages(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(100, 24)) as pilot:
+        chat = app.query_one(ChatView)
+        chat.clear_log()
+        for index in range(60):
+            chat.add_chat_message("PeerB", f"message {index}", False)
+        await pilot.pause()
+
+        log = chat.rich_log
+        bottom = log.scroll_y
+        assert bottom > 0
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert log.scroll_y < bottom
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert log.scroll_y == bottom
+
+
+@pytest.mark.asyncio
+async def test_chat_narrow_width_keeps_long_sender_metadata_and_message(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(80, 30)) as pilot:
+        chat = app.query_one(ChatView)
+        log = chat.rich_log
+        width = log.scrollable_content_region.width
+        chat.clear_log()
+        sender = "A" * 32
+        chat.add_chat_message(sender, "visible message body", False)
+        await pilot.pause()
+
+        rendered = " ".join(" ".join(line.text for line in log.lines).split())
+        assert sender in rendered
+        assert "[Public]" in rendered
+        assert "visible message body" in rendered
+        assert all(line.cell_length <= width for line in log.lines)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_p_uses_configured_action_and_preserves_palette_access(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    keybindings = DEFAULT_KEYBINDINGS.copy()
+    keybindings["help"] = "ctrl+p"
+    app = BitChatApp(
+        coordinator=test_coordinator,
+        config=AppConfig(keybindings=keybindings),
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        ctrl_p_bindings = app._bindings.key_to_bindings["ctrl+p"]
+        assert [binding.action for binding in ctrl_p_bindings] == ["show_help"]
+
+        message_input = app.query_one(MessageInput)
+        message_input.focus()
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        assert not isinstance(app.screen, CommandPalette)
+
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+        assert not isinstance(app.screen, CommandPalette)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        sidebar = app.query_one(PeerSidebar)
+        sidebar.focus()
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        assert not isinstance(app.screen, CommandPalette)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("ctrl+shift+p")
+        await pilot.pause()
+        assert isinstance(app.screen, CommandPalette)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, CommandPalette)
+
+        message_input = app.query_one(MessageInput)
+        message_input.focus()
+        message_input.value = "/"
+        await pilot.pause()
+        assert app.query_one(AutocompletePalette).is_visible
+
+        message_input.value = ""
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        settings_input = app.screen.query_one("#settings-kb-help", Input)
+        settings_input.focus()
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, SettingsModal)
+
+        app.query_one(ChatView).add_chat_message("PeerB", "clear me", False)
+        await pilot.pause()
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+        assert not app.query_one(ChatView)._message_history
 
 
 @pytest.mark.asyncio
@@ -252,7 +460,7 @@ async def test_tui_peer_discovery_and_status_update(
         await pilot.pause()
 
         log = app.query_one("#chat-log", RichLog)
-        assert any("Connected" in str(line) for line in log.lines)
+        assert any("Connected" in line.text for line in log.lines)
 
 
 def test_tui_deterministic_identity_colors() -> None:
@@ -507,10 +715,8 @@ async def test_tui_context_switching_and_at_syntax(
         await pilot.pause()
 
         log = app.query_one("#chat-log", RichLog)
-        assert any(
-            "to @Bob" in str(line) and "Hey Bob from context mode" in str(line)
-            for line in log.lines
-        )
+        rendered = " ".join(" ".join(line.text for line in log.lines).split())
+        assert "to @Bob" in rendered and "Hey Bob from context mode" in rendered
 
         # 3. Switch back via /public
         inp.focus()
@@ -524,10 +730,8 @@ async def test_tui_context_switching_and_at_syntax(
         inp.value = "@Bob Direct message via at syntax"
         await pilot.press("enter")
         await pilot.pause()
-        assert any(
-            "to Bob" in str(line) and "Direct message via at syntax" in str(line)
-            for line in log.lines
-        )
+        rendered = " ".join(" ".join(line.text for line in log.lines).split())
+        assert "to Bob" in rendered and "Direct message via at syntax" in rendered
 
 
 @pytest.mark.asyncio
@@ -620,7 +824,7 @@ async def test_tui_lan_status_uses_real_network_values_only(
         chat = app.query_one(ChatView)
         app._display_status_diagnostics(chat)
         await pilot.pause()
-        rendered = "\n".join(str(line) for line in chat.rich_log.lines)
+        rendered = "\n".join(line.text for line in chat.rich_log.lines)
         assert "127.0.0.1" not in rendered
         assert "unavailable" in rendered.lower()
         assert "OfficeNet" in rendered
@@ -841,7 +1045,7 @@ async def test_tui_appearance_density_real_effect_and_history_rerender(
         assert chat.compact_mode is True
         assert storage.load_config().density == "compact"
 
-        rendered_lines = [str(line) for line in chat.rich_log.lines]
+        rendered_lines = [line.text for line in chat.rich_log.lines]
         log_content = " ".join(rendered_lines)
         assert "Hello comfortable world" in log_content
 
@@ -883,7 +1087,7 @@ async def test_tui_appearance_timestamps_real_toggle_and_rerender(
         assert storage.load_config().show_timestamps is False
 
         # Verify timestamp bullet is absent from re-rendered log
-        rendered_lines = [str(line) for line in chat.rich_log.lines]
+        rendered_lines = [line.text for line in chat.rich_log.lines]
         for line in rendered_lines:
             if "Test timestamp message" in line:
                 assert "•" not in line

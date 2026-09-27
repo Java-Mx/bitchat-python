@@ -313,6 +313,7 @@ Send private, end-to-end encrypted messages to any peer using either syntax:
 
 ### 9. Command Palette & Autocomplete
 * Type `/` to open the command palette above the prompt.
+* Press `Ctrl+Shift+P` to open Textual's built-in command palette.
 * Use `Up` and `Down` arrow keys to browse commands.
 * Press `Tab` or `Enter` to complete the command into the input box.
 * Type `@` to view suggestions for online and known peers, and press `Tab` to complete their name.
@@ -359,6 +360,7 @@ Press `F3` (or click `Settings` or type `/settings`) to configure:
 | `F3` | `settings` | Toggle Node Settings & Keybinding Configuration |
 | `Ctrl+L` | `clear_chat` | Clear the current conversation message log |
 | `Ctrl+Q` | `quit` | Gracefully terminate and exit BitChat |
+| `Ctrl+Shift+P` | Textual command palette | Open Textual's built-in command palette |
 | `PageUp` | `scroll_up` | Scroll conversation view upwards |
 | `PageDown` | `scroll_down` | Scroll conversation view downwards |
 | `Escape` | `dismiss` | Close open modals or dismiss the autocomplete palette |

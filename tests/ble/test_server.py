@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from tests.ble.mocks import MockBleakClient, MockBLEServerBackend
 
 from bitchat.ble.server import BLEServer
 from bitchat.exceptions import BLEError
+from bitchat.protocol.constants import BITCHAT_SERVICE_UUID
+
+
+def test_manufacturer_advertisement_fits_legacy_ble_payload() -> None:
+    from bitchat.ble.server import (
+        _LEGACY_ADVERTISEMENT_MAX_BYTES,
+        _MANUFACTURER_AD_STRUCTURE_OVERHEAD,
+        _manufacturer_advertisement_payload,
+    )
+
+    payload = _manufacturer_advertisement_payload(BITCHAT_SERVICE_UUID)
+
+    assert payload == b"BC" + uuid.UUID(BITCHAT_SERVICE_UUID).bytes
+    assert len(payload) + _MANUFACTURER_AD_STRUCTURE_OVERHEAD <= (
+        _LEGACY_ADVERTISEMENT_MAX_BYTES
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_for_advertisement_status_rejects_failed_start() -> None:
+    from types import SimpleNamespace
+
+    with pytest.raises(BLEError, match="advertising failed with status 5"):
+        await BLEServer._wait_for_advertisement_status(
+            SimpleNamespace(status=5),
+            "status",
+            started_status=2,
+            failed_statuses=(3, 4, 5),
+            advertisement_type="BitChat discovery",
+        )
 
 
 @pytest.mark.asyncio

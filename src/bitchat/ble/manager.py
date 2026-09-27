@@ -111,6 +111,13 @@ class BLEManager:
             "connected_peers_count": len(self.connected_peers),
         }
 
+    def _spawn_task(self, coroutine: Any) -> asyncio.Task[Any]:
+        """Keep a reference to a cleanup task until it completes."""
+        task = asyncio.create_task(coroutine)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
     def _handle_adapter_state_changed(self, info: AdapterInfo) -> None:
         """React to hardware Bluetooth radio state changes."""
         logger.info(
@@ -166,7 +173,9 @@ class BLEManager:
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Handle peer disconnection and clean up local transport entry."""
         logger.info("Handling disconnect cleanup for %s", peer_address)
-        self._transports.pop(peer_address, None)
+        transport = self._transports.pop(peer_address, None)
+        if transport is not None:
+            self._spawn_task(transport.stop())
         if not self._transports and self._state == BLEState.CONNECTED:
             self._state = BLEState.READY
 

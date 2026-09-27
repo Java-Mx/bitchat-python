@@ -88,8 +88,10 @@ class BLETransport:
         while self._is_running:
             try:
                 raw_bytes = await self._receive_queue.get()
-                self._process_raw_bytes(raw_bytes)
-                self._receive_queue.task_done()
+                try:
+                    self._process_raw_bytes(raw_bytes)
+                finally:
+                    self._receive_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -178,6 +180,11 @@ class BLETransport:
                 await self._worker_task
             self._worker_task = None
 
+        while not self._receive_queue.empty():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._receive_queue.get_nowait()
+                self._receive_queue.task_done()
+        self.reassembler.clear()
         await self.connection.disconnect()
 
     async def send_packet(

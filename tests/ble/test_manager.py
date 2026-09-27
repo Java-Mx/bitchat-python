@@ -125,7 +125,7 @@ async def test_manager_remote_disconnect_handling() -> None:
         client_factory=client_factory,
     )
 
-    await manager.connect_peer("11:22:33:44:55:66")
+    transport = await manager.connect_peer("11:22:33:44:55:66")
     assert "11:22:33:44:55:66" in manager.connected_peers
 
     # Simulate unexpected remote disconnection
@@ -134,6 +134,10 @@ async def test_manager_remote_disconnect_handling() -> None:
 
     assert "11:22:33:44:55:66" not in manager.connected_peers
     assert disconnected_events == ["11:22:33:44:55:66"]
+    await asyncio.gather(*tuple(manager._background_tasks))
+    assert not transport.is_running
+    assert transport.connection.is_connected is False
+    assert transport._worker_task is None
 
 
 @pytest.mark.asyncio
