@@ -77,12 +77,16 @@ class MockBleakScanner:
         name: str | None = "BitChat Node",
         service_uuids: list[str] | None = None,
         rssi: int = -60,
+        manufacturer_data: dict[int, bytes] | None = None,
     ) -> None:
         if service_uuids is None:
             service_uuids = [BITCHAT_SERVICE_UUID.lower()]
         device = MockBLEDevice(address=address, name=name, rssi=rssi)
         adv = MockAdvertisementData(
-            local_name=name, service_uuids=service_uuids, rssi=rssi
+            local_name=name,
+            service_uuids=service_uuids,
+            rssi=rssi,
+            manufacturer_data=manufacturer_data or {},
         )
         self.detection_callback(device, adv)
 

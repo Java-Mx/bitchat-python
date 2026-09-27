@@ -20,6 +20,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ADVERTISEMENT_START_TIMEOUT_SECONDS = 5.0
+_ADVERTISEMENT_POLL_INTERVAL_SECONDS = 0.05
+_LEGACY_ADVERTISEMENT_MAX_BYTES = 31
+_MANUFACTURER_AD_STRUCTURE_OVERHEAD = 4
+
+
+def _manufacturer_advertisement_payload(service_uuid: str) -> bytes:
+    return b"BC" + uuid.UUID(service_uuid).bytes
+
 
 class BLEServer:
     """GATT Server hosting the BitChat service and characteristic."""
@@ -180,9 +189,17 @@ class BLEServer:
             char.add_subscribed_clients_changed(self._on_winrt_subscribers_changed)
             self._characteristic = char
 
-            # Start GATT provider advertising
-            with contextlib.suppress(Exception):
-                self._provider.start_advertising()
+            advertising_params = gatt.GattServiceProviderAdvertisingParameters()
+            advertising_params.is_connectable = True
+            advertising_params.is_discoverable = True
+            self._provider.start_advertising_with_parameters(advertising_params)
+            await self._wait_for_advertisement_status(
+                self._provider,
+                "advertisement_status",
+                started_status=2,
+                failed_statuses=(3, 4),
+                advertisement_type="GATT service",
+            )
 
             # Broadcast companion manufacturer advertisement so nodes detect BitChat
             try:
@@ -190,27 +207,31 @@ class BLEServer:
                 m = adv.BluetoothLEManufacturerData()
                 m.company_id = 0xFFFF
                 writer = DataWriter()
-                # b'BC' + 16-byte UUID + peer_id + '|' + nickname
-                payload = b"BC" + srv_uuid.bytes
-                if self.peer_id:
-                    pid_bytes = self.peer_id[:12].encode("utf-8")
-                    nick_bytes = (self.nickname[:8] if self.nickname else "").encode(
-                        "utf-8"
-                    )
-                    payload += pid_bytes + b"|" + nick_bytes
+                payload = _manufacturer_advertisement_payload(self.service_uuid)
+                if len(payload) + _MANUFACTURER_AD_STRUCTURE_OVERHEAD > (
+                    _LEGACY_ADVERTISEMENT_MAX_BYTES
+                ):
+                    raise BLEError("BitChat manufacturer advertisement is too large")
                 writer.write_bytes(payload)
                 m.data = writer.detach_buffer()
                 publisher.advertisement.manufacturer_data.append(m)
                 publisher.start()
                 self._publisher = publisher
+                await self._wait_for_advertisement_status(
+                    publisher,
+                    "status",
+                    started_status=2,
+                    failed_statuses=(3, 4, 5),
+                    advertisement_type="BitChat discovery",
+                )
                 logger.info(
                     "WinRT BLE advertisement publisher started for BitChat (%s)",
                     self.service_uuid,
                 )
             except Exception as pub_err:
-                logger.warning(
-                    "WinRT advertisement publisher could not start: %s", pub_err
-                )
+                raise BLEError(
+                    f"WinRT BitChat discovery advertisement failed: {pub_err}"
+                ) from pub_err
 
             self._is_advertising = True
             logger.info(
@@ -220,6 +241,31 @@ class BLEServer:
             self._cleanup_windows_resources()
             self._is_advertising = False
             raise BLEError(f"Failed to start WinRT BLEServer: {e}") from e
+
+    @staticmethod
+    async def _wait_for_advertisement_status(
+        resource: Any,
+        status_attribute: str,
+        started_status: int,
+        failed_statuses: tuple[int, ...],
+        advertisement_type: str,
+    ) -> None:
+        """Wait for WinRT to report that an advertisement actually started."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _ADVERTISEMENT_START_TIMEOUT_SECONDS
+        while True:
+            status = int(getattr(resource, status_attribute))
+            if status == started_status:
+                return
+            if status in failed_statuses:
+                raise BLEError(
+                    f"{advertisement_type} advertising failed with status {status}"
+                )
+            if loop.time() >= deadline:
+                raise BLEError(
+                    f"{advertisement_type} advertising did not start (status {status})"
+                )
+            await asyncio.sleep(_ADVERTISEMENT_POLL_INTERVAL_SECONDS)
 
     def _cleanup_windows_resources(self) -> None:
         """Safely release Windows WinRT provider and publisher."""

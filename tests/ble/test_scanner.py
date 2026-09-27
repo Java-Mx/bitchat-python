@@ -1,5 +1,7 @@
 """Tests for BLE scanner behavior."""
 
+import uuid
+
 import pytest
 from tests.ble.mocks import MockBleakScanner
 
@@ -71,6 +73,48 @@ async def test_scanner_filters_service_uuid():
     assert discovered[0].name == "BitChat-Alice"
     assert discovered[0].rssi == -50
 
+    await scanner.stop()
+
+
+@pytest.mark.asyncio
+async def test_scanner_recognizes_compact_manufacturer_signature() -> None:
+    mock_scanner: MockBleakScanner | None = None
+    discovered = []
+
+    def scanner_factory(detection_callback, service_uuids):
+        nonlocal mock_scanner
+        mock_scanner = MockBleakScanner(detection_callback, service_uuids)
+        return mock_scanner
+
+    scanner = BLEScanner(
+        on_peer_discovered=discovered.append,
+        scanner_factory=scanner_factory,
+    )
+    await scanner.start()
+    assert mock_scanner is not None
+
+    signature = b"BC" + uuid.UUID(BITCHAT_SERVICE_UUID).bytes
+    mock_scanner.emit_device(
+        address="11:22:33:44:55:66",
+        name="Unknown",
+        service_uuids=[],
+        manufacturer_data={0xFFFF: signature},
+    )
+
+    assert len(discovered) == 1
+    assert discovered[0].address == "11:22:33:44:55:66"
+    assert discovered[0].peer_id is None
+    assert discovered[0].name == "Unknown"
+
+    mock_scanner.emit_device(
+        address="99:88:77:66:55:44",
+        name="Unrelated",
+        service_uuids=[],
+        manufacturer_data={0xFFFF: b"not BitChat"},
+    )
+
+    assert len(discovered) == 1
+    assert len(scanner.discovered_peers) == 1
     await scanner.stop()
 
 
