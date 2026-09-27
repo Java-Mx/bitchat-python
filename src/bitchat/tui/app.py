@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Input
 
 from bitchat.commands.parser import (
     COMMAND_REGISTRY,
@@ -33,7 +35,6 @@ from bitchat.tui.widgets.status_bar import StatusBar
 
 if TYPE_CHECKING:
     from textual import events
-    from textual.widgets import Input
 
     from bitchat.app.session_coordinator import SessionCoordinator
 
@@ -47,6 +48,7 @@ class BitChatApp(App[None]):
     SUB_TITLE = "Bluetooth Low Energy Mesh Chat"
     CSS_PATH = "styles/app.tcss"
     CSS = TCSS_STYLES
+    COMMAND_PALETTE_BINDING = "ctrl+shift+p"
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
@@ -184,6 +186,12 @@ class BitChatApp(App[None]):
         """Global key event interceptor guaranteeing dynamic binding execution."""
         action = self.get_action_for_key(event.key)
         if action:
+            if isinstance(self.screen, ModalScreen) and isinstance(
+                self.screen.focused, Input
+            ):
+                event.prevent_default()
+                event.stop()
+                return
             event.prevent_default()
             event.stop()
             self.trigger_action(action)
