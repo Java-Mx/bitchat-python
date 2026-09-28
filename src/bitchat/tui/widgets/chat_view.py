@@ -17,6 +17,7 @@ from bitchat.tui.theme import (
 )
 
 if TYPE_CHECKING:
+    from textual import events
     from textual.app import ComposeResult
 
 
@@ -51,6 +52,10 @@ class ChatView(Widget):
         self.border_title = f"Conversation ({self.channel_name})"
         self._mounted = True
 
+    def on_resize(self, event: events.Resize) -> None:
+        if self._mounted and self._message_history:
+            self.re_render_all()
+
     def watch_channel_name(self, new_val: str) -> None:
         self.border_title = f"Conversation ({new_val})"
 
@@ -81,7 +86,9 @@ class ChatView(Widget):
         try:
             log = self.rich_log
             log.clear()
-            for rec in self._message_history:
+            for index, rec in enumerate(self._message_history):
+                if index:
+                    log.write(Text(" "))
                 self._render_record(rec)
         except Exception:
             pass
@@ -110,7 +117,7 @@ class ChatView(Widget):
                 if self.show_timestamps:
                     header.append(f" • {ts_str}", style="dim #57606a")
 
-                width = max(1, self.rich_log.scrollable_content_region.width)
+                width = max(1, self.rich_log.content_region.width)
                 prefix_width = header.cell_len + 2
                 header_wraps = prefix_width >= width
                 continuation_indent = " " * min(
@@ -190,6 +197,8 @@ class ChatView(Widget):
                 self.rich_log.write(line)
 
     def _append_record(self, record: ChatMessageRecord) -> None:
+        if self._message_history:
+            self.rich_log.write(Text(" "))
         self._message_history.append(record)
         if len(self._message_history) > self.MAX_HISTORY:
             self._message_history.pop(0)

@@ -20,6 +20,8 @@ from bitchat.crypto.identity import LocalIdentity
 from bitchat.crypto.noise import NoiseSessionState
 from bitchat.protocol.constants import MessageType
 from bitchat.protocol.packet import BitchatPacket
+from bitchat.tui.app import BitChatApp
+from bitchat.tui.widgets.chat_view import ChatView
 
 
 def _create_linked_pair() -> tuple[
@@ -273,6 +275,104 @@ class TestSessionCoordinator:
 
         await coord_a.stop()
         await coord_b.stop()
+
+    @pytest.mark.asyncio
+    async def test_authenticated_ble_transition_is_reported_once_in_tui(self) -> None:
+        coord_a, coord_b, messages_a, messages_b = _create_linked_pair()
+        app_a = BitChatApp(coordinator=coord_a)
+        app_b = BitChatApp(coordinator=coord_b)
+        on_message_b = coord_b.on_message_received
+
+        def capture_message_b(sender: str, text: str, is_encrypted: bool) -> None:
+            messages_b.append((sender, text, is_encrypted))
+            if on_message_b is not None:
+                on_message_b(sender, text, is_encrypted)
+
+        coord_b.on_message_received = capture_message_b
+
+        try:
+            async with (
+                app_a.run_test() as pilot_a,
+                app_b.run_test() as pilot_b,
+            ):
+                await asyncio.sleep(0.05)
+                for app in (app_a, app_b):
+                    assert not any(
+                        record.kind == "system"
+                        and record.text == "Connected via Bluetooth"
+                        for record in app.query_one(ChatView)._message_history
+                    )
+
+                await coord_a.ble_manager.connect_peer("BB:01")
+                await asyncio.sleep(0.05)
+
+                for app in (app_a, app_b):
+                    assert not any(
+                        record.kind == "system"
+                        and record.text == "Connected via Bluetooth"
+                        for record in app.query_one(ChatView)._message_history
+                    )
+
+                await coord_a.send_direct_message(
+                    coord_b.local_identity.peer_id_hex,
+                    "Authenticated BLE message",
+                )
+                for _ in range(50):
+                    session_a = coord_a.get_session(coord_b.local_identity.peer_id_hex)
+                    session_b = coord_b.get_session(coord_a.local_identity.peer_id_hex)
+                    if (
+                        session_a is not None
+                        and session_a.is_established
+                        and session_b is not None
+                        and session_b.is_established
+                    ):
+                        break
+                    await asyncio.sleep(0.01)
+                await pilot_a.pause()
+                await pilot_b.pause()
+                for _ in range(50):
+                    if messages_b:
+                        break
+                    await asyncio.sleep(0.01)
+
+                for app in (app_a, app_b):
+                    connected_messages = [
+                        record
+                        for record in app.query_one(ChatView)._message_history
+                        if record.kind == "system"
+                        and record.text == "Connected via Bluetooth"
+                    ]
+                    assert len(connected_messages) == 1
+
+                assert messages_b == [
+                    (
+                        coord_a.local_identity.peer_id_hex,
+                        "Authenticated BLE message",
+                        True,
+                    )
+                ]
+                assert not any(
+                    "Connected via Bluetooth" in message
+                    for _, message, _ in messages_a + messages_b
+                )
+
+                assert coord_a.on_handshake_completed is not None
+                coord_a.on_handshake_completed(
+                    coord_b.local_identity.peer_id_hex,
+                    coord_b.local_identity.fingerprint,
+                )
+                await pilot_a.pause()
+                assert (
+                    sum(
+                        record.kind == "system"
+                        and record.text == "Connected via Bluetooth"
+                        for record in app_a.query_one(ChatView)._message_history
+                    )
+                    == 1
+                )
+        finally:
+            await coord_a.stop()
+            await coord_b.stop()
 
     @pytest.mark.asyncio
     async def test_large_fragmented_direct_message(self) -> None:

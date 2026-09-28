@@ -110,6 +110,8 @@ class BitChatApp(App[None]):
         self.current_density: str = self.config.density
         self.current_show_timestamps: bool = self.config.show_timestamps
         self.current_accent: str = self.config.accent
+        self._authenticated_transport_peers: set[str] = set()
+        self._authenticated_peer_addresses: dict[str, str] = {}
 
         # Sync nickname to coordinator if coordinator was default "Anonymous"
         if (
@@ -424,20 +426,58 @@ class BitChatApp(App[None]):
 
         def _do_update() -> None:
             chat = self.query_one(ChatView)
-            chat.add_system_message(f"Peer {peer}: {status}")
+            if status.casefold() == "disconnected":
+                disconnected_peers = [
+                    peer_id
+                    for peer_id, address in self._authenticated_peer_addresses.items()
+                    if address == peer
+                ]
+                for peer_id in disconnected_peers:
+                    self._authenticated_peer_addresses.pop(peer_id, None)
+                    self._authenticated_transport_peers.discard(peer_id)
+
+            if status.casefold() != "connected":
+                chat.add_system_message(f"Peer {peer}: {status}")
             self._refresh_peer_lists()
 
         self._dispatch_ui(_do_update)
 
     def _on_coordinator_handshake(self, peer_id: str, fingerprint: str) -> None:
         """Handle successful Noise XX handshake."""
+        coordinator = self.coordinator
+        if coordinator is None:
+            return
+
         short_fp = fingerprint[:16] + "..." if len(fingerprint) > 16 else fingerprint
 
         def _do_notify() -> None:
+            if peer_id in self._authenticated_transport_peers:
+                self._refresh_peer_lists()
+                return
+
+            self._authenticated_transport_peers.add(peer_id)
+            address = coordinator.peer_addresses.get(peer_id)
+            if address is None:
+                address = next(
+                    (
+                        peer_address
+                        for peer_address, known_peer_id in (
+                            coordinator.address_to_peer_id.items()
+                        )
+                        if known_peer_id == peer_id
+                    ),
+                    None,
+                )
+            if address is not None:
+                self._authenticated_peer_addresses[peer_id] = address
+
             chat = self.query_one(ChatView)
             chat.add_security_event(
                 f"Noise XX session established with {peer_id[:8]} (FP: {short_fp})"
             )
+            transport_name = coordinator.active_transport_name
+            connection_label = "LAN" if transport_name == "lan" else "Bluetooth"
+            chat.add_system_message(f"Connected via {connection_label}")
             self._refresh_peer_lists()
 
         self._dispatch_ui(_do_notify)
