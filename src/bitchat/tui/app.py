@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input
 
@@ -39,6 +40,14 @@ if TYPE_CHECKING:
     from bitchat.app.session_coordinator import SessionCoordinator
 
 logger = logging.getLogger(__name__)
+
+
+class BleErrorReported(Message):
+    """BLE error forwarded from coordinator or transport callbacks."""
+
+    def __init__(self, error_message: str) -> None:
+        super().__init__()
+        self.error_message = error_message
 
 
 class BitChatApp(App[None]):
@@ -352,21 +361,21 @@ class BitChatApp(App[None]):
             status_bar.target_status = f"Target: {self.active_context}"
 
     def _on_coordinator_ble_error(self, err_msg: str) -> None:
-        """Handle Bluetooth hardware or scan failure from coordinator."""
+        """Queue BLE failures for handling inside the active Textual app context."""
+        self.post_message(BleErrorReported(err_msg))
 
-        def _do_error() -> None:
-            chat = self.query_one(ChatView)
-            chat.add_error_message(f"Bluetooth Error: {err_msg}")
-            chat.add_system_message(
-                "Bluetooth hardware is unavailable or disabled. "
-                "Please enable Bluetooth in settings and "
-                "click 'Retry Adapter' or type /scan."
-            )
-            self._refresh_peer_lists()
-            if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
-                self.push_screen(BLEErrorModal(error_message=err_msg))
-
-        self._dispatch_ui(_do_error)
+    def on_ble_error_reported(self, event: BleErrorReported) -> None:
+        """Present a coordinator BLE failure from the Textual message loop."""
+        chat = self.query_one(ChatView)
+        chat.add_error_message(f"Bluetooth Error: {event.error_message}")
+        chat.add_system_message(
+            "Bluetooth hardware is unavailable or disabled. "
+            "Please enable Bluetooth in settings and "
+            "click 'Retry Adapter' or type /scan."
+        )
+        self._refresh_peer_lists()
+        if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+            self.push_screen(BLEErrorModal(error_message=event.error_message))
 
     def _resolve_peer_address(self, target: str) -> str | None:
         """Resolve a nickname, peer ID prefix, or discovered device

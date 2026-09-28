@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 from unittest.mock import MagicMock
 
 import pytest
@@ -796,6 +798,84 @@ async def test_tui_ble_truthful_state_and_error_modal(
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, BLEErrorModal)
+
+
+@pytest.mark.asyncio
+async def test_ble_error_from_real_coordinator_uses_active_textual_lifecycle(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    def failing_scanner_factory(detection_callback, service_uuids):
+        scanner = MockBleakScanner(detection_callback, service_uuids)
+        scanner.should_fail_start = True
+        return scanner
+
+    test_coordinator.ble_manager.scanner._scanner_factory = failing_scanner_factory
+    app = BitChatApp(coordinator=test_coordinator)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.is_mounted
+        assert app.screen.app is app
+        assert app.screen.error_message == (
+            "Bluetooth scan failed: Failed to start BLE scanner: "
+            "Bluetooth adapter offline"
+        )
+        error_content = app.screen.query_one(".ble-error-text", Static)
+        error_title = app.screen.query_one("#ble-error-title", Static)
+        assert "Bluetooth Hardware Error" in str(error_title.render())
+        assert "Bluetooth adapter offline" in str(error_content.render())
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert app.is_running
+
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        second_error = "A second BLE failure without an active app context"
+
+        async def report_without_textual_context() -> None:
+            test_coordinator._handle_transport_error(second_error)
+
+        callback_task = contextvars.Context().run(
+            asyncio.create_task, report_without_textual_context()
+        )
+        await callback_task
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.is_mounted
+        assert app.screen.app is app
+        assert app.screen.error_message == second_error
+        error_content = app.screen.query_one(".ble-error-text", Static)
+        assert second_error in str(error_content.render())
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert app.is_running
+
+        third_error = "A third BLE failure from a worker thread"
+        await asyncio.to_thread(test_coordinator._handle_transport_error, third_error)
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.is_mounted
+        assert app.screen.app is app
+        assert app.screen.error_message == third_error
+        error_content = app.screen.query_one(".ble-error-text", Static)
+        assert third_error in str(error_content.render())
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert app.is_running
 
 
 @pytest.mark.asyncio
