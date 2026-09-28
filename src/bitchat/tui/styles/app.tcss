@@ -161,7 +161,7 @@ ChatView {
     background: #080a0f;
     color: #e6edf3;
     border: none;
-    padding: 0;
+    padding: 0 1;
     scrollbar-size-vertical: 1;
     scrollbar-color: #22283a;
     scrollbar-color-hover: #388bfd;
@@ -696,4 +696,3 @@ RadioSet > RadioButton:focus {
     background: #271b3d;
     color: #bc8cff;
 }
-

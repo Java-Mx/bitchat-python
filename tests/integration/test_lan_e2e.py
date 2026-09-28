@@ -183,6 +183,10 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
             )
             connected_session = alice_coord.get_session(bob_identity.peer_id_hex)
             assert connected_session is None or not connected_session.is_established
+            assert not any(
+                record.kind == "system" and record.text == "Connected via LAN"
+                for record in alice_app.query_one(ChatView)._message_history
+            )
 
             public_text = "Alice public over real LAN TCP"
             await _send_input(alice_pilot, alice_app, public_text)
@@ -243,6 +247,33 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
                 "TCP Connected" in label and "Noise XX authenticated" in label
                 for label in _connected_peer_labels(alice_app)
             )
+            alice_chat_records = alice_app.query_one(ChatView)._message_history
+            bob_chat_records = bob_app.query_one(ChatView)._message_history
+            assert (
+                sum(
+                    record.kind == "system" and record.text == "Connected via LAN"
+                    for record in alice_chat_records
+                )
+                == 1
+            )
+            assert (
+                sum(
+                    record.kind == "system" and record.text == "Connected via LAN"
+                    for record in bob_chat_records
+                )
+                == 1
+            )
+            alice_app._on_coordinator_handshake(
+                bob_identity.peer_id_hex, bob_identity.fingerprint
+            )
+            await alice_pilot.pause()
+            assert (
+                sum(
+                    record.kind == "system" and record.text == "Connected via LAN"
+                    for record in alice_app.query_one(ChatView)._message_history
+                )
+                == 1
+            )
 
             alice_session = alice_coord.get_session(bob_identity.peer_id_hex)
             bob_session = bob_coord.get_session(alice_identity.peer_id_hex)
@@ -288,6 +319,15 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
             )
             assert _chat_records(bob_app, reconnect_private)[0].is_encrypted
             assert both_sessions_established()
+            await _wait_until(
+                lambda: (
+                    sum(
+                        record.kind == "system" and record.text == "Connected via LAN"
+                        for record in alice_app.query_one(ChatView)._message_history
+                    )
+                    == 2
+                )
+            )
             assert (
                 alice_coord.get_session(bob_identity.peer_id_hex) is not alice_session
             )

@@ -236,16 +236,40 @@ async def test_chat_messages_render_metadata_and_text_on_one_aligned_row(
         await pilot.pause()
 
         lines = [line.text.rstrip() for line in chat.rich_log.lines]
-        assert len(lines) == 4
+        assert len(lines) == 7
         assert lines[0].lstrip().startswith("You [Public] • ")
         assert ": short outgoing" in lines[0]
         assert lines[0].startswith(" ")
-        assert lines[1].startswith("PeerB [Public] • ")
-        assert ": short incoming" in lines[1]
-        assert lines[2].startswith("PeerC [🔒 DM] • ")
-        assert ": private incoming" in lines[2]
-        assert lines[3].lstrip().startswith("You [🔒 DM] • ")
-        assert ": private outgoing" in lines[3]
+        assert not lines[1].strip()
+        assert lines[2].startswith("PeerB [Public] • ")
+        assert ": short incoming" in lines[2]
+        assert not lines[3].strip()
+        assert lines[4].startswith("PeerC [🔒 DM] • ")
+        assert ": private incoming" in lines[4]
+        assert not lines[5].strip()
+        assert lines[6].lstrip().startswith("You [🔒 DM] • ")
+        assert ": private outgoing" in lines[6]
+
+
+@pytest.mark.asyncio
+async def test_chat_spacing_is_between_records_not_multiline_lines(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 40)) as pilot:
+        chat = app.query_one(ChatView)
+        chat.clear_log()
+        chat.add_chat_message("PeerB", "first line\nsecond line", False)
+        chat.add_chat_message("Alice", "outgoing", False, is_self=True)
+        await pilot.pause()
+
+        lines = [line.text.rstrip() for line in chat.rich_log.lines]
+        assert len(lines) == 4
+        assert lines[0].startswith("PeerB [Public] • ")
+        assert lines[0].endswith(": first line")
+        assert lines[1].lstrip() == "second line"
+        assert lines[2].strip() == ""
+        assert lines[3].lstrip().startswith("You [Public] • ")
 
 
 @pytest.mark.asyncio
@@ -256,7 +280,7 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
     async with app.run_test(size=(110, 36)) as pilot:
         chat = app.query_one(ChatView)
         log = chat.rich_log
-        width = log.scrollable_content_region.width
+        width = log.content_region.width
         chat.clear_log()
 
         long_text = (
@@ -308,6 +332,39 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
 
 
 @pytest.mark.asyncio
+async def test_chat_margins_wrap_and_resize_with_conversation_width(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(110, 36)) as pilot:
+        chat = app.query_one(ChatView)
+        log = chat.rich_log
+        chat.clear_log()
+        assert log.content_region.x >= log.region.x + 1
+        assert log.region.right - log.content_region.right >= 1
+
+        message = "Long content that must wrap inside the padded conversation " * 4
+        chat.add_chat_message("PeerB", message, False)
+        chat.add_chat_message("Alice", message, False, is_self=True)
+        await pilot.pause()
+
+        width = log.content_region.width
+        assert all(line.cell_length <= width for line in log.lines)
+        incoming_lines = [line for line in log.lines if "PeerB [Public]" in line.text]
+        outgoing_lines = [line for line in log.lines if "You [Public]" in line.text]
+        assert incoming_lines and outgoing_lines
+        assert incoming_lines[0].text.startswith("PeerB [Public]")
+        assert outgoing_lines[0].text.lstrip().startswith("You [Public]")
+
+        await pilot.resize_terminal(85, 36)
+        await pilot.pause()
+        resized_width = log.content_region.width
+        assert resized_width < width
+        assert all(line.cell_length <= resized_width for line in log.lines)
+        assert "Long content" in "".join(line.text for line in log.lines)
+
+
+@pytest.mark.asyncio
 async def test_chat_scrolls_after_many_single_row_messages(
     test_coordinator: SessionCoordinator,
 ) -> None:
@@ -325,9 +382,15 @@ async def test_chat_scrolls_after_many_single_row_messages(
         await pilot.press("pageup")
         await pilot.pause()
         assert log.scroll_y < bottom
+        chat.add_chat_message("PeerB", "arrived while manually scrolling", False)
+        await pilot.pause()
+        assert log.scroll_y == log.max_scroll_y
+        assert any(
+            "arrived while manually scrolling" in line.text for line in log.lines
+        )
         await pilot.press("pagedown")
         await pilot.pause()
-        assert log.scroll_y == bottom
+        assert log.scroll_y == log.max_scroll_y
 
 
 @pytest.mark.asyncio
@@ -338,7 +401,7 @@ async def test_chat_narrow_width_keeps_long_sender_metadata_and_message(
     async with app.run_test(size=(80, 30)) as pilot:
         chat = app.query_one(ChatView)
         log = chat.rich_log
-        width = log.scrollable_content_region.width
+        width = log.content_region.width
         chat.clear_log()
         sender = "A" * 32
         chat.add_chat_message(sender, "visible message body", False)
@@ -462,7 +525,7 @@ async def test_tui_peer_discovery_and_status_update(
         await pilot.pause()
 
         log = app.query_one("#chat-log", RichLog)
-        assert any("Connected" in line.text for line in log.lines)
+        assert not any("Connected" in line.text for line in log.lines)
 
 
 def test_tui_deterministic_identity_colors() -> None:
