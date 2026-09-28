@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
@@ -427,21 +427,51 @@ async def test_ctrl_p_uses_configured_action_and_preserves_palette_access(
     async with app.run_test(size=(120, 40)) as pilot:
         ctrl_p_bindings = app._bindings.key_to_bindings["ctrl+p"]
         assert [binding.action for binding in ctrl_p_bindings] == ["show_help"]
+        default_screen = app.screen
 
         message_input = app.query_one(MessageInput)
         message_input.focus()
         await pilot.press("ctrl+p")
         await pilot.pause()
         assert isinstance(app.screen, HelpScreen)
+        help_screen = app.screen
+        assert help_screen.is_active
+        assert help_screen in app.screen_stack
+        assert len(app.screen_stack) == 2
         assert not isinstance(app.screen, CommandPalette)
 
         await pilot.press("ctrl+p")
         await pilot.pause()
         assert not isinstance(app.screen, HelpScreen)
+        assert app.screen is default_screen
+        assert default_screen.is_active
+        assert help_screen not in app.screen_stack
+        assert len(app.screen_stack) == 1
         assert not isinstance(app.screen, CommandPalette)
 
-        await pilot.press("escape")
+        with patch.object(help_screen, "dismiss", wraps=help_screen.dismiss) as dismiss:
+            help_screen.action_dismiss_modal()
+            dismiss.assert_not_called()
+
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+            assert app.screen is not help_screen
+            assert dismiss.call_count == 0
+
+        await pilot.press("ctrl+p")
         await pilot.pause()
+        assert app.screen is default_screen
+
+        for _ in range(3):
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+            assert app.screen.is_active
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert app.screen is default_screen
+
         sidebar = app.query_one(PeerSidebar)
         sidebar.focus()
         await pilot.press("ctrl+p")
