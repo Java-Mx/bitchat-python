@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import asyncio
+import contextvars
+from unittest.mock import MagicMock, patch
 
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
@@ -234,16 +236,40 @@ async def test_chat_messages_render_metadata_and_text_on_one_aligned_row(
         await pilot.pause()
 
         lines = [line.text.rstrip() for line in chat.rich_log.lines]
-        assert len(lines) == 4
+        assert len(lines) == 7
         assert lines[0].lstrip().startswith("You [Public] • ")
         assert ": short outgoing" in lines[0]
         assert lines[0].startswith(" ")
-        assert lines[1].startswith("PeerB [Public] • ")
-        assert ": short incoming" in lines[1]
-        assert lines[2].startswith("PeerC [🔒 DM] • ")
-        assert ": private incoming" in lines[2]
-        assert lines[3].lstrip().startswith("You [🔒 DM] • ")
-        assert ": private outgoing" in lines[3]
+        assert not lines[1].strip()
+        assert lines[2].startswith("PeerB [Public] • ")
+        assert ": short incoming" in lines[2]
+        assert not lines[3].strip()
+        assert lines[4].startswith("PeerC [🔒 DM] • ")
+        assert ": private incoming" in lines[4]
+        assert not lines[5].strip()
+        assert lines[6].lstrip().startswith("You [🔒 DM] • ")
+        assert ": private outgoing" in lines[6]
+
+
+@pytest.mark.asyncio
+async def test_chat_spacing_is_between_records_not_multiline_lines(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 40)) as pilot:
+        chat = app.query_one(ChatView)
+        chat.clear_log()
+        chat.add_chat_message("PeerB", "first line\nsecond line", False)
+        chat.add_chat_message("Alice", "outgoing", False, is_self=True)
+        await pilot.pause()
+
+        lines = [line.text.rstrip() for line in chat.rich_log.lines]
+        assert len(lines) == 4
+        assert lines[0].startswith("PeerB [Public] • ")
+        assert lines[0].endswith(": first line")
+        assert lines[1].lstrip() == "second line"
+        assert lines[2].strip() == ""
+        assert lines[3].lstrip().startswith("You [Public] • ")
 
 
 @pytest.mark.asyncio
@@ -254,7 +280,7 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
     async with app.run_test(size=(110, 36)) as pilot:
         chat = app.query_one(ChatView)
         log = chat.rich_log
-        width = log.scrollable_content_region.width
+        width = log.content_region.width
         chat.clear_log()
 
         long_text = (
@@ -306,6 +332,39 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
 
 
 @pytest.mark.asyncio
+async def test_chat_margins_wrap_and_resize_with_conversation_width(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(110, 36)) as pilot:
+        chat = app.query_one(ChatView)
+        log = chat.rich_log
+        chat.clear_log()
+        assert log.content_region.x >= log.region.x + 1
+        assert log.region.right - log.content_region.right >= 1
+
+        message = "Long content that must wrap inside the padded conversation " * 4
+        chat.add_chat_message("PeerB", message, False)
+        chat.add_chat_message("Alice", message, False, is_self=True)
+        await pilot.pause()
+
+        width = log.content_region.width
+        assert all(line.cell_length <= width for line in log.lines)
+        incoming_lines = [line for line in log.lines if "PeerB [Public]" in line.text]
+        outgoing_lines = [line for line in log.lines if "You [Public]" in line.text]
+        assert incoming_lines and outgoing_lines
+        assert incoming_lines[0].text.startswith("PeerB [Public]")
+        assert outgoing_lines[0].text.lstrip().startswith("You [Public]")
+
+        await pilot.resize_terminal(85, 36)
+        await pilot.pause()
+        resized_width = log.content_region.width
+        assert resized_width < width
+        assert all(line.cell_length <= resized_width for line in log.lines)
+        assert "Long content" in "".join(line.text for line in log.lines)
+
+
+@pytest.mark.asyncio
 async def test_chat_scrolls_after_many_single_row_messages(
     test_coordinator: SessionCoordinator,
 ) -> None:
@@ -323,9 +382,15 @@ async def test_chat_scrolls_after_many_single_row_messages(
         await pilot.press("pageup")
         await pilot.pause()
         assert log.scroll_y < bottom
+        chat.add_chat_message("PeerB", "arrived while manually scrolling", False)
+        await pilot.pause()
+        assert log.scroll_y == log.max_scroll_y
+        assert any(
+            "arrived while manually scrolling" in line.text for line in log.lines
+        )
         await pilot.press("pagedown")
         await pilot.pause()
-        assert log.scroll_y == bottom
+        assert log.scroll_y == log.max_scroll_y
 
 
 @pytest.mark.asyncio
@@ -336,7 +401,7 @@ async def test_chat_narrow_width_keeps_long_sender_metadata_and_message(
     async with app.run_test(size=(80, 30)) as pilot:
         chat = app.query_one(ChatView)
         log = chat.rich_log
-        width = log.scrollable_content_region.width
+        width = log.content_region.width
         chat.clear_log()
         sender = "A" * 32
         chat.add_chat_message(sender, "visible message body", False)
@@ -362,21 +427,51 @@ async def test_ctrl_p_uses_configured_action_and_preserves_palette_access(
     async with app.run_test(size=(120, 40)) as pilot:
         ctrl_p_bindings = app._bindings.key_to_bindings["ctrl+p"]
         assert [binding.action for binding in ctrl_p_bindings] == ["show_help"]
+        default_screen = app.screen
 
         message_input = app.query_one(MessageInput)
         message_input.focus()
         await pilot.press("ctrl+p")
         await pilot.pause()
         assert isinstance(app.screen, HelpScreen)
+        help_screen = app.screen
+        assert help_screen.is_active
+        assert help_screen in app.screen_stack
+        assert len(app.screen_stack) == 2
         assert not isinstance(app.screen, CommandPalette)
 
         await pilot.press("ctrl+p")
         await pilot.pause()
         assert not isinstance(app.screen, HelpScreen)
+        assert app.screen is default_screen
+        assert default_screen.is_active
+        assert help_screen not in app.screen_stack
+        assert len(app.screen_stack) == 1
         assert not isinstance(app.screen, CommandPalette)
 
-        await pilot.press("escape")
+        with patch.object(help_screen, "dismiss", wraps=help_screen.dismiss) as dismiss:
+            help_screen.action_dismiss_modal()
+            dismiss.assert_not_called()
+
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+            assert app.screen is not help_screen
+            assert dismiss.call_count == 0
+
+        await pilot.press("ctrl+p")
         await pilot.pause()
+        assert app.screen is default_screen
+
+        for _ in range(3):
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+            assert app.screen.is_active
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert app.screen is default_screen
+
         sidebar = app.query_one(PeerSidebar)
         sidebar.focus()
         await pilot.press("ctrl+p")
@@ -460,7 +555,7 @@ async def test_tui_peer_discovery_and_status_update(
         await pilot.pause()
 
         log = app.query_one("#chat-log", RichLog)
-        assert any("Connected" in line.text for line in log.lines)
+        assert not any("Connected" in line.text for line in log.lines)
 
 
 def test_tui_deterministic_identity_colors() -> None:
@@ -796,6 +891,84 @@ async def test_tui_ble_truthful_state_and_error_modal(
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, BLEErrorModal)
+
+
+@pytest.mark.asyncio
+async def test_ble_error_from_real_coordinator_uses_active_textual_lifecycle(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    def failing_scanner_factory(detection_callback, service_uuids):
+        scanner = MockBleakScanner(detection_callback, service_uuids)
+        scanner.should_fail_start = True
+        return scanner
+
+    test_coordinator.ble_manager.scanner._scanner_factory = failing_scanner_factory
+    app = BitChatApp(coordinator=test_coordinator)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.is_mounted
+        assert app.screen.app is app
+        assert app.screen.error_message == (
+            "Bluetooth scan failed: Failed to start BLE scanner: "
+            "Bluetooth adapter offline"
+        )
+        error_content = app.screen.query_one(".ble-error-text", Static)
+        error_title = app.screen.query_one("#ble-error-title", Static)
+        assert "Bluetooth Hardware Error" in str(error_title.render())
+        assert "Bluetooth adapter offline" in str(error_content.render())
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert app.is_running
+
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        second_error = "A second BLE failure without an active app context"
+
+        async def report_without_textual_context() -> None:
+            test_coordinator._handle_transport_error(second_error)
+
+        callback_task = contextvars.Context().run(
+            asyncio.create_task, report_without_textual_context()
+        )
+        await callback_task
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.is_mounted
+        assert app.screen.app is app
+        assert app.screen.error_message == second_error
+        error_content = app.screen.query_one(".ble-error-text", Static)
+        assert second_error in str(error_content.render())
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert app.is_running
+
+        third_error = "A third BLE failure from a worker thread"
+        await asyncio.to_thread(test_coordinator._handle_transport_error, third_error)
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.is_mounted
+        assert app.screen.app is app
+        assert app.screen.error_message == third_error
+        error_content = app.screen.query_one(".ble-error-text", Static)
+        assert third_error in str(error_content.render())
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert app.is_running
 
 
 @pytest.mark.asyncio
