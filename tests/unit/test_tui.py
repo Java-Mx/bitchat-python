@@ -273,6 +273,28 @@ async def test_chat_spacing_is_between_records_not_multiline_lines(
 
 
 @pytest.mark.asyncio
+async def test_chat_messages_have_a_visible_richlog_row_gap(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 40)) as pilot:
+        chat = app.query_one(ChatView)
+        chat.clear_log()
+        chat.add_chat_message("Alice", "Hello", False, is_self=True)
+        chat.add_chat_message("Alice", "World", False, is_self=True)
+        await pilot.pause()
+
+        log = chat.rich_log
+        rows = [line.text.rstrip() for line in log.lines]
+        hello_row = next(i for i, row in enumerate(rows) if ": Hello" in row)
+        world_row = next(i for i, row in enumerate(rows) if ": World" in row)
+
+        assert world_row - hello_row == 2
+        assert not rows[hello_row + 1].strip()
+        assert log.virtual_size.height > world_row
+
+
+@pytest.mark.asyncio
 async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
     test_coordinator: SessionCoordinator,
 ) -> None:
@@ -280,7 +302,7 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
     async with app.run_test(size=(110, 36)) as pilot:
         chat = app.query_one(ChatView)
         log = chat.rich_log
-        width = log.content_region.width
+        width = max(1, log.scrollable_content_region.width - 1)
         chat.clear_log()
 
         long_text = (
@@ -342,23 +364,26 @@ async def test_chat_margins_wrap_and_resize_with_conversation_width(
         chat.clear_log()
         assert log.content_region.x >= log.region.x + 1
         assert log.region.right - log.content_region.right >= 1
+        assert log.region.right - log.scrollable_content_region.right >= 2
 
         message = "Long content that must wrap inside the padded conversation " * 4
         chat.add_chat_message("PeerB", message, False)
         chat.add_chat_message("Alice", message, False, is_self=True)
         await pilot.pause()
 
-        width = log.content_region.width
+        width = max(1, log.scrollable_content_region.width - 1)
         assert all(line.cell_length <= width for line in log.lines)
         incoming_lines = [line for line in log.lines if "PeerB [Public]" in line.text]
         outgoing_lines = [line for line in log.lines if "You [Public]" in line.text]
         assert incoming_lines and outgoing_lines
         assert incoming_lines[0].text.startswith("PeerB [Public]")
         assert outgoing_lines[0].text.lstrip().startswith("You [Public]")
+        assert outgoing_lines[0].cell_length == width
+        assert outgoing_lines[0].cell_length < log.scrollable_content_region.width
 
         await pilot.resize_terminal(85, 36)
         await pilot.pause()
-        resized_width = log.content_region.width
+        resized_width = max(1, log.scrollable_content_region.width - 1)
         assert resized_width < width
         assert all(line.cell_length <= resized_width for line in log.lines)
         assert "Long content" in "".join(line.text for line in log.lines)
@@ -401,7 +426,7 @@ async def test_chat_narrow_width_keeps_long_sender_metadata_and_message(
     async with app.run_test(size=(80, 30)) as pilot:
         chat = app.query_one(ChatView)
         log = chat.rich_log
-        width = log.content_region.width
+        width = max(1, log.scrollable_content_region.width - 1)
         chat.clear_log()
         sender = "A" * 32
         chat.add_chat_message(sender, "visible message body", False)

@@ -54,7 +54,7 @@ class ChatView(Widget):
 
     def on_resize(self, event: events.Resize) -> None:
         if self._mounted and self._message_history:
-            self.re_render_all()
+            self.call_after_refresh(self.re_render_all)
 
     def watch_channel_name(self, new_val: str) -> None:
         self.border_title = f"Conversation ({new_val})"
@@ -117,7 +117,7 @@ class ChatView(Widget):
                 if self.show_timestamps:
                     header.append(f" • {ts_str}", style="dim #57606a")
 
-                width = max(1, self.rich_log.content_region.width)
+                width = max(1, self.rich_log.scrollable_content_region.width - 1)
                 prefix_width = header.cell_len + 2
                 header_wraps = prefix_width >= width
                 continuation_indent = " " * min(
