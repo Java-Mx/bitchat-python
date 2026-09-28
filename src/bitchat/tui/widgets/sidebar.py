@@ -136,13 +136,24 @@ class PeerSidebar(Widget):
             else:
                 for addr, label in self._connected_peers.items():
                     name = label.split(" (")[0].strip()
-                    clean_name = name.replace("🔒", "").strip()
+                    clean_name = name.split(" • ", 1)[0].strip()
+                    connection_state = (
+                        "Noise XX authenticated"
+                        if "🔒 authenticated" in name
+                        else "Noise session not established"
+                    )
+                    connection_label = (
+                        "TCP Connected"
+                        if self.active_transport == "lan"
+                        else "Connected"
+                    )
                     self._addr_to_name[addr] = clean_name
                     color = get_peer_color(clean_name)
                     item = PeerListItem(
                         Label(
-                            f"[bold {color}]● {name}[/bold {color}]\n"
-                            f"  [dim #8b949e]Secure • Connected[/dim #8b949e]"
+                            f"[bold {color}]● {clean_name}[/bold {color}]\n"
+                            f"  [dim #8b949e]{connection_label} • {connection_state}"
+                            "[/dim #8b949e]"
                         ),
                         peer_address=addr,
                         peer_name=clean_name,

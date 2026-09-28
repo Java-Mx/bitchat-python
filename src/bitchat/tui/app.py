@@ -268,8 +268,12 @@ class BitChatApp(App[None]):
         for addr in connected_addrs:
             pid = self.coordinator.address_to_peer_id.get(addr, "")
             nick = self.coordinator.peer_nicknames.get(pid, pid[:8] if pid else addr)
-            session = self.coordinator.get_or_create_session(pid) if pid else None
-            sec_tag = "🔒" if session and session.is_established else ""
+            session = self.coordinator.get_session(pid) if pid else None
+            sec_tag = (
+                "🔒 authenticated"
+                if session and session.is_established
+                else "unverified"
+            )
             conn_display[addr] = f"{nick} {sec_tag} ({addr})"
 
         sidebar.set_connected_peers(conn_display)
@@ -289,9 +293,12 @@ class BitChatApp(App[None]):
         # Truthful state reporting
         if connected_addrs:
             medium_label = "LAN / Wi-Fi Mesh" if trans_name == "lan" else "Local Mesh"
-            status_bar.mesh_status = (
-                f"● Connected ({len(connected_addrs)} peers) • {medium_label}"
+            connection_label = (
+                f"TCP active ({len(connected_addrs)} connections)"
+                if trans_name == "lan"
+                else f"Connected ({len(connected_addrs)} peers)"
             )
+            status_bar.mesh_status = f"● {connection_label} • {medium_label}"
         elif self.coordinator.ble_status in ("active", "ready", "scanning"):
             status_lbl = (
                 "LAN / Wi-Fi Ready • Local Mesh"
@@ -477,11 +484,7 @@ class BitChatApp(App[None]):
                 resolved_pid, resolved_pid[:8]
             )
 
-        session = (
-            self.coordinator.get_or_create_session(resolved_pid)
-            if resolved_pid
-            else None
-        )
+        session = self.coordinator.get_session(resolved_pid) if resolved_pid else None
         fp = (
             session.remote_fingerprint if session and session.remote_fingerprint else ""
         )

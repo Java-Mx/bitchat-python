@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_READ_TIMEOUT_SECONDS: float = 120.0
+
 
 class LANConnection:
     """Manages an active bi-directional TCP stream to a BitChat peer."""
@@ -31,11 +33,15 @@ class LANConnection:
         on_packet_received: Callable[[BitchatPacket, str], None] | None = None,
         on_disconnected: Callable[[str], None] | None = None,
         connect_timeout: float = 10.0,
+        read_timeout: float = DEFAULT_READ_TIMEOUT_SECONDS,
+        is_inbound: bool = False,
     ) -> None:
         self.peer_address = peer_address
         self.on_packet_received = on_packet_received
         self.on_disconnected = on_disconnected
         self.connect_timeout = connect_timeout
+        self.read_timeout = read_timeout
+        self.is_inbound = is_inbound
 
         self._reader: asyncio.StreamReader | None = reader
         self._writer: asyncio.StreamWriter | None = writer
@@ -97,7 +103,13 @@ class LANConnection:
         logger.debug("Started TCP read loop for %s", self.peer_address)
         try:
             while self._is_connected and self._reader:
-                chunk = await self._reader.read(4096)
+                try:
+                    chunk = await asyncio.wait_for(
+                        self._reader.read(4096), timeout=self.read_timeout
+                    )
+                except TimeoutError:
+                    logger.info("Idle read timeout for LAN peer %s", self.peer_address)
+                    break
                 if not chunk:
                     # Clean EOF from remote peer
                     logger.info(

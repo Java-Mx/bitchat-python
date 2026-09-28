@@ -4,15 +4,20 @@ generation, and peer state teardown.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.crypto.identity import LocalIdentity
 from bitchat.mesh.router import MeshRouter
-from bitchat.storage.config import AppConfig, InMemoryStorage
+from bitchat.network.models import LANDiscoveredPeer
+from bitchat.network.transport import LANTransport
+from bitchat.storage.config import AppConfig, FileConfigStorage
 from bitchat.transport.base import TransportState
 
 
@@ -22,17 +27,19 @@ def test_identity() -> LocalIdentity:
 
 
 @pytest.fixture
-def mock_storage(test_identity: LocalIdentity) -> InMemoryStorage:
-    storage = InMemoryStorage(
-        initial_config=AppConfig(nickname="AliceNode", transport="bluetooth"),
-        initial_identity=test_identity,
+def mock_storage(test_identity: LocalIdentity, tmp_path: Path) -> FileConfigStorage:
+    storage = FileConfigStorage(
+        config_path=tmp_path / "config.json",
+        identity_path=tmp_path / "identity.json",
     )
+    storage.save_config(AppConfig(nickname="AliceNode", transport="bluetooth"))
+    storage.save_identity(test_identity)
     return storage
 
 
 @pytest.mark.asyncio
 async def test_transport_switching_lifecycle(
-    test_identity: LocalIdentity, mock_storage: InMemoryStorage
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
 ) -> None:
     original_peer_id = test_identity.peer_id_hex
 
@@ -41,6 +48,7 @@ async def test_transport_switching_lifecycle(
         local_identity=test_identity,
         mesh_router=mesh_router,
         nickname="AliceNode",
+        storage=mock_storage,
     )
 
     async def mock_bt_start() -> None:
@@ -85,7 +93,20 @@ async def test_transport_switching_lifecycle(
         coordinator.peer_addresses["dummy_peer"] = "AA:BB:CC:DD:EE:FF"
         coordinator.address_to_peer_id["AA:BB:CC:DD:EE:FF"] = "dummy_peer"
         coordinator.peer_nicknames["dummy_peer"] = "Bob"
-        coordinator.get_or_create_session("dummy_peer")
+        session = coordinator.get_or_create_session("dummy_peer")
+        session.start_handshake()
+        coordinator._schedule_handshake_timeout("dummy_peer", session)
+        lan_transport = coordinator._transports["lan"]
+        assert isinstance(lan_transport, LANTransport)
+        lan_transport.discovery._discovered_peers["192.168.1.20:41235"] = (
+            LANDiscoveredPeer(
+                address="192.168.1.20:41235",
+                ip="192.168.1.20",
+                port=41235,
+                peer_id="aabbccddeeff0011",
+                nickname="Stale",
+            )
+        )
 
         assert len(coordinator.peer_addresses) == 1
         assert len(coordinator.peer_nicknames) == 1
@@ -100,12 +121,15 @@ async def test_transport_switching_lifecycle(
         # Verify fresh transport-scoped identity was generated
         new_lan_peer_id = coordinator.local_identity.peer_id_hex
         assert new_lan_peer_id != original_peer_id
+        assert lan_transport.local_peer_id == new_lan_peer_id
+        assert lan_transport.discovered_peers == {}
 
         # Verify peer tables and sessions were cleared
         assert len(coordinator.peer_addresses) == 0
         assert len(coordinator.address_to_peer_id) == 0
         assert len(coordinator.peer_nicknames) == 0
         assert len(coordinator._sessions) == 0
+        assert not coordinator._handshake_timeout_tasks
 
         # Verify permanent storage was NOT overwritten
         stored_id = mock_storage.load_identity()
@@ -128,6 +152,8 @@ async def test_transport_switching_lifecycle(
         new_bt_peer_id = coordinator.local_identity.peer_id_hex
         assert new_bt_peer_id != new_lan_peer_id
         assert new_bt_peer_id != original_peer_id
+        assert lan_transport.local_peer_id == new_bt_peer_id
+        assert lan_transport.discovered_peers == {}
 
         # 4. Attempt switching to an invalid transport
         bad_success, bad_msg = await coordinator.switch_transport("carrier_pigeon")

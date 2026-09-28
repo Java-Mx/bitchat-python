@@ -62,14 +62,15 @@ class PeerInfoModal(ModalScreen[None]):
         peer_color = get_peer_color(self.peer_nickname)
         status_dot = "●" if self.is_connected else "○"
         status_color = "#3fb950" if self.is_connected else "#d29922"
-        status_text = (
-            "Connected (BLE Central/Peripheral)"
-            if self.is_connected
-            else "Discovered Nearby"
-        )
+        if self.is_connected and self.is_encrypted:
+            status_text = "Transport connected • Noise identity authenticated"
+        elif self.is_connected:
+            status_text = "Transport connected • identity unverified"
+        else:
+            status_text = "Discovered Nearby"
 
         enc_badge = (
-            "[bold #3fb950]Established & Verified (Noise XX)[/bold #3fb950]"
+            "[bold #3fb950]Established; peer ID bound to Noise key[/bold #3fb950]"
             if self.is_encrypted
             else "[dim #d29922]Handshake Pending / Public[/dim #d29922]"
         )
@@ -111,8 +112,8 @@ class PeerInfoModal(ModalScreen[None]):
                 )
 
                 yield Static(
-                    "[bold #8b949e]Full Peer Identifier "
-                    "(32-byte Ed25519 Public ID)[/bold #8b949e]\n"
+                    "[bold #8b949e]Peer Identifier "
+                    "(8-byte SHA-256 prefix of X25519 public key)[/bold #8b949e]\n"
                     f"[dim #e6edf3]{self.peer_id_hex}[/dim #e6edf3]",
                     classes="peer-info-section",
                 )

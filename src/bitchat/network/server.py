@@ -7,7 +7,10 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-from bitchat.network.connection import LANConnection
+from bitchat.network.connection import (
+    DEFAULT_READ_TIMEOUT_SECONDS,
+    LANConnection,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,11 +30,13 @@ class LANServer:
         port: int = DEFAULT_LAN_PORT,
         on_connection_accepted: Callable[[LANConnection], None] | None = None,
         max_connections: int = MAX_CONCURRENT_CONNECTIONS,
+        read_timeout: float = DEFAULT_READ_TIMEOUT_SECONDS,
     ) -> None:
         self.host = host
         self.port = port
         self.on_connection_accepted = on_connection_accepted
         self.max_connections = max_connections
+        self.read_timeout = read_timeout
 
         self._server: asyncio.Server | None = None
         self._bound_port: int = 0
@@ -122,6 +127,8 @@ class LANServer:
                 reader=reader,
                 writer=writer,
                 on_disconnected=self._handle_client_disconnected,
+                read_timeout=self.read_timeout,
+                is_inbound=True,
             )
             self._connections[peer_addr] = conn
 

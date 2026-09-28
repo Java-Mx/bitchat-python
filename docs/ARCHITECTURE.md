@@ -207,6 +207,7 @@ All transports implement `BaseTransport` (`bitchat.transport.base`):
 3. **Transport Switching & Ephemeral Identity**:
    - Switching between Bluetooth and LAN (`/transport` or Settings modal `F3`) immediately terminates active connections, tears down existing Noise XX sessions, and generates a fresh transport-scoped identity (`LocalIdentity.generate()`).
    - Permanent identity storage (`~/.bitchat/identity.json`) is never overwritten, guaranteeing cryptographic privacy across transport boundaries.
+   - The compatible identity JSON stores private keys as plaintext hex. File access is restricted to the current user (POSIX mode `0600`; protected Windows DACL); these controls do not encrypt keys at rest. Existing identity files are retained and hardened when loaded.
 
 ## Dependency Rules
 - Higher layers depend on lower layers, never the reverse.
