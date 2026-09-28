@@ -57,6 +57,7 @@ pythonpath = ["src", "."]
 target-version = "py312"
 line-length = 88
 src = ["src", "tests"]
+exclude = ["tools/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH", "RUF"]

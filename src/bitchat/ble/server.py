@@ -203,13 +203,7 @@ class BLEServer:
             advertising_params.is_connectable = True
             advertising_params.is_discoverable = True
             self._provider.start_advertising_with_parameters(advertising_params)
-            await self._wait_for_advertisement_status(
-                self._provider,
-                "advertisement_status",
-                started_status=2,
-                failed_statuses=(3, 4),
-                advertisement_type="GATT service",
-            )
+            await self._wait_for_gatt_advertisement_status(self._provider)
 
             # Broadcast companion manufacturer advertisement so nodes detect BitChat
             try:
@@ -277,6 +271,43 @@ class BLEServer:
             if loop.time() >= deadline:
                 raise BLEError(
                     f"{advertisement_type} advertising did not start (status {status})"
+                )
+            await asyncio.sleep(_ADVERTISEMENT_POLL_INTERVAL_SECONDS)
+
+    @staticmethod
+    async def _wait_for_gatt_advertisement_status(provider: Any) -> bool:
+        """Wait for GattServiceProvider advertisement to reach a terminal state.
+
+        GattServiceProviderAdvertisementStatus enum values (WinRT):
+          0 = Created   (initial / pre-start)
+          1 = Stopped
+          2 = Started                           -> full success
+          3 = Aborted                           -> failure
+          4 = StartedWithoutAllAdvertisementData -> partial success (acceptable)
+
+        Returns True when fully started, True when partially started (logs warning),
+        raises BLEError when aborted.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _ADVERTISEMENT_START_TIMEOUT_SECONDS
+        while True:
+            status = int(getattr(provider, "advertisement_status", 0))
+            if status == 2:  # STARTED
+                return True
+            if status == 4:  # STARTED_WITHOUT_ALL_ADVERTISEMENT_DATA
+                logger.warning(
+                    "GATT service started without all advertisement data (status 4). "
+                    "Some service metadata may not be broadcast. Continuing."
+                )
+                return True
+            if status == 3:  # ABORTED
+                raise BLEError(
+                    "GATT service advertising failed with status 3 (Aborted)"
+                )
+            if loop.time() >= deadline:
+                raise BLEError(
+                    "GATT service advertising did not start within timeout "
+                    f"(status {status})"
                 )
             await asyncio.sleep(_ADVERTISEMENT_POLL_INTERVAL_SECONDS)
 
