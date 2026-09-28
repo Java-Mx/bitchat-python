@@ -75,6 +75,7 @@ class SessionCoordinator:
         self.on_peer_status_changed = on_peer_status_changed
         self.on_handshake_completed = on_handshake_completed
         self.on_ble_error: Callable[[str], None] | None = None
+        self.on_ble_warning: Callable[[str], None] | None = None
         self.ble_status: str = "offline"
         self.ble_error_message: str | None = None
 
@@ -139,6 +140,7 @@ class SessionCoordinator:
         transport.on_peer_disconnected = self._handle_peer_disconnected
         transport.on_state_changed = self._handle_transport_state_changed
         transport.on_error = self._handle_transport_error
+        transport.on_warning = self._handle_transport_warning
 
     def _handle_transport_state_changed(self, state: TransportState) -> None:
         self.ble_status = state.value
@@ -149,6 +151,10 @@ class SessionCoordinator:
         self.ble_error_message = err_msg
         if self.on_ble_error:
             self.on_ble_error(err_msg)
+
+    def _handle_transport_warning(self, warning: str) -> None:
+        if self.on_ble_warning:
+            self.on_ble_warning(warning)
 
     def _spawn_task(self, coro: Any) -> asyncio.Task[Any]:
         """Spawn background task and keep a reference until completion."""
@@ -294,7 +300,7 @@ class SessionCoordinator:
                 self.active_transport_name,
                 e,
             )
-            self.ble_status = "unavailable"
+            self.ble_status = self.active_transport.state.value
             self.ble_error_message = str(e)
             if self.on_ble_error:
                 self.on_ble_error(self.ble_error_message)
@@ -316,7 +322,16 @@ class SessionCoordinator:
                 if self._uses_injected_ble_backend():
                     return telem.get("scanner_status") == "Active"
                 return False
-            return telem.get("scanner_status") == "Active"
+            return bool(
+                (
+                    telem.get("central_supported")
+                    and telem.get("scanner_status") == "Active"
+                )
+                or (
+                    telem.get("peripheral_supported")
+                    and telem.get("advertising_active")
+                )
+            )
         if self.active_transport_name == "lan":
             return (
                 telem.get("status") == "Connected"
@@ -354,7 +369,7 @@ class SessionCoordinator:
                 return True
             except Exception as e:
                 logger.warning("Retry active transport failed: %s", e)
-                self.ble_status = "unavailable"
+                self.ble_status = self.active_transport.state.value
                 self.ble_error_message = str(e)
                 if self.on_ble_error:
                     self.on_ble_error(self.ble_error_message)

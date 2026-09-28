@@ -439,7 +439,7 @@ class TestSessionCoordinator:
 
         await coord.start()
 
-        assert coord.ble_status == "unavailable"
+        assert coord.ble_status == "error"
         assert coord.ble_error_message is not None
         assert "Hardware adapter missing" in coord.ble_error_message
         assert len(reported_errors) >= 1
@@ -447,7 +447,7 @@ class TestSessionCoordinator:
         # Test retry failure
         success = await coord.retry_ble()
         assert success is False
-        assert coord.ble_status == "unavailable"
+        assert coord.ble_status == "error"
 
         await coord.stop()
         assert coord.ble_status == "offline"

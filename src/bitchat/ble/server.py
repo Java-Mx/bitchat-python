@@ -54,6 +54,7 @@ class BLEServer:
         self.nickname = nickname
 
         self._is_advertising: bool = False
+        self._last_error: str | None = None
         self._provider: Any | None = None
         self._characteristic: Any | None = None
         self._publisher: Any | None = None
@@ -79,6 +80,7 @@ class BLEServer:
             "characteristic_uuid": self.characteristic_uuid,
             "has_provider": self._provider is not None,
             "has_publisher": self._publisher is not None,
+            "last_error": self._last_error,
         }
 
     async def start(self) -> None:
@@ -88,9 +90,17 @@ class BLEServer:
                 return
 
             self._loop = asyncio.get_running_loop()
+            self._last_error = None
 
             if self._custom_backend is not None:
-                await self._custom_backend.start(self)
+                try:
+                    await self._custom_backend.start(self)
+                except Exception as e:
+                    with contextlib.suppress(Exception):
+                        await self._custom_backend.stop()
+                    self._last_error = str(e)
+                    self._is_advertising = False
+                    raise BLEError(f"Failed to start BLE server backend: {e}") from e
                 self._is_advertising = True
                 logger.info("BLEServer started using injected test backend")
                 return
@@ -215,8 +225,8 @@ class BLEServer:
                 writer.write_bytes(payload)
                 m.data = writer.detach_buffer()
                 publisher.advertisement.manufacturer_data.append(m)
-                publisher.start()
                 self._publisher = publisher
+                publisher.start()
                 await self._wait_for_advertisement_status(
                     publisher,
                     "status",
@@ -240,7 +250,10 @@ class BLEServer:
         except Exception as e:
             self._cleanup_windows_resources()
             self._is_advertising = False
+            self._last_error = str(e)
             raise BLEError(f"Failed to start WinRT BLEServer: {e}") from e
+
+        self._last_error = None
 
     @staticmethod
     async def _wait_for_advertisement_status(

@@ -23,7 +23,7 @@ class AdapterInfo:
     radio_state: str = "unavailable"  # "on", "off", "disabled", "unavailable"
     is_peripheral_supported: bool = False
     is_central_supported: bool = False
-    is_advertising_supported: bool = False
+    is_advertisement_offload_supported: bool = False
     device_id: str = ""
     name: str = ""
 
@@ -129,21 +129,33 @@ class BLEAdapterManager:
                     name="No Bluetooth Adapter",
                 )
 
-            radio = await adapter.get_radio_async()
-            state_str = "unknown"
-            if radio is not None:
-                state_map = {
-                    RadioState.ON: "on",
-                    RadioState.OFF: "off",
-                    RadioState.DISABLED: "disabled",
-                    RadioState.UNKNOWN: "unknown",
-                }
-                state_str = state_map.get(radio.state, "unknown")
+            try:
+                radio = await adapter.get_radio_async()
+            except Exception as e:
+                logger.warning("Windows Bluetooth radio query failed: %s", e)
+                radio = None
+                radio_query_failed = True
             else:
-                state_str = "unavailable"
+                radio_query_failed = False
+
+            state_map = {
+                RadioState.ON: "on",
+                RadioState.OFF: "off",
+                RadioState.DISABLED: "disabled",
+                RadioState.UNKNOWN: "unknown",
+            }
+            state_str = (
+                "unknown"
+                if radio_query_failed
+                else (
+                    state_map.get(radio.state, "unknown")
+                    if radio is not None
+                    else "unavailable"
+                )
+            )
 
             is_periph = bool(getattr(adapter, "is_peripheral_role_supported", False))
-            is_central = bool(getattr(adapter, "is_central_role_supported", True))
+            is_central = bool(getattr(adapter, "is_central_role_supported", False))
             is_adv = bool(getattr(adapter, "is_advertisement_offload_supported", False))
 
             device_id = str(getattr(adapter, "device_id", ""))
@@ -154,7 +166,7 @@ class BLEAdapterManager:
                 radio_state=state_str,
                 is_peripheral_supported=is_periph,
                 is_central_supported=is_central,
-                is_advertising_supported=is_adv,
+                is_advertisement_offload_supported=is_adv,
                 device_id=device_id,
                 name=radio_name,
             )

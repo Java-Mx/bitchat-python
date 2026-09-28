@@ -57,6 +57,10 @@ class BluetoothTransport(BaseTransport):
         self._is_running: bool = False
         self._state: TransportState = TransportState.OFFLINE
         self._error_message: str | None = None
+        self._peripheral_error_message: str | None = None
+        self._central_supported: bool = False
+        self._peripheral_supported: bool = False
+        self._advertisement_offload_supported: bool = False
         self._start_lock = asyncio.Lock()
         self._halt_task: asyncio.Task[Any] | None = None
 
@@ -184,8 +188,17 @@ class BluetoothTransport(BaseTransport):
         )
         return server_injected or adapter_injected
 
+    def _skip_host_adapter_probe(self) -> bool:
+        """Keep legacy server-only test doubles independent from host hardware."""
+        server_injected = getattr(self.ble_server, "_custom_backend", None) is not None
+        adapter_injected = (
+            getattr(self.ble_manager.adapter_manager, "_custom_backend", None)
+            is not None
+        )
+        return server_injected and not adapter_injected
+
     async def start(self) -> None:
-        """Start adapter checks, GATT server, and BLE scanner."""
+        """Start only the BLE roles supported by the current adapter."""
         async with self._start_lock:
             if self._is_running:
                 return
@@ -193,9 +206,11 @@ class BluetoothTransport(BaseTransport):
             self._is_running = True
             self._set_state(TransportState.CHECKING)
             self._error_message = None
+            self._peripheral_error_message = None
+            adapter_info: AdapterInfo | None = None
 
             try:
-                if not self._uses_injected_test_backend():
+                if not self._skip_host_adapter_probe():
                     adapter_info = (
                         await self.ble_manager.adapter_manager.check_adapter()
                     )
@@ -220,26 +235,79 @@ class BluetoothTransport(BaseTransport):
                         self._handle_adapter_state_changed
                     )
 
-                try:
-                    await self.ble_server.start()
-                except Exception as e:
-                    logger.warning("Could not start BLE server: %s", e)
-                    self._set_state(TransportState.UNAVAILABLE)
-                    self._error_message = f"GATT server failed: {e}"
-                    if self.on_error:
-                        self.on_error(self._error_message)
-                    raise RuntimeError(self._error_message) from e
+                self._central_supported = (
+                    adapter_info.is_central_supported
+                    if adapter_info is not None
+                    else True
+                )
+                self._peripheral_supported = (
+                    adapter_info.is_peripheral_supported
+                    if adapter_info is not None
+                    else True
+                )
+                self._advertisement_offload_supported = (
+                    adapter_info.is_advertisement_offload_supported
+                    if adapter_info is not None
+                    else False
+                )
 
-                try:
-                    await self.ble_manager.start_discovery()
-                    self._set_state(TransportState.SCANNING)
-                except Exception as e:
-                    logger.warning("Could not start BLE discovery: %s", e)
-                    self._set_state(TransportState.UNAVAILABLE)
-                    self._error_message = f"Bluetooth scan failed: {e}"
+                if not self._central_supported and not self._peripheral_supported:
+                    self._set_state(TransportState.ERROR)
+                    self._error_message = (
+                        "Bluetooth adapter supports neither BLE central nor "
+                        "peripheral operation"
+                    )
                     if self.on_error:
                         self.on_error(self._error_message)
-                    raise RuntimeError(self._error_message) from e
+                    raise RuntimeError(self._error_message)
+
+                if self._peripheral_supported:
+                    try:
+                        await self.ble_server.start()
+                    except Exception as e:
+                        self._peripheral_error_message = (
+                            f"BLE peripheral advertising failed: {e}"
+                        )
+                        self._error_message = self._peripheral_error_message
+                        logger.warning("%s", self._peripheral_error_message)
+                else:
+                    self._peripheral_error_message = (
+                        "BLE peripheral role is not supported by the adapter"
+                    )
+                    logger.info("%s", self._peripheral_error_message)
+
+                if self._central_supported:
+                    try:
+                        await self.ble_manager.start_discovery()
+                        self._set_state(TransportState.SCANNING)
+                    except Exception as e:
+                        logger.warning("Could not start BLE discovery: %s", e)
+                        scan_error = f"Bluetooth scan failed: {e}"
+                        if self.ble_server.is_advertising:
+                            await self.ble_server.stop()
+                        self._set_state(TransportState.ERROR)
+                        self._error_message = scan_error
+                        if self.on_error:
+                            self.on_error(self._error_message)
+                        raise RuntimeError(self._error_message) from e
+
+                if not self.ble_manager.scanner.is_scanning and (
+                    not self.ble_server.is_advertising
+                ):
+                    self._set_state(TransportState.ERROR)
+                    self._error_message = (
+                        self._peripheral_error_message
+                        or "No supported BLE role could be started"
+                    )
+                    if self.on_error:
+                        self.on_error(self._error_message)
+                    raise RuntimeError(self._error_message)
+
+                if self._peripheral_error_message and self.on_warning:
+                    self.on_warning(self._peripheral_error_message)
+
+                if not self._central_supported:
+                    self._set_state(TransportState.READY)
             except Exception:
                 self._is_running = False
                 raise
@@ -262,6 +330,11 @@ class BluetoothTransport(BaseTransport):
                 await self.ble_server.stop()
 
     async def start_discovery(self) -> None:
+        if not self._central_supported:
+            raise RuntimeError(
+                "BLE discovery is unavailable because the adapter does not "
+                "support the central role"
+            )
         await self.ble_manager.start_discovery()
         self._set_state(TransportState.SCANNING)
 
@@ -338,6 +411,13 @@ class BluetoothTransport(BaseTransport):
                 "state": self._state.value,
                 "adapter_available": False,
                 "adapter_state": "Unavailable",
+                "central_supported": self._central_supported,
+                "peripheral_supported": self._peripheral_supported,
+                "advertisement_offload_supported": (
+                    self._advertisement_offload_supported
+                ),
+                "advertising_active": False,
+                "peripheral_error": self._peripheral_error_message,
                 "gatt_server_status": "Stopped",
                 "scanner_status": "Stopped",
                 "discovered_peers_count": 0,
@@ -359,9 +439,12 @@ class BluetoothTransport(BaseTransport):
                 "Off" if adapter.radio_state in ("off", "disabled") else "Unavailable"
             ),
             "radio_state": adapter.radio_state,
-            "gatt_server_status": "Advertising"
-            if server_telem.get("is_advertising")
-            else "Stopped",
+            "central_supported": self._central_supported,
+            "peripheral_supported": self._peripheral_supported,
+            "advertisement_offload_supported": (self._advertisement_offload_supported),
+            "advertising_active": self.ble_server.is_advertising,
+            "peripheral_error": self._peripheral_error_message,
+            "gatt_server_status": self._gatt_server_status(server_telem),
             "scanner_status": "Active"
             if self.ble_manager.scanner.is_scanning
             else "Stopped",
@@ -371,3 +454,12 @@ class BluetoothTransport(BaseTransport):
             "discovered_peers": self.discovered_peers,
             "error_message": self._error_message,
         }
+
+    def _gatt_server_status(self, telemetry: dict[str, Any]) -> str:
+        if telemetry.get("is_advertising"):
+            return "Advertising"
+        if not self._peripheral_supported:
+            return "Unsupported"
+        if self._peripheral_error_message:
+            return "Failed"
+        return "Stopped"

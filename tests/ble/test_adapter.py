@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,6 +58,116 @@ async def test_adapter_manager_custom_backend() -> None:
     assert info.is_available is True
     assert info.is_enabled is True
     mock_backend.check_adapter.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("adapter", "expected"),
+    [
+        (
+            SimpleNamespace(
+                is_peripheral_role_supported=True,
+                is_central_role_supported=True,
+                is_advertisement_offload_supported=True,
+                device_id="adapter-1",
+                get_radio_async=AsyncMock(
+                    return_value=SimpleNamespace(state=1, name="Bluetooth")
+                ),
+            ),
+            (True, "on", True, True, True),
+        ),
+        (
+            SimpleNamespace(
+                is_peripheral_role_supported=False,
+                is_central_role_supported=True,
+                is_advertisement_offload_supported=True,
+                device_id="adapter-2",
+                get_radio_async=AsyncMock(
+                    return_value=SimpleNamespace(state=1, name="Bluetooth")
+                ),
+            ),
+            (True, "on", False, True, True),
+        ),
+        (
+            SimpleNamespace(
+                is_peripheral_role_supported=True,
+                is_central_role_supported=False,
+                is_advertisement_offload_supported=False,
+                device_id="adapter-3",
+                get_radio_async=AsyncMock(
+                    return_value=SimpleNamespace(state=0, name="Bluetooth")
+                ),
+            ),
+            (True, "off", True, False, False),
+        ),
+        (
+            SimpleNamespace(
+                is_peripheral_role_supported=False,
+                is_central_role_supported=True,
+                is_advertisement_offload_supported=False,
+                device_id="adapter-4",
+                get_radio_async=AsyncMock(
+                    side_effect=RuntimeError("radio query failed")
+                ),
+            ),
+            (True, "unknown", False, True, False),
+        ),
+        (None, (False, "unavailable", False, False, False)),
+    ],
+)
+async def test_windows_adapter_detection_reports_actual_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: object | None,
+    expected: tuple[bool, str, bool, bool, bool],
+) -> None:
+    """WinRT adapter presence, radio state, and roles are independently reported."""
+    winrt = ModuleType("winrt")
+    winrt.__path__ = []
+    windows = ModuleType("winrt.windows")
+    windows.__path__ = []
+    devices = ModuleType("winrt.windows.devices")
+    devices.__path__ = []
+    bluetooth = ModuleType("winrt.windows.devices.bluetooth")
+    radios = ModuleType("winrt.windows.devices.radios")
+    # Cast to Any: dynamic attribute assignment on ModuleType is safe here
+    # (pyright rejects direct assignment; ruff B010 rejects setattr with literal key)
+    _bt: Any = bluetooth
+    _rd: Any = radios
+    _wrt: Any = winrt
+    _win: Any = windows
+    _dev: Any = devices
+    _rd.RadioState = SimpleNamespace(ON=1, OFF=0, DISABLED=2, UNKNOWN=3)
+
+    if adapter is None:
+        _bt.BluetoothAdapter = SimpleNamespace(
+            get_default_async=AsyncMock(return_value=None)
+        )
+    else:
+        _bt.BluetoothAdapter = SimpleNamespace(
+            get_default_async=AsyncMock(return_value=adapter)
+        )
+
+    _wrt.windows = windows
+    _win.devices = devices
+    _dev.bluetooth = bluetooth
+    _dev.radios = radios
+    for name, module in (
+        ("winrt", winrt),
+        ("winrt.windows", windows),
+        ("winrt.windows.devices", devices),
+        ("winrt.windows.devices.bluetooth", bluetooth),
+        ("winrt.windows.devices.radios", radios),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    info = await BLEAdapterManager()._check_windows_adapter()
+    assert (
+        info.is_available,
+        info.radio_state,
+        info.is_peripheral_supported,
+        info.is_central_supported,
+        info.is_advertisement_offload_supported,
+    ) == expected
 
 
 @pytest.mark.asyncio

@@ -95,6 +95,7 @@ class BaseTransport(ABC):
         self.on_peer_disconnected: Callable[[str], None] | None = None
         self.on_state_changed: Callable[[TransportState], None] | None = None
         self.on_error: Callable[[str], None] | None = None
+        self.on_warning: Callable[[str], None] | None = None
 
     @property
     @abstractmethod

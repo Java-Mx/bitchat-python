@@ -50,6 +50,14 @@ class BleErrorReported(Message):
         self.error_message = error_message
 
 
+class BleWarningReported(Message):
+    """BLE capability warning forwarded from transport startup."""
+
+    def __init__(self, warning: str) -> None:
+        super().__init__()
+        self.warning = warning
+
+
 class BitChatApp(App[None]):
     """Modern terminal user interface for the BitChat mesh client."""
 
@@ -134,6 +142,7 @@ class BitChatApp(App[None]):
             self.coordinator.on_peer_status_changed = self._on_coordinator_peer_status
             self.coordinator.on_handshake_completed = self._on_coordinator_handshake
             self.coordinator.on_ble_error = self._on_coordinator_ble_error
+            self.coordinator.on_ble_warning = self._on_coordinator_ble_warning
 
     def _spawn_task(self, coro: Any) -> asyncio.Task[Any]:
         """Spawn background task and keep reference until completed."""
@@ -270,6 +279,7 @@ class BitChatApp(App[None]):
 
         active_transport = self.coordinator.active_transport
         trans_name = self.coordinator.active_transport_name
+        telemetry = active_transport.get_telemetry()
         sidebar.active_transport = trans_name
 
         connected_addrs = active_transport.connected_peers
@@ -289,10 +299,10 @@ class BitChatApp(App[None]):
 
         sidebar.set_connected_peers(conn_display)
         is_sc = getattr(active_transport, "is_scanning", False)
-        is_off = self.coordinator.ble_status in (
-            "unavailable",
-            "disabled",
-            "offline",
+        is_off = (
+            telemetry.get("adapter_state") in ("Off", "Unavailable")
+            if trans_name == "bluetooth"
+            else self.coordinator.ble_status in ("unavailable", "disabled", "offline")
         )
         sidebar.set_discovered_peers(
             active_transport.discovered_peers,
@@ -310,13 +320,42 @@ class BitChatApp(App[None]):
                 else f"Connected ({len(connected_addrs)} peers)"
             )
             status_bar.mesh_status = f"● {connection_label} • {medium_label}"
+        elif trans_name == "bluetooth" and telemetry.get("adapter_state") == "On":
+            central_active = telemetry.get("scanner_status") == "Active"
+            peripheral_active = telemetry.get("advertising_active")
+            if central_active and peripheral_active:
+                status_lbl = "Bluetooth Ready • BLE Central + Peripheral"
+            elif central_active:
+                status_lbl = "Bluetooth Available • BLE Central Mode"
+                if not telemetry.get("peripheral_supported"):
+                    status_lbl += " • Peripheral Unsupported"
+                elif telemetry.get("peripheral_error"):
+                    status_lbl += " • Peripheral Advertising Failed"
+            elif peripheral_active:
+                status_lbl = "Bluetooth Available • BLE Peripheral Mode"
+            elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
+                status_lbl = "BLE Error • Bluetooth Available"
+            else:
+                status_lbl = "Bluetooth Available"
+            status_bar.mesh_status = f"● {status_lbl}"
         elif self.coordinator.ble_status in ("active", "ready", "scanning"):
             status_lbl = (
                 "LAN / Wi-Fi Ready • Local Mesh"
                 if trans_name == "lan"
-                else "BitChat Ready • Local Mesh"
+                else (
+                    "BLE Central Scanning"
+                    if telemetry.get("scanner_status") == "Active"
+                    else "BLE Ready"
+                )
             )
             status_bar.mesh_status = f"● {status_lbl}"
+        elif trans_name == "bluetooth" and telemetry.get("adapter_state") == "Off":
+            status_bar.mesh_status = "✕ BLE Offline • Bluetooth Disabled"
+        elif (
+            trans_name == "bluetooth"
+            and telemetry.get("adapter_state") == "Unavailable"
+        ):
+            status_bar.mesh_status = "✕ BLE Offline • Bluetooth Unavailable"
         elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
             status_lbl = (
                 "LAN Offline • Network Unavailable"
@@ -366,18 +405,88 @@ class BitChatApp(App[None]):
         """Queue BLE failures for handling inside the active Textual app context."""
         self.post_message(BleErrorReported(err_msg))
 
+    def _on_coordinator_ble_warning(self, warning: str) -> None:
+        """Queue non-fatal BLE role limitations inside the Textual app context."""
+        self.post_message(BleWarningReported(warning))
+
+    def on_ble_warning_reported(self, event: BleWarningReported) -> None:
+        """Present a BLE role limitation without marking Bluetooth offline."""
+        if self.coordinator is None:
+            return
+        telemetry = self.coordinator.active_transport.get_telemetry()
+        if (
+            telemetry.get("central_supported")
+            and telemetry.get("scanner_status") == "Active"
+        ):
+            prefix = "Bluetooth is available and BLE central scanning is active. "
+        else:
+            prefix = "Bluetooth is available. "
+        self.query_one(ChatView).add_system_message(prefix + event.warning)
+        self._refresh_peer_lists()
+        if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+            self.push_screen(
+                BLEErrorModal(
+                    error_message=event.warning,
+                    bluetooth_available=True,
+                    central_active=(
+                        telemetry.get("central_supported", False)
+                        and telemetry.get("scanner_status") == "Active"
+                    ),
+                    peripheral_failure=bool(telemetry.get("peripheral_error")),
+                    peripheral_supported=bool(telemetry.get("peripheral_supported")),
+                ),
+                self._on_ble_modal_dismissed,
+            )
+
     def on_ble_error_reported(self, event: BleErrorReported) -> None:
         """Present a coordinator BLE failure from the Textual message loop."""
         chat = self.query_one(ChatView)
         chat.add_error_message(f"Bluetooth Error: {event.error_message}")
-        chat.add_system_message(
-            "Bluetooth hardware is unavailable or disabled. "
-            "Please enable Bluetooth in settings and "
-            "click 'Retry Adapter' or type /scan."
-        )
+        if self.coordinator and self.coordinator.active_transport_name == "bluetooth":
+            adapter_state = self.coordinator.active_transport.get_telemetry().get(
+                "adapter_state"
+            )
+            if adapter_state == "On":
+                guidance = (
+                    "Bluetooth radio is ON, but BLE startup failed. "
+                    "Click 'Retry Adapter' or type /scan."
+                )
+            elif adapter_state == "Off":
+                guidance = (
+                    "Bluetooth adapter is present but the radio is OFF. "
+                    "Enable it, then click 'Retry Adapter'."
+                )
+            else:
+                guidance = (
+                    "Bluetooth adapter or radio is unavailable. "
+                    "Check settings, then click 'Retry Adapter'."
+                )
+        else:
+            guidance = "BLE transport startup failed. Click 'Retry Adapter' to retry."
+        chat.add_system_message(guidance)
         self._refresh_peer_lists()
         if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
-            self.push_screen(BLEErrorModal(error_message=event.error_message))
+            telemetry = (
+                self.coordinator.active_transport.get_telemetry()
+                if self.coordinator
+                and self.coordinator.active_transport_name == "bluetooth"
+                else {}
+            )
+            radio_available = telemetry.get("adapter_state") == "On"
+            self.push_screen(
+                BLEErrorModal(
+                    error_message=event.error_message,
+                    bluetooth_available=radio_available,
+                    central_active=(
+                        radio_available and telemetry.get("scanner_status") == "Active"
+                    ),
+                ),
+                self._on_ble_modal_dismissed,
+            )
+
+    def _on_ble_modal_dismissed(self, retry: bool | None) -> None:
+        if retry:
+            self._spawn_task(self._handle_ble_retry())
 
     def _resolve_peer_address(self, target: str) -> str | None:
         """Resolve a nickname, peer ID prefix, or discovered device
@@ -708,12 +817,6 @@ class BitChatApp(App[None]):
             f"timestamps={event.show_timestamps}, accent={event.accent_name}"
         )
 
-    def on_ble_error_modal_retry_requested(
-        self, event: BLEErrorModal.RetryRequested
-    ) -> None:
-        """Handle retry request from BLE error dialog."""
-        self._spawn_task(self._handle_ble_retry())
-
     async def _handle_ble_retry(self) -> None:
         """Attempt to re-initialize BLE services and notify user."""
         chat = self.query_one(ChatView)
@@ -721,9 +824,21 @@ class BitChatApp(App[None]):
         if self.coordinator:
             success = await self.coordinator.retry_ble()
             if success:
-                chat.add_system_message(
-                    "Bluetooth reconnected successfully. BLE Mesh Active."
-                )
+                telemetry = self.coordinator.active_transport.get_telemetry()
+                if telemetry.get("peripheral_error"):
+                    chat.add_system_message(
+                        "Bluetooth central mode is active; peripheral advertising "
+                        f"failed: {telemetry['peripheral_error']}"
+                    )
+                elif not telemetry.get("peripheral_supported"):
+                    chat.add_system_message(
+                        "Bluetooth central mode is active; peripheral advertising "
+                        "is not supported by this adapter."
+                    )
+                else:
+                    chat.add_system_message(
+                        "Bluetooth reconnected successfully. BLE Mesh Active."
+                    )
                 self._refresh_peer_lists()
             else:
                 chat.add_error_message(

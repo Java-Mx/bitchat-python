@@ -105,6 +105,11 @@ class BLEManager:
             "adapter_available": adapter.is_available,
             "adapter_enabled": adapter.is_enabled,
             "radio_state": adapter.radio_state,
+            "central_supported": adapter.is_central_supported,
+            "peripheral_supported": adapter.is_peripheral_supported,
+            "advertisement_offload_supported": (
+                adapter.is_advertisement_offload_supported
+            ),
             "scanner_active": self.scanner.is_scanning,
             "ble_state": self._state,
             "discovered_peers_count": len(self.discovered_peers),

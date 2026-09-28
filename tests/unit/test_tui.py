@@ -12,6 +12,7 @@ from textual.command import CommandPalette
 from textual.widgets import Button, Input, RadioButton, RichLog, Static
 
 from bitchat.app.session_coordinator import SessionCoordinator
+from bitchat.ble.adapter import AdapterInfo, BLEAdapterManager
 from bitchat.ble.manager import BLEManager
 from bitchat.ble.models import DiscoveredPeer
 from bitchat.ble.server import BLEServer
@@ -994,6 +995,69 @@ async def test_ble_error_from_real_coordinator_uses_active_textual_lifecycle(
         await pilot.pause()
         assert not isinstance(app.screen, BLEErrorModal)
         assert app.is_running
+
+
+@pytest.mark.asyncio
+async def test_gatt_failure_keeps_bluetooth_central_mode_visible(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    class AdapterBackend:
+        async def check_adapter(self) -> AdapterInfo:
+            return AdapterInfo(
+                is_available=True,
+                radio_state="on",
+                is_central_supported=True,
+                is_peripheral_supported=True,
+                device_id="test-adapter",
+                name="Test Bluetooth",
+            )
+
+    test_coordinator.ble_manager.adapter_manager = BLEAdapterManager(
+        custom_backend=AdapterBackend()
+    )
+    server_backend = test_coordinator.ble_server._custom_backend
+    server_backend.start_errors.append(
+        RuntimeError("GATT service advertising failed with status 3")
+    )
+    app = BitChatApp(coordinator=test_coordinator)
+
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        title = app.screen.query_one("#ble-error-title", Static)
+        content = app.screen.query_one(".ble-error-text", Static)
+        telemetry = test_coordinator.active_transport.get_telemetry()
+        assert "BLE Peripheral Mode Warning" in str(title.render())
+        assert "radio is ON" in str(content.render())
+        assert "central scanning remains active" in str(content.render())
+        assert telemetry["scanner_status"] == "Active"
+        assert telemetry["adapter_state"] == "On"
+        assert telemetry["scanner_status"] == "Active"
+        assert telemetry["advertising_active"] is False
+
+        status = app.query_one(StatusBar).status_message
+        assert "Bluetooth Available" in status
+        assert "BLE Central Mode" in status
+        assert "Peripheral Advertising Failed" in status
+        rendered = "\n".join(
+            line.text for line in app.query_one("#chat-log", RichLog).lines
+        )
+        assert "BLE central scanning is active" in rendered
+        assert "status 3" in rendered
+
+        retry_button = app.screen.query_one("#btn-ble-retry", Button)
+        clicked = await pilot.click("#btn-ble-retry")
+        await pilot.pause(1)
+        assert clicked, retry_button.region
+        assert not isinstance(app.screen, BLEErrorModal), (
+            server_backend.start_attempts,
+            test_coordinator.active_transport.get_telemetry(),
+            [type(screen).__name__ for screen in app._screen_stack],
+        )
+        assert server_backend.start_attempts == 2
+        assert telemetry["advertising_active"] is False
+        assert test_coordinator.active_transport.get_telemetry()["advertising_active"]
 
 
 @pytest.mark.asyncio

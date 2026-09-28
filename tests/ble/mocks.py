@@ -168,12 +168,19 @@ class MockBLEServerBackend:
         self.server: Any | None = None
         self.is_started: bool = False
         self.clients: list[MockBleakClient] = []
+        self.start_attempts: int = 0
+        self.stop_attempts: int = 0
+        self.start_errors: list[Exception] = []
 
     async def start(self, server: Any) -> None:
+        self.start_attempts += 1
+        if self.start_errors:
+            raise self.start_errors.pop(0)
         self.server = server
         self.is_started = True
 
     async def stop(self) -> None:
+        self.stop_attempts += 1
         self.is_started = False
         self.server = None
 
