@@ -46,7 +46,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.8",
     "pyright>=1.1.414",
-    "pyinstaller>=6.10.0",
+    "pyinstaller>=6.22.3",
 ]
 
 [tool.pytest.ini_options]
