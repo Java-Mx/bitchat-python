@@ -134,3 +134,44 @@ def test_locate_iscc() -> None:
     # If installed in standard paths, it must exist
     if iscc is not None:
         assert iscc.is_file()
+
+
+def test_committed_manifests_consistency() -> None:
+    """Committed WinGet manifests strictly match authoritative project version."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    version = get_authoritative_version()
+
+    manifest_dir = repo_root / "manifests" / "j" / "Java-Mx" / "BitChat" / version
+    singleton_file = (
+        repo_root / "packaging" / "windows" / "winget" / "Java-Mx.BitChat.yaml"
+    )
+
+    assert manifest_dir.is_dir(), f"Committed manifest dir {manifest_dir} must exist"
+    assert singleton_file.is_file(), f"Committed singleton {singleton_file} must exist"
+
+    version_file = manifest_dir / "Java-Mx.BitChat.yaml"
+    installer_file = manifest_dir / "Java-Mx.BitChat.installer.yaml"
+    locale_file = manifest_dir / "Java-Mx.BitChat.locale.en-US.yaml"
+
+    assert version_file.is_file()
+    assert installer_file.is_file()
+    assert locale_file.is_file()
+
+    v_content = version_file.read_text(encoding="utf-8")
+    assert f"PackageVersion: {version}" in v_content
+    assert "PackageIdentifier: Java-Mx.BitChat" in v_content
+
+    i_content = installer_file.read_text(encoding="utf-8")
+    assert f"PackageVersion: {version}" in i_content
+    assert "PackageIdentifier: Java-Mx.BitChat" in i_content
+    assert f"BitChat-{version}-windows-x64.exe" in i_content
+    assert "InstallerType: inno" in i_content
+
+    l_content = locale_file.read_text(encoding="utf-8")
+    assert f"PackageVersion: {version}" in l_content
+    assert "PackageIdentifier: Java-Mx.BitChat" in l_content
+
+    s_content = singleton_file.read_text(encoding="utf-8")
+    assert f"PackageVersion: {version}" in s_content
+    assert "PackageIdentifier: Java-Mx.BitChat" in s_content
+    assert f"BitChat-{version}-windows-x64.exe" in s_content

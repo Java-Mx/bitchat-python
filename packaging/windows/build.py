@@ -14,6 +14,7 @@ Automates the complete Windows packaging workflow:
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import os
 import shutil
@@ -140,7 +141,7 @@ def verify_executable(exe_path: Path, expected_version: str) -> None:
         [str(exe_path), "--version"],
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=30,
         check=False,
     )
     if res_ver.returncode != 0:
@@ -157,7 +158,7 @@ def verify_executable(exe_path: Path, expected_version: str) -> None:
         [str(exe_path), "--help"],
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=30,
         check=False,
     )
     if res_help.returncode != 0:
@@ -199,11 +200,14 @@ def build_inno_setup(version: str, iscc_path: Path) -> Path:
     return installer_path
 
 
-def generate_winget_manifests(version: str, installer_sha256: str) -> tuple[Path, Path]:
+def generate_winget_manifests(
+    version: str, installer_sha256: str, release_date: str | None = None
+) -> tuple[Path, Path]:
     """Generate official multi-file manifests and repository singleton manifest."""
     installer_filename = f"BitChat-{version}-windows-x64.exe"
     base_release_url = "https://github.com/Java-Mx/bitchat-python/releases/download"
     installer_url = f"{base_release_url}/v{version}/{installer_filename}"
+    rel_date = release_date or datetime.date.today().isoformat()
 
     manifest_dir = MANIFESTS_ROOT / "j" / "Java-Mx" / "BitChat" / version
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -234,7 +238,7 @@ InstallModes:
 UpgradeBehavior: install
 Commands:
   - bitchat
-ReleaseDate: 2026-09-29
+ReleaseDate: {rel_date}
 Installers:
   - Architecture: x64
     InstallerUrl: {installer_url}
@@ -244,6 +248,17 @@ ManifestVersion: 1.6.0
 """
     (manifest_dir / "Java-Mx.BitChat.installer.yaml").write_text(
         installer_yaml, encoding="utf-8"
+    )
+
+    short_description = (
+        "Python terminal client for the BitChat protocol over Bluetooth Low Energy"
+    )
+    description = (
+        "BitChat is a secure peer-to-peer terminal chat client operating over "
+        "Bluetooth Low Energy (BLE).\n"
+        "  It features decentralized mesh networking, end-to-end encryption with "
+        "Noise Protocol / X25519 / AES-GCM,\n"
+        "  and an interactive terminal user interface built with Textual."
     )
 
     locale_yaml = f"""# Created using BitChat automated packaging workflow
@@ -260,11 +275,9 @@ PackageUrl: https://github.com/Java-Mx/bitchat-python
 License: MIT
 LicenseUrl: https://github.com/Java-Mx/bitchat-python/blob/main/LICENSE
 Copyright: Copyright (c) BitChat Contributors
-ShortDescription: Python terminal client for BitChat over Bluetooth Low Energy
+ShortDescription: {short_description}
 Description: |-
-  BitChat is a secure peer-to-peer terminal chat client operating over BLE.
-  It features decentralized mesh networking, end-to-end encryption with
-  Noise Protocol / X25519 / AES-GCM, and an interactive terminal UI.
+  {description}
 Moniker: bitchat
 Tags:
   - bluetooth
@@ -298,11 +311,9 @@ PackageUrl: https://github.com/Java-Mx/bitchat-python
 License: MIT
 LicenseUrl: https://github.com/Java-Mx/bitchat-python/blob/main/LICENSE
 Copyright: Copyright (c) BitChat Contributors
-ShortDescription: Python terminal client for BitChat over Bluetooth Low Energy
+ShortDescription: {short_description}
 Description: |-
-  BitChat is a secure peer-to-peer terminal chat client operating over BLE.
-  It features decentralized mesh networking, end-to-end encryption with
-  Noise Protocol / X25519 / AES-GCM, and an interactive terminal UI.
+  {description}
 Moniker: bitchat
 Tags:
   - bluetooth

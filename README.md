@@ -91,7 +91,8 @@ BitChat provides dedicated distribution channels tailored for each platform:
 #### WinGet
 
 > [!NOTE]
-> **Publication Status:** Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.1.0/`](manifests/j/Java-Mx/BitChat/0.1.0/).
+> **Status:** WinGet manifest prepared — pending submission/publication.
+> Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.1.0/`](manifests/j/Java-Mx/BitChat/0.1.0/).
 > The public command `winget install Java-Mx.BitChat` becomes available once the manifest pull request is merged into Microsoft's community repository ([microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)).
 > Until upstream review is complete, use the **GitHub Release Installer** below or install directly from the local repository manifest.
 
