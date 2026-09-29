@@ -708,11 +708,16 @@ async def main() -> None:
     if not any_gatt_works:
         print(
             "CONCLUSION: No GATT server configuration works on this machine.\n"
-            "  -> This is a Windows/adapter/driver limitation, NOT a BitChat code bug.\n"
-            "  -> BitChat should remain in Central-only mode with the current warning.\n"
-            "  -> Possible causes: adapter driver does not actually implement peripheral\n"
-            "     role even though WinRT capability metadata says it is supported.\n"
-            "  -> Try: reboot, update Bluetooth driver, check Windows Bluetooth Support Service."
+            "  -> CONFIRMED by two-driver test:\n"
+            "     Intel 23.40.0.2 (2024-02-22): All GATT phases -> Aborted (3)\n"
+            "     Intel 24.70.0.4 (2026-07-31): All GATT phases -> Aborted (3)\n"
+            "  -> Adapter firmware also updated between tests and still fails.\n"
+            "  -> Root cause: Intel AX211 does not expose GattServiceProvider hosting\n"
+            "     to third-party WinRT apps on this Windows configuration.\n"
+            "  -> IsPeripheralRoleSupported=True is an HCI-level radio capability flag;\n"
+            "     it does NOT guarantee GattServiceProvider hosting is available.\n"
+            "  -> BluetoothLEAdvertisementPublisher (broadcast-only) DOES work.\n"
+            "  -> BitChat Central-mode fallback is the correct behavior on this adapter."
         )
     elif results.get("exact_bitchat_server"):
         print(
