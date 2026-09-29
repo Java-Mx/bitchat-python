@@ -6,9 +6,18 @@
 
 *Terminal-native · No servers · No accounts · No internet required*
 
-[![CI](https://github.com/Java-Mx/bitchat-python/actions/workflows/ci.yml/badge.svg)](https://github.com/Java-Mx/bitchat-python/actions/workflows/ci.yml)
+[![Security](https://github.com/Java-Mx/bitchat-python/actions/workflows/security.yml/badge.svg)](https://github.com/Java-Mx/bitchat-python/actions/workflows/security.yml)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Ruff](https://img.shields.io/badge/linter-ruff-orange)](https://docs.astral.sh/ruff/)
+[![Pyright](https://img.shields.io/badge/type%20check-pyright-blue)](https://github.com/microsoft/pyright)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue?logo=dependabot)](https://github.com/Java-Mx/bitchat-python/blob/main/.github/dependabot.yml)
+[![Last Commit](https://img.shields.io/github/last-commit/Java-Mx/bitchat-python/main)](https://github.com/Java-Mx/bitchat-python/commits/main)
+[![Repo Size](https://img.shields.io/github/repo-size/Java-Mx/bitchat-python)](https://github.com/Java-Mx/bitchat-python)
+[![Issues](https://img.shields.io/github/issues/Java-Mx/bitchat-python)](https://github.com/Java-Mx/bitchat-python/issues)
+[![Contributors](https://img.shields.io/github/contributors/Java-Mx/bitchat-python)](https://github.com/Java-Mx/bitchat-python/graphs/contributors)
+[![Stars](https://img.shields.io/github/stars/Java-Mx/bitchat-python?style=flat)](https://github.com/Java-Mx/bitchat-python/stargazers)
+[![Forks](https://img.shields.io/github/forks/Java-Mx/bitchat-python?style=flat)](https://github.com/Java-Mx/bitchat-python/network/members)
 
 </div>
 
