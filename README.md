@@ -91,7 +91,7 @@ BitChat provides dedicated distribution channels tailored for each platform:
 #### WinGet
 
 > [!NOTE]
-> **Status:** WinGet manifest prepared — pending submission/publication.
+> **Status:** WinGet submission: pending Microsoft review ([microsoft/winget-pkgs#443445](https://github.com/microsoft/winget-pkgs/pull/443445)).
 > Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.1.0/`](manifests/j/Java-Mx/BitChat/0.1.0/).
 > The public command `winget install Java-Mx.BitChat` becomes available once the manifest pull request is merged into Microsoft's community repository ([microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)).
 > Until upstream review is complete, use the **GitHub Release Installer** below or install directly from the local repository manifest.
@@ -373,7 +373,7 @@ bitchat --cli
 - **Solution:** Windows Package Manager comes standard with Windows 11 and modern Windows 10 (build 17763+). If missing, install **App Installer** from the Microsoft Store, or download the latest `.msixbundle` installer directly from [microsoft/winget-cli Releases](https://github.com/microsoft/winget-cli/releases).
 
 ### 2. Package not found (`Java-Mx.BitChat`)
-- **What it means:** The package manifest has been generated locally and is pending submission/merging into Microsoft's public `microsoft/winget-pkgs` repository.
+- **What it means:** The package manifest has been submitted upstream ([microsoft/winget-pkgs#443445](https://github.com/microsoft/winget-pkgs/pull/443445)) and is pending Microsoft review/merge into the public repository.
 - **Solution:**
   - Fallback 1: Download `BitChat-<version>-windows-x64.exe` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) and run setup.
   - Fallback 2: Install directly from the local repository manifest:
