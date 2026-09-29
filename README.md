@@ -25,134 +25,307 @@ BitChat Python is an asynchronous terminal client implementing the [BitChat](htt
 
 ---
 
-## Architecture
+## Contents
 
-```mermaid
-graph TD
-    A[TUI — Textual App] --> B[Session Coordinator]
-    B --> C[Mesh Router]
-    C --> D[Protocol — Packet / Framing / Fragmentation]
-    D --> E{Transport}
-    E --> F[BLE — Bleak / WinRT]
-    E --> G[LAN — UDP + TCP]
-    B --> H[Crypto — Noise XX / Ed25519 / X25519]
-```
-
-| Layer | Modules |
-|---|---|
-| Terminal UI | `tui/` — Textual app, widgets, modals, autocomplete |
-| Orchestration | `app/` — `SessionCoordinator`, `Application`, config |
-| Mesh routing | `mesh/` — `MeshRouter`, deduplication, store-and-forward |
-| Cryptography | `crypto/` — Noise XX, Ed25519, X25519, AES-GCM, HKDF, PBKDF2 |
-| Protocol | `protocol/` — packet encoding/decoding, fragmentation, reassembly |
-| Transport | `transport/` + `ble/` + `network/` — BLE and LAN backends |
+- [Quick Start](#quick-start)
+- [Installation — Windows](#installation--windows)
+- [Installation — Linux](#installation--linux)
+- [Installation — macOS](#installation--macos)
+- [Commands](#commands)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Transports](#transports)
+- [Cryptography](#cryptography)
+- [Platform Support](#platform-support)
+- [Troubleshooting](#troubleshooting)
+- [Project Structure](#project-structure)
+- [Development](#development)
+- [Security](#security)
+- [License](#license)
 
 ---
 
-## Transports
-
-### Bluetooth Low Energy
-
-- **Central** — scans for peers advertising the BitChat GATT service UUID
-- **Peripheral / GATT server** — advertises and accepts inbound connections
-- Automatic MTU fragmentation: packets > 500 B split into ≤ 150 B fragments, paced at 20 ms intervals
-- Platform note: GATT peripheral advertising requires hardware and driver support. On some Windows configurations (e.g. certain Intel adapters) the radio supports Central scanning but the OS does not grant GATT host access to third-party applications. BitChat detects this and falls back gracefully — Central scanning and LAN remain available.
-
-### LAN / Wi-Fi
-
-- **UDP discovery** (port 41234) — zero-config broadcast beacons (`BC_DISCOVER_V1`), 10 pkts/s rate limit, 30 s peer TTL
-- **Framed TCP** (port 41235) — 8-byte length-prefix framing (`BC\x01\x00` magic + 4-byte big-endian length), 64 KB frame limit
-- Supports up to 32 concurrent peer connections
-
-### Runtime switching
-
-Switch transport at any time: `/transport lan` or `/transport bluetooth` (also via Settings `F3`).
-Switching generates a fresh ephemeral identity and tears down all active sessions — previous sessions are not linkable to the new transport identity.
-
----
-
-## Cryptography
-
-```
-Ed25519 keypair  ──── identity / signatures
-     │
-     ▼
-Noise XX  (Noise_XX_25519_ChaChaPoly_SHA256)
-  ├── X25519        key agreement
-  ├── SHA-256       Noise hash / chaining
-  ├── HKDF-SHA256   key derivation within handshake
-  └── ChaCha20-Poly1305  session AEAD (1024-entry replay window)
-
-Legacy / channel encryption
-  ├── AES-256-GCM   direct-message legacy path
-  └── PBKDF2-HMAC-SHA256  channel key derivation
-```
-
-All key material is generated locally. No key escrow. No third-party servers.
-Identity persists to `~/.bitchat/identity.json` (mode `0600` on POSIX; restricted ACL on Windows). This is access control, not encryption of the key file.
-
-> See [`docs/security/CRYPTOGRAPHY.md`](docs/security/CRYPTOGRAPHY.md) and [`docs/security/NOISE.md`](docs/security/NOISE.md) for detailed protocol documentation.
-
----
-
-## Platform support
-
-| Platform | BLE Central | BLE Peripheral / GATT | LAN |
-|---|:---:|:---:|:---:|
-| Windows 10 / 11 | ✓ | Hardware/driver dependent | ✓ |
-| Linux (BlueZ) | ✓ | ✓ | ✓ |
-| macOS 12+ | ✓ | ✓ | ✓ |
-
-**Physical two-machine validation** — automated integration tests (including two-node Noise XX over simulated BLE and over framed TCP) pass in CI. Real over-the-air validation across two separate physical machines is not yet confirmed.
-
----
-
-## Installation
-
-### Requirements
-
-- Python 3.12+
-- Git
-
-For BLE on Linux: BlueZ (`bluez`, `dbus`). For BLE on macOS: Bluetooth permission granted to your terminal. For LAN: any local network.
-
-### With `uv` (recommended)
+## Quick Start
 
 ```bash
 git clone https://github.com/Java-Mx/bitchat-python.git
 cd bitchat-python
+```
+
+Then follow the guide for your OS:
+
+- [Windows](#installation--windows) — PowerShell, `py` launcher, WinRT BLE
+- [Linux](#installation--linux) — venv, BlueZ, socket permissions
+- [macOS](#installation--macos) — venv, Bluetooth permission prompt
+
+Once installed, launch BitChat:
+
+```bash
+uv run bitchat          # interactive TUI (recommended)
+uv run bitchat --cli    # headless / scripted mode
+```
+
+On first launch an Ed25519 identity is generated and saved to `~/.bitchat/identity.json`.
+
+---
+
+## Installation — Windows
+
+**Requirements:** Windows 10 version 1903+ or Windows 11, Python 3.12 or 3.13.
+
+### 1. Install Python
+
+Download the official installer from [python.org](https://www.python.org/downloads/). During setup, tick **"Add Python to PATH"**.
+
+Verify:
+
+```powershell
+py --version
+# or
+python --version
+```
+
+Expected: `Python 3.12.x` or `Python 3.13.x`. If `python` is not found, use `py` (the Windows Python Launcher).
+
+### 2. Clone the repository
+
+```powershell
+git clone https://github.com/Java-Mx/bitchat-python.git
+cd bitchat-python
+```
+
+### 3a. Install with `uv` (recommended)
+
+[`uv`](https://github.com/astral-sh/uv) handles Python versions, virtual environments, and dependencies automatically.
+
+```powershell
+# Install uv
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Install dependencies and run
 uv sync
 uv run bitchat
 ```
 
-### With `pip`
+### 3b. Install with standard venv + pip
+
+```powershell
+# Create virtual environment
+py -3.12 -m venv .venv
+
+# Activate (PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Upgrade pip and install
+python -m pip install --upgrade pip
+pip install -e .
+
+# Launch
+bitchat
+# or: python -m bitchat
+```
+
+### 4. Development install
+
+```powershell
+uv sync --all-groups
+# or with pip:
+pip install -e ".[dev]"
+```
+
+### Windows Bluetooth notes
+
+- BitChat uses Windows WinRT Bluetooth APIs — no third-party drivers required.
+- Enable Bluetooth in **Settings → Bluetooth & devices**.
+- BLE Central scanning works on all standard BLE adapters.
+- GATT peripheral hosting (advertising a server to inbound connections) requires driver and hardware support. Some adapter/driver combinations report `IsPeripheralRoleSupported = True` but fail when BitChat calls `GattServiceProvider.RequestAccess()`. This is normal and not a bug in BitChat — see [Troubleshooting](#gatt-service-advertising-failed-with-status-3) below.
+- LAN transport requires no special configuration beyond a working Wi-Fi or Ethernet connection.
+
+---
+
+## Installation — Linux
+
+**Requirements:** Python 3.12 or 3.13. BlueZ for BLE. Any modern Linux with working networking for LAN.
+
+### 1. Install Python
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv python3-pip git
+```
+
+If Python 3.12 is not in your distro's default repositories, use the [deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa):
+
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv
+```
+
+**Fedora:**
+
+```bash
+sudo dnf install -y python3.12 git
+```
+
+**Arch Linux:**
+
+```bash
+sudo pacman -S python git
+```
+
+Verify:
+
+```bash
+python3.12 --version
+```
+
+### 2. Clone the repository
 
 ```bash
 git clone https://github.com/Java-Mx/bitchat-python.git
 cd bitchat-python
-python -m venv .venv
-# Windows:   .venv\Scripts\Activate.ps1
-# Unix:      source .venv/bin/activate
+```
+
+### 3a. Install with `uv` (recommended)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env   # or restart your shell
+
+uv sync
+uv run bitchat
+```
+
+### 3b. Install with standard venv + pip
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -e .
 bitchat
 ```
 
+### 4. Development install
+
+```bash
+uv sync --all-groups
+# or with pip:
+pip install -e ".[dev]"
+```
+
+### Linux Bluetooth (BlueZ) setup
+
+BLE requires BlueZ and the Bluetooth service running:
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt install -y bluez dbus
+sudo systemctl enable --now bluetooth
+```
+
+**Arch Linux:**
+
+```bash
+sudo pacman -S bluez bluez-utils
+sudo systemctl enable --now bluetooth
+```
+
+**Fedora:**
+
+```bash
+sudo dnf install -y bluez
+sudo systemctl enable --now bluetooth
+```
+
+**User permissions:**
+
+```bash
+sudo usermod -aG bluetooth $USER
+# Log out and back in for the group change to take effect
+```
+
+**Check adapter state:**
+
+```bash
+rfkill list bluetooth          # ensure not blocked
+bluetoothctl power on          # power on the adapter
+bluetoothctl show              # verify adapter properties
+```
+
+### Linux LAN notes
+
+LAN transport uses UDP broadcast (port 41234) and TCP (port 41235). These work on any standard Linux networking stack without extra configuration. If you run a firewall (`ufw`, `firewalld`, `iptables`), see [Troubleshooting — Linux Firewall](#linux-firewall-blocking-lan) below.
+
 ---
 
-## Quick start
+## Installation — macOS
 
+**Requirements:** macOS 12 Monterey or later, Python 3.12 or 3.13.
+
+### 1. Install Python
+
+**Option A — python.org installer (recommended for most users):**
+
+Download from [python.org/downloads](https://www.python.org/downloads/). Run the `.pkg` installer.
+
+**Option B — Homebrew:**
+
+```bash
+brew install python@3.12
 ```
-$ uv run bitchat          # interactive TUI (default)
-$ uv run bitchat --cli    # headless / scripted mode
+
+Verify:
+
+```bash
+python3 --version
+# or: python3.12 --version
 ```
 
-On first launch, an Ed25519 identity is generated and saved to `~/.bitchat/identity.json`.
+### 2. Clone the repository
 
-The TUI opens with:
-- **Header** — connection state, action bar (`F1` Help · `F2` Theme · `F3` Settings)
-- **Left panel** — discovered and connected peers, RSSI or IP displayed
-- **Chat pane** — conversation log with encryption indicators
-- **Status bar** — transport state, active channel, peer count
+```bash
+git clone https://github.com/Java-Mx/bitchat-python.git
+cd bitchat-python
+```
+
+### 3a. Install with `uv` (recommended)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+uv sync
+uv run bitchat
+```
+
+### 3b. Install with standard venv + pip
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .
+bitchat
+```
+
+### 4. Development install
+
+```bash
+uv sync --all-groups
+```
+
+### macOS Bluetooth notes
+
+- Ensure Bluetooth is enabled: **System Settings → Bluetooth**.
+- On first launch, macOS prompts your terminal emulator (Terminal, iTerm2, etc.) for Bluetooth access. Click **Allow**.
+- If the prompt was previously dismissed: **System Settings → Privacy & Security → Bluetooth** → enable your terminal application.
+- BLE Central scanning and GATT peripheral advertising are both supported on Apple Silicon and Intel Macs with built-in Bluetooth hardware.
+- LAN transport requires no special configuration.
 
 ---
 
@@ -177,7 +350,7 @@ The TUI opens with:
 | `/help` | `/help` | Show help screen (`F1`) |
 | `/exit` | `/exit` | Quit BitChat |
 
-**Keyboard shortcuts** (all remappable in Settings):
+**Keyboard shortcuts** (all remappable in Settings `F3`):
 
 | Key | Action |
 |---|---|
@@ -223,7 +396,438 @@ The TUI opens with:
 
 ---
 
-## Project structure
+## Architecture
+
+```mermaid
+graph TD
+    A[TUI — Textual App] --> B[Session Coordinator]
+    B --> C[Mesh Router]
+    C --> D[Protocol — Packet / Framing / Fragmentation]
+    D --> E{Transport}
+    E --> F[BLE — Bleak / WinRT]
+    E --> G[LAN — UDP + TCP]
+    B --> H[Crypto — Noise XX / Ed25519 / X25519]
+```
+
+| Layer | Modules |
+|---|---|
+| Terminal UI | `tui/` — Textual app, widgets, modals, autocomplete |
+| Orchestration | `app/` — `SessionCoordinator`, `Application`, config |
+| Mesh routing | `mesh/` — `MeshRouter`, deduplication, store-and-forward |
+| Cryptography | `crypto/` — Noise XX, Ed25519, X25519, AES-GCM, HKDF, PBKDF2 |
+| Protocol | `protocol/` — packet encoding/decoding, fragmentation, reassembly |
+| Transport | `transport/` + `ble/` + `network/` — BLE and LAN backends |
+
+---
+
+## Transports
+
+### Bluetooth Low Energy
+
+- **Central** — scans for peers advertising the BitChat GATT service UUID
+- **Peripheral / GATT server** — advertises and accepts inbound connections
+- Automatic MTU fragmentation: packets > 500 B split into ≤ 150 B fragments, paced at 20 ms intervals
+- Platform note: GATT peripheral advertising requires hardware and driver support. On some Windows configurations the radio supports Central scanning but GATT peripheral hosting is not available to third-party applications. BitChat detects this and offers a LAN fallback — Central scanning continues regardless.
+
+### LAN / Wi-Fi
+
+- **UDP discovery** (port 41234) — zero-config broadcast beacons (`BC_DISCOVER_V1`), 10 pkts/s rate limit, 30 s peer TTL
+- **Framed TCP** (port 41235) — 8-byte length-prefix framing (`BC\x01\x00` magic + 4-byte big-endian length), 64 KB frame limit
+- Supports up to 32 concurrent peer connections
+
+### Runtime switching
+
+Switch transport at any time: `/transport lan` or `/transport bluetooth` (also via Settings `F3`).
+Switching generates a fresh ephemeral identity and tears down all active sessions — previous sessions are not linkable to the new transport identity.
+
+---
+
+## Cryptography
+
+```
+Ed25519 keypair  ──── identity / signatures
+     │
+     ▼
+Noise XX  (Noise_XX_25519_ChaChaPoly_SHA256)
+  ├── X25519        key agreement
+  ├── SHA-256       Noise hash / chaining
+  ├── HKDF-SHA256   key derivation within handshake
+  └── ChaCha20-Poly1305  session AEAD (1024-entry replay window)
+
+Legacy / channel encryption
+  ├── AES-256-GCM   direct-message legacy path
+  └── PBKDF2-HMAC-SHA256  channel key derivation
+```
+
+All key material is generated locally. No key escrow. No third-party servers.
+Identity persists to `~/.bitchat/identity.json` (mode `0600` on POSIX; restricted ACL on Windows). This is access control, not encryption of the key file.
+
+> See [`docs/security/CRYPTOGRAPHY.md`](docs/security/CRYPTOGRAPHY.md) and [`docs/security/NOISE.md`](docs/security/NOISE.md) for detailed protocol documentation.
+
+---
+
+## Platform Support
+
+| Platform | Install | BLE Central | BLE Peripheral | LAN | Notes |
+|---|:---:|:---:|:---:|:---:|---|
+| Windows 10 / 11 | ✓ | ✓ | Hardware/driver dependent | ✓ | WinRT Bluetooth stack; GATT peripheral mode depends on driver/adapter |
+| Linux (BlueZ) | ✓ | ✓ | ✓ | ✓ | Requires BlueZ and D-Bus daemon running; standard user permissions |
+| macOS 12+ | ✓ | ✓ | ✓ | ✓ | Requires terminal Bluetooth privacy permission in System Settings |
+
+**Physical two-machine validation** — automated integration tests (including two-node Noise XX over simulated BLE and over framed TCP) pass in CI. Real over-the-air validation across two separate physical machines is not yet confirmed.
+
+---
+
+## Troubleshooting
+
+### Python / Environment
+
+---
+
+#### `python` command not found
+
+**What it means**
+
+Python is not on your PATH, or the command differs by platform.
+
+**Try**
+
+1. **Windows:** Use `py` instead of `python`. The Windows Python Launcher (`py`) is installed with official Python installers.
+   ```powershell
+   py --version
+   py -3.12 --version
+   ```
+2. **Linux / macOS:** Use `python3` or `python3.12`.
+   ```bash
+   python3 --version
+   ```
+3. Confirm Python is installed at all: check **Windows Settings → Apps**, or run `where python` (Windows) / `which python3` (Linux/macOS).
+4. Reinstall Python from [python.org](https://www.python.org/) and ensure "Add to PATH" is checked during setup.
+
+---
+
+#### Python version mismatch
+
+**What it means**
+
+BitChat requires Python 3.12 or 3.13. Older versions will fail during install or at import time.
+
+**Try**
+
+1. Check your version: `python --version` or `py --version`.
+2. Install Python 3.12+ from [python.org](https://www.python.org/downloads/).
+3. If multiple versions are installed, create the venv explicitly with the correct one:
+   ```bash
+   py -3.12 -m venv .venv          # Windows
+   python3.12 -m venv .venv         # Linux / macOS
+   ```
+4. With `uv`, it selects the correct Python automatically based on `pyproject.toml`.
+
+---
+
+#### PowerShell execution policy blocks `.venv\Scripts\Activate.ps1`
+
+**What it means**
+
+Windows PowerShell may block running unsigned scripts by default.
+
+**Error example:**
+```
+.venv\Scripts\Activate.ps1 cannot be loaded because running scripts is disabled on this system.
+```
+
+**Try**
+
+1. Allow scripts for the current user only (safe, does not affect system policy):
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+   ```
+2. Then activate again:
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
+3. Alternatively, use `uv run bitchat` which bypasses this entirely.
+
+---
+
+#### `pip install -e .` fails with dependency errors
+
+**Try**
+
+1. Ensure your venv is activated before running pip.
+2. Upgrade pip first:
+   ```bash
+   python -m pip install --upgrade pip
+   ```
+3. If a specific dependency fails on Linux, check that build tools are present:
+   ```bash
+   sudo apt install -y build-essential python3.12-dev   # Ubuntu/Debian
+   ```
+4. If `bleak` fails to install on Windows, ensure you are on Python 3.12 and Windows 10+.
+
+---
+
+### Windows — Bluetooth
+
+---
+
+#### Bluetooth adapter unavailable
+
+**What it means**
+
+BitChat could not find a Bluetooth adapter on this machine, or the adapter is disabled.
+
+**Try**
+
+1. Open **Settings → Bluetooth & devices** and verify Bluetooth is toggled ON.
+2. Check Device Manager for the Bluetooth adapter. If it shows a yellow warning icon, reinstall or update the driver.
+3. Verify the adapter is not blocked by Airplane Mode (**Settings → Network & internet → Airplane mode**).
+4. If using a USB Bluetooth dongle, try unplugging and re-inserting it.
+
+---
+
+#### GATT service advertising failed with status 3
+
+**What it means**
+
+This is the most commonly encountered Windows BLE limitation. The exact error raised internally is:
+
+```
+GATT service advertising failed with status 3 (Aborted)
+```
+
+Windows reports `IsPeripheralRoleSupported = True` at the radio level (this is a hardware capability flag), but `GattServiceProvider.RequestAccess()` returns `Allowed` and `StartAdvertising()` nonetheless aborts with status 3. This is a driver/stack restriction — the adapter can receive BLE, but the Windows Bluetooth Host stack does not grant third-party applications GATT host access on certain hardware/driver combinations.
+
+**This has been confirmed on:**
+- Intel Wi-Fi 6E AX211 (USB VID 8087 / PID 0033), driver 23.40.0.2 and 24.70.0.4
+
+**What BitChat does**
+
+BitChat detects this condition automatically. The BLE warning dialog appears with three options:
+
+- **Retry Adapter** — re-checks capabilities and retries BLE startup
+- **Continue with LAN** — switches to LAN / Wi-Fi transport (peers on the same network are discovered via UDP)
+- **Continue Offline** — stays offline
+
+BLE Central scanning (discovering nearby BitChat nodes) **remains active** regardless of GATT failure.
+
+**Try**
+
+1. Click **Continue with LAN** to use Wi-Fi transport without Bluetooth.
+2. Update your Bluetooth driver via **Device Manager → Bluetooth → Update driver** or from your laptop manufacturer's support page.
+3. Check Windows Update for optional driver updates (**Settings → Windows Update → Advanced options → Optional updates**).
+4. If Peripheral mode is not required, BLE Central scanning continues normally — no action needed.
+
+**If it still fails**
+
+This is a known limitation of certain Intel adapters on Windows. It is not a bug in BitChat. Use LAN transport as the primary transport on affected hardware.
+
+---
+
+#### BLE Central scanning finds no peers
+
+**What it means**
+
+BitChat is scanning but no other nodes appear.
+
+**Try**
+
+1. Ensure at least one other BitChat instance is running on another device nearby with BLE enabled.
+2. Verify the remote device is within BLE range (typically 5–30 m without obstructions).
+3. Ensure neither device is in Airplane Mode.
+4. Try `/scan` to trigger an explicit discovery cycle.
+5. On Windows, check that the Bluetooth service is running: open **Services** (`services.msc`) and verify **Bluetooth Support Service** is started.
+
+---
+
+#### Windows Firewall blocking LAN
+
+**What it means**
+
+Windows Firewall may block UDP (port 41234) or TCP (port 41235) traffic between nodes.
+
+**Try**
+
+1. When BitChat first runs, Windows may show a Firewall prompt — click **Allow**.
+2. If the prompt was dismissed, add rules manually:
+   ```powershell
+   # Allow BitChat UDP discovery (inbound)
+   netsh advfirewall firewall add rule name="BitChat UDP" protocol=UDP dir=in localport=41234 action=allow
+
+   # Allow BitChat TCP connections (inbound)
+   netsh advfirewall firewall add rule name="BitChat TCP" protocol=TCP dir=in localport=41235 action=allow
+   ```
+3. Verify rules were added: **Windows Defender Firewall → Advanced Settings → Inbound Rules**.
+
+---
+
+### Linux — Bluetooth
+
+---
+
+#### BlueZ not found / `bluetoothd` not running
+
+**What it means**
+
+The Bluetooth daemon is not installed or not started.
+
+**Try**
+
+1. Install and start BlueZ:
+   ```bash
+   sudo apt install -y bluez dbus        # Ubuntu/Debian
+   sudo dnf install -y bluez             # Fedora
+   sudo pacman -S bluez bluez-utils      # Arch
+   sudo systemctl enable --now bluetooth
+   ```
+2. Verify the daemon is running:
+   ```bash
+   systemctl status bluetooth
+   ```
+
+---
+
+#### Permission denied accessing Bluetooth adapter
+
+**What it means**
+
+Your user account does not have permission to interact with the Bluetooth subsystem.
+
+**Try**
+
+1. Add your user to the `bluetooth` group:
+   ```bash
+   sudo usermod -aG bluetooth $USER
+   ```
+2. Log out and back in (or reboot) for the group change to take effect.
+3. Verify group membership: `groups $USER`.
+4. If the problem persists, check `/etc/dbus-1/system.d/bluetooth.conf` for policy restrictions.
+
+---
+
+#### Bluetooth adapter software-blocked
+
+**What it means**
+
+`rfkill` has blocked the adapter (common after suspend/hibernate or on laptops with hardware Bluetooth switches).
+
+**Try**
+
+```bash
+rfkill list bluetooth
+rfkill unblock bluetooth
+bluetoothctl power on
+```
+
+---
+
+#### Linux Firewall blocking LAN
+
+**What it means**
+
+`ufw`, `firewalld`, or `iptables` may drop UDP or TCP traffic on ports 41234 / 41235.
+
+**Try**
+
+**ufw:**
+```bash
+sudo ufw allow 41234/udp comment "BitChat discovery"
+sudo ufw allow 41235/tcp comment "BitChat LAN"
+```
+
+**firewalld:**
+```bash
+sudo firewall-cmd --add-port=41234/udp --permanent
+sudo firewall-cmd --add-port=41235/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+---
+
+### macOS — Bluetooth
+
+---
+
+#### Bluetooth permission denied
+
+**What it means**
+
+macOS has not granted your terminal application access to Bluetooth.
+
+**Try**
+
+1. On first launch a system prompt appears — click **Allow**.
+2. If previously denied: **System Settings → Privacy & Security → Bluetooth** → find your terminal (Terminal.app, iTerm2, Ghostty, etc.) and enable it.
+3. If the app does not appear in the list, try launching BitChat once more to trigger the permission request.
+
+---
+
+### LAN — Peer discovery and connectivity
+
+---
+
+#### Peer not discovered via LAN
+
+**What it means**
+
+UDP broadcast beacons (port 41234) are not reaching the other node.
+
+**Try**
+
+1. Verify both nodes are on the **same subnet** (e.g. both connected to the same router, not one on Wi-Fi and one on a separate VLAN).
+2. Check whether your router or access point has **client/AP isolation** enabled — this blocks direct broadcast traffic between wireless clients. Disable it in your router's settings if possible.
+3. Check your local firewall on both machines (see Windows/Linux firewall sections above).
+4. VPNs can create virtual network interfaces that intercept or misroute broadcast traffic. Disconnect your VPN and test again.
+5. Run `/scan` to force an active discovery cycle.
+
+---
+
+#### TCP connection refused (LAN)
+
+**What it means**
+
+The peer's TCP listener on port 41235 is not accepting connections.
+
+**Error pattern:** `Connection failed: refused`
+
+**Try**
+
+1. Confirm the remote peer has BitChat running and LAN transport is active (`/status`).
+2. Check that port 41235 is not blocked on the remote machine's firewall (see firewall sections above).
+3. Ensure the peer's LAN transport started successfully — if they are using BLE only, they will not be listening on TCP.
+
+---
+
+#### Peer discovered but session does not establish
+
+**What it means**
+
+UDP discovery succeeded (you see the peer in the sidebar) but the Noise XX handshake does not complete.
+
+**Try**
+
+1. Confirm both peers are running the same protocol version (check `/status` for version mismatch warnings).
+2. Check for TCP connection issues — try `/connect <ip>:41235` directly.
+3. Ensure neither side is behind a strict NAT or firewall that blocks TCP inbound on port 41235.
+4. Restart BitChat on both ends to clear any stale session state.
+
+---
+
+#### LAN peers stop appearing after some time
+
+**What it means**
+
+Peers are pruned from the discovery table after 30 seconds of no beacons. The remote node may have lost network connectivity, changed IP, or exited.
+
+**Try**
+
+1. Verify the remote peer is still running: ask them to type `/status`.
+2. If their IP changed (e.g. DHCP lease renewed), they will re-announce automatically within 30 s.
+3. Run `/scan` to force a discovery refresh.
+
+---
+
+## Project Structure
 
 ```
 src/bitchat/
@@ -273,44 +877,6 @@ uv run ruff format --check .
 ```
 
 **658 tests** covering protocol, crypto, BLE mocks, LAN, mesh routing, TUI lifecycle, and integration scenarios. CI runs on Python 3.12 and 3.13 via GitHub Actions on every push and pull request.
-
----
-
-## Platform setup notes
-
-<details>
-<summary>Linux (BlueZ)</summary>
-
-```bash
-# Debian / Ubuntu
-sudo apt update && sudo apt install -y bluez dbus
-
-# Arch
-sudo pacman -S bluez bluez-utils
-
-sudo systemctl enable --now bluetooth
-sudo usermod -aG bluetooth $USER
-rfkill unblock bluetooth
-```
-
-</details>
-
-<details>
-<summary>macOS</summary>
-
-Allow Bluetooth access for your terminal emulator when macOS prompts on first launch.
-If previously denied: **System Settings → Privacy & Security → Bluetooth** → enable your terminal.
-
-</details>
-
-<details>
-<summary>Windows</summary>
-
-Enable Bluetooth in **Settings → Bluetooth & devices**.
-BitChat uses native WinRT APIs — no extra drivers required.
-If GATT peripheral advertising fails (status 3 / Aborted), the BLE warning modal offers a LAN fallback. Central scanning continues regardless.
-
-</details>
 
 ---
 
