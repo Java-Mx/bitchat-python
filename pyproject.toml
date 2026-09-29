@@ -46,6 +46,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.8",
     "pyright>=1.1.414",
+    "pyinstaller>=6.10.0",
 ]
 
 [tool.pytest.ini_options]
@@ -63,6 +64,8 @@ exclude = ["tools/"]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH", "RUF"]
 
 [tool.pyright]
+include = ["src", "tests", "packaging"]
+exclude = ["dist", "build", ".venv"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"

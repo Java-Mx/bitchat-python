@@ -28,9 +28,15 @@ BitChat Python is an asynchronous terminal client implementing the [BitChat](htt
 ## Contents
 
 - [Quick Start](#quick-start)
-- [Installation — Windows](#installation--windows)
-- [Installation — Linux](#installation--linux)
-- [Installation — macOS](#installation--macos)
+- [Installation](#installation)
+  - [Windows](#windows)
+    - [WinGet](#winget)
+    - [GitHub Release Installer](#github-release-installer)
+    - [Source & Developer Install](#source--developer-install)
+  - [Linux](#linux)
+  - [macOS](#macos)
+- [Verify Installation](#verify-installation)
+- [Troubleshooting Installation](#troubleshooting-installation)
 - [Commands](#commands)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -47,90 +53,101 @@ BitChat Python is an asynchronous terminal client implementing the [BitChat](htt
 
 ## Quick Start
 
+### Windows (Fastest)
+
+Download and run the standalone installer from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases):
+```powershell
+# Or via WinGet once published upstream:
+winget install Java-Mx.BitChat
+
+# Launch immediately:
+bitchat
+```
+
+### Linux & macOS (Python / Source)
+
 ```bash
 git clone https://github.com/Java-Mx/bitchat-python.git
 cd bitchat-python
-```
-
-Then follow the guide for your OS:
-
-- [Windows](#installation--windows) — PowerShell, `py` launcher, WinRT BLE
-- [Linux](#installation--linux) — venv, BlueZ, socket permissions
-- [macOS](#installation--macos) — venv, Bluetooth permission prompt
-
-Once installed, launch BitChat:
-
-```bash
-uv run bitchat          # interactive TUI (recommended)
-uv run bitchat --cli    # headless / scripted mode
-```
-
-On first launch an Ed25519 identity is generated and saved to `~/.bitchat/identity.json`.
-
----
-
-## Installation — Windows
-
-**Requirements:** Windows 10 version 1903+ or Windows 11, Python 3.12 or 3.13.
-
-### 1. Install Python
-
-Download the official installer from [python.org](https://www.python.org/downloads/). During setup, tick **"Add Python to PATH"**.
-
-Verify:
-
-```powershell
-py --version
-# or
-python --version
-```
-
-Expected: `Python 3.12.x` or `Python 3.13.x`. If `python` is not found, use `py` (the Windows Python Launcher).
-
-### 2. Clone the repository
-
-```powershell
-git clone https://github.com/Java-Mx/bitchat-python.git
-cd bitchat-python
-```
-
-### 3a. Install with `uv` (recommended)
-
-[`uv`](https://github.com/astral-sh/uv) handles Python versions, virtual environments, and dependencies automatically.
-
-```powershell
-# Install uv
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Install dependencies and run
 uv sync
 uv run bitchat
 ```
 
-### 3b. Install with standard venv + pip
+---
 
+## Installation
+
+BitChat provides dedicated distribution channels tailored for each platform:
+- **Windows:** Self-contained native installer and WinGet package (no separate Python or venv required).
+- **Linux:** Native Python / pip / virtual environment (BlueZ D-Bus integration).
+- **macOS:** Native Python / pip / virtual environment (CoreBluetooth integration).
+
+*(Note: WinGet is Windows-only and does not install Linux or macOS packages).*
+
+---
+
+### Windows
+
+#### WinGet
+
+> [!NOTE]
+> **Publication Status:** Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.1.0/`](manifests/j/Java-Mx/BitChat/0.1.0/).
+> The public command `winget install Java-Mx.BitChat` becomes available once the manifest pull request is merged into Microsoft's community repository ([microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)).
+> Until upstream review is complete, use the **GitHub Release Installer** below or install directly from the local repository manifest.
+
+Once accepted into Microsoft's official WinGet repository:
 ```powershell
-# Create virtual environment
-py -3.12 -m venv .venv
-
-# Activate (PowerShell)
-.\.venv\Scripts\Activate.ps1
-
-# Upgrade pip and install
-python -m pip install --upgrade pip
-pip install -e .
-
-# Launch
-bitchat
-# or: python -m bitchat
+winget install Java-Mx.BitChat
 ```
 
-### 4. Development install
+To test or install directly from this repository's local manifest:
+```powershell
+winget install --manifest manifests/j/Java-Mx/BitChat/0.1.0/
+```
+
+**Upgrade:**
+```powershell
+winget upgrade Java-Mx.BitChat
+```
+
+**Uninstall:**
+```powershell
+winget uninstall Java-Mx.BitChat
+```
+
+#### GitHub Release Installer
+
+The self-contained Windows executable installer bundles the Python runtime, BitChat package, Bleak Bluetooth stack, and native cryptographic libraries into a single setup program. No Python installation or virtual environment is needed.
+
+1. Download `BitChat-<version>-windows-x64.exe` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases).
+2. Run the installer. It supports both an interactive setup wizard and silent unattended installations.
+3. The installer automatically adds BitChat to your user `PATH`.
+4. Open a PowerShell or Command Prompt terminal and launch:
+   ```powershell
+   bitchat
+   ```
+
+#### Source & Developer Install
+
+If you prefer developing on Windows or running from source:
+
+**Requirements:** Windows 10 version 1903+ or Windows 11, Python 3.12 or 3.13.
 
 ```powershell
-uv sync --all-groups
-# or with pip:
-pip install -e ".[dev]"
+# Clone the repository
+git clone https://github.com/Java-Mx/bitchat-python.git
+cd bitchat-python
+
+# Using uv (recommended)
+uv sync
+uv run bitchat
+
+# Or with pip in a virtual environment:
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -e .
+bitchat
 ```
 
 ### Windows Bluetooth notes
@@ -326,6 +343,78 @@ uv sync --all-groups
 - If the prompt was previously dismissed: **System Settings → Privacy & Security → Bluetooth** → enable your terminal application.
 - BLE Central scanning and GATT peripheral advertising are both supported on Apple Silicon and Intel Macs with built-in Bluetooth hardware.
 - LAN transport requires no special configuration.
+
+---
+
+## Verify Installation
+
+Verify that BitChat is discoverable on your PATH and outputs the version:
+
+```bash
+bitchat --version
+# Expected: bitchat 0.1.0
+
+bitchat --help
+# Displays command-line options (--cli, --tui)
+```
+
+To test running in headless/scripted CLI mode:
+```bash
+bitchat --cli
+```
+
+---
+
+## Troubleshooting Installation
+
+### 1. `winget` command not found
+- **What it means:** The Windows Package Manager client is not installed or not in PATH.
+- **Solution:** Windows Package Manager comes standard with Windows 11 and modern Windows 10 (build 17763+). If missing, install **App Installer** from the Microsoft Store, or download the latest `.msixbundle` installer directly from [microsoft/winget-cli Releases](https://github.com/microsoft/winget-cli/releases).
+
+### 2. Package not found (`Java-Mx.BitChat`)
+- **What it means:** The package manifest has been generated locally and is pending submission/merging into Microsoft's public `microsoft/winget-pkgs` repository.
+- **Solution:**
+  - Fallback 1: Download `BitChat-<version>-windows-x64.exe` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) and run setup.
+  - Fallback 2: Install directly from the local repository manifest:
+    ```powershell
+    winget install --manifest manifests/j/Java-Mx/BitChat/0.1.0/
+    ```
+
+### 3. Installation failed
+- **What it means:** The installer was interrupted, lacked write permissions, or had insufficient disk space.
+- **Solution:**
+  - Ensure you have write permissions to `%LOCALAPPDATA%\Programs\BitChat`.
+  - If installing machine-wide with `/ALLUSERS`, open PowerShell as Administrator.
+  - Run the installer with logging to diagnose setup failures:
+    ```powershell
+    .\BitChat-<version>-windows-x64.exe /LOG="install.log"
+    ```
+
+### 4. Executable not found after installation (`bitchat` not recognized)
+- **What it means:** The installer added BitChat to your user `PATH`, but existing terminal windows keep their snapshot of environment variables.
+- **Solution:**
+  - Close and reopen your PowerShell or CMD terminal window.
+  - Or refresh environment variables in your current PowerShell session immediately without restarting:
+    ```powershell
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
+    ```
+
+### 5. Windows SmartScreen / Code-Signing Situation
+- **What it means:** BitChat is an open-source project and installers are currently compiled without an expensive commercial EV Authenticode certificate. Windows SmartScreen displays a warning ("Windows protected your PC / Unknown Publisher").
+- **Solution:**
+  - Click **More info**, then click **Run anyway**.
+  - Do not disable Windows Defender or SmartScreen system-wide.
+  - You can independently verify the cryptographic integrity of the installer by checking the SHA-256 hash:
+    ```powershell
+    Get-FileHash .\BitChat-<version>-windows-x64.exe -Algorithm SHA256
+    ```
+    Verify that the hash matches `BitChat-<version>-windows-x64.exe.sha256` published in the release assets.
+
+### 6. Firewall & Bluetooth Low Energy (BLE) Permissions
+- **What it means:** Windows blocked incoming network sockets or Bluetooth is disabled.
+- **Solution:**
+  - Turn Bluetooth **On** in Windows Settings → **Bluetooth & devices**.
+  - If Windows Defender Firewall shows an alert when launching BitChat, click **Allow access** for Private networks to permit LAN transport peer discovery (UDP 41234, TCP 41235).
 
 ---
 

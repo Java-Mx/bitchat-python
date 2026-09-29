@@ -3,12 +3,21 @@
 import argparse
 import sys
 
+from bitchat import __version__
 from bitchat.app.application import Application
 
 
 def main() -> None:
     """Bootstrap and run the BitChat application."""
-    parser = argparse.ArgumentParser(description="BitChat BLE Messenger")
+    parser = argparse.ArgumentParser(
+        prog="bitchat", description="BitChat BLE Messenger"
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     parser.add_argument(
         "--cli",
         action="store_true",

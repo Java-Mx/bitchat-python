@@ -42,3 +42,60 @@ jobs:
           for artifact in wheels + sdists:
               print(f'  - {artifact}')
           "
+
+  package-windows:
+    name: Build & Validate Windows Package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (uv sync --all-groups)
+        run: uv sync --all-groups
+
+      - name: Setup Inno Setup
+        shell: pwsh
+        run: |
+          if (Get-Command iscc -ErrorAction SilentlyContinue) {
+            Write-Host "ISCC already available on PATH."
+          } elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+            "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          } else {
+            choco install innosetup --no-progress
+            "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+      - name: Build Windows Distributable & WinGet Manifests
+        shell: pwsh
+        run: uv run python packaging/windows/build.py
+
+      - name: Verify Packaging Artifacts
+        shell: pwsh
+        run: |
+          $version = (Get-Content pyproject.toml | Select-String '^version = "(.*)"').Matches.Groups[1].Value
+          $installer = "dist/BitChat-$version-windows-x64.exe"
+          $shaFile = "dist/BitChat-$version-windows-x64.exe.sha256"
+          if (-not (Test-Path $installer)) { throw "Expected installer $installer was not created!" }
+          if (-not (Test-Path $shaFile)) { throw "Expected checksum file $shaFile was not created!" }
+          $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
+          $recordedHash = (Get-Content $shaFile).Split(' ')[0].Trim()
+          if ($hash -ne $recordedHash) { throw "Installer SHA-256 mismatch: $hash vs $recordedHash" }
+          Write-Host "Verification succeeded for $installer ($hash)"
+
+      - name: Upload Windows Packaging Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-distributable
+          path: |
+            dist/BitChat-*-windows-x64.exe
+            dist/BitChat-*-windows-x64.exe.sha256
+            manifests/
+            packaging/windows/winget/
