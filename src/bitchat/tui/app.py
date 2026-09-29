@@ -434,6 +434,7 @@ class BitChatApp(App[None]):
                     ),
                     peripheral_failure=bool(telemetry.get("peripheral_error")),
                     peripheral_supported=bool(telemetry.get("peripheral_supported")),
+                    lan_available=True,
                 ),
                 self._on_ble_modal_dismissed,
             )
@@ -480,13 +481,24 @@ class BitChatApp(App[None]):
                     central_active=(
                         radio_available and telemetry.get("scanner_status") == "Active"
                     ),
+                    lan_available=True,
                 ),
                 self._on_ble_modal_dismissed,
             )
 
-    def _on_ble_modal_dismissed(self, retry: bool | None) -> None:
-        if retry:
+    def _on_ble_modal_dismissed(self, result: str | None) -> None:
+        if result == "retry":
             self._spawn_task(self._handle_ble_retry())
+        elif result == "lan":
+            self._handle_lan_fallback()
+
+    def _handle_lan_fallback(self) -> None:
+        """Switch to LAN transport after BLE failure, reusing existing switch path."""
+        chat = self.query_one(ChatView)
+        chat.add_system_message(
+            "Switching to LAN / Wi-Fi transport. Discovering local peers..."
+        )
+        self._handle_transport_switch("lan")
 
     def _resolve_peer_address(self, target: str) -> str | None:
         """Resolve a nickname, peer ID prefix, or discovered device

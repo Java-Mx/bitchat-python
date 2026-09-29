@@ -1722,3 +1722,184 @@ async def test_phase11_settings_transport_selection_and_switch(
 
         assert test_coordinator.active_transport_name == "bluetooth"
         assert "BLE Mesh" in sidebar.border_title
+
+
+# ---------------------------------------------------------------------------
+# BLE → LAN fallback modal tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ble_error_modal_shows_lan_button_when_lan_available() -> None:
+    """BLEErrorModal renders 'Continue with LAN' when lan_available=True."""
+    modal = BLEErrorModal(
+        error_message="GATT failed",
+        bluetooth_available=True,
+        peripheral_failure=True,
+        lan_available=True,
+    )
+    app = BitChatApp()
+    async with app.run_test() as pilot:
+        await app.push_screen(modal)
+        await pilot.pause()
+        assert isinstance(app.screen, BLEErrorModal)
+        buttons = {b.id for b in app.screen.query(Button)}
+        assert "btn-ble-lan" in buttons
+        assert "btn-ble-retry" in buttons
+        assert "btn-ble-close" in buttons
+
+
+@pytest.mark.asyncio
+async def test_ble_error_modal_hides_lan_button_when_lan_unavailable() -> None:
+    """BLEErrorModal omits 'Continue with LAN' when lan_available=False."""
+    modal = BLEErrorModal(
+        error_message="GATT failed",
+        bluetooth_available=True,
+        peripheral_failure=True,
+        lan_available=False,
+    )
+    app = BitChatApp()
+    async with app.run_test() as pilot:
+        await app.push_screen(modal)
+        await pilot.pause()
+        buttons = {b.id for b in app.screen.query(Button)}
+        assert "btn-ble-lan" not in buttons
+        assert "btn-ble-retry" in buttons
+        assert "btn-ble-close" in buttons
+
+
+@pytest.mark.asyncio
+async def test_ble_warning_modal_includes_lan_button(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """BLE peripheral warning modal always includes the LAN fallback button."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        buttons = {b.id for b in app.screen.query(Button)}
+        assert "btn-ble-lan" in buttons, (
+            "LAN button must be present when BLE peripheral fails"
+        )
+        assert "btn-ble-retry" in buttons
+        assert "btn-ble-close" in buttons
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+
+
+@pytest.mark.asyncio
+async def test_continue_with_lan_switches_transport(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """'Continue with LAN' dismisses the modal and switches to LAN transport."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        assert test_coordinator.active_transport_name == "bluetooth"
+
+        await pilot.click("#btn-ble-lan")
+        await pilot.pause(1)
+
+        # Modal must be gone
+        assert not isinstance(app.screen, BLEErrorModal)
+        # Transport must have switched to LAN
+        assert test_coordinator.active_transport_name == "lan"
+        # BLE was NOT faked as successful
+        assert not test_coordinator.active_transport.get_telemetry().get(
+            "advertising_active"
+        )
+
+
+@pytest.mark.asyncio
+async def test_continue_offline_does_not_start_lan(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """'Continue Offline' dismisses the modal without starting LAN."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        await pilot.click("#btn-ble-close")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, BLEErrorModal)
+        # Transport remains bluetooth (no switch happened)
+        assert test_coordinator.active_transport_name == "bluetooth"
+
+
+@pytest.mark.asyncio
+async def test_retry_adapter_still_works_after_modal_changes(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """'Retry Adapter' still retries BLE; transport must stay bluetooth."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test() as pilot:
+        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        await pilot.click("#btn-ble-retry")
+        await pilot.pause(1)
+
+        assert not isinstance(app.screen, BLEErrorModal)
+        # Transport stays bluetooth (retry, not LAN)
+        assert test_coordinator.active_transport_name == "bluetooth"
+
+
+@pytest.mark.asyncio
+async def test_no_connected_via_lan_before_peer_connection(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Status bar must not show 'Connected via LAN' until a real peer connects."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        app._on_coordinator_ble_warning("GATT failed")
+        await pilot.pause()
+        assert isinstance(app.screen, BLEErrorModal)
+
+        await pilot.click("#btn-ble-lan")
+        await pilot.pause(1)
+
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert test_coordinator.active_transport_name == "lan"
+
+        # Gather all chat lines
+        chat_lines = "\n".join(
+            line.text for line in app.query_one("#chat-log", RichLog).lines
+        )
+        # "Connected via LAN" must NOT appear without a real peer handshake
+        assert "Connected via LAN" not in chat_lines
+
+        # Status bar must reflect LAN state, not a fake BLE success
+        status = app.query_one(StatusBar).status_message
+        assert "BLE Central" not in status or "LAN" in status
+
+
+@pytest.mark.asyncio
+async def test_lan_fallback_handler_calls_transport_switch(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """_handle_lan_fallback() routes through _handle_transport_switch('lan')."""
+    app = BitChatApp(coordinator=test_coordinator)
+    calls: list[str] = []
+    original = app._handle_transport_switch
+
+    def _spy(target: str) -> None:
+        calls.append(target)
+        original(target)
+
+    app._handle_transport_switch = _spy  # type: ignore[assignment]
+
+    async with app.run_test() as pilot:
+        app._handle_lan_fallback()
+        await pilot.pause(1)
+
+    assert "lan" in calls, "LAN fallback must invoke _handle_transport_switch('lan')"

@@ -13,8 +13,15 @@ if TYPE_CHECKING:
     from textual.binding import BindingType
 
 
-class BLEErrorModal(ModalScreen[bool]):
-    """Modal dialog displayed when Bluetooth adapter is missing, disabled, or fails."""
+class BLEErrorModal(ModalScreen[str | None]):
+    """Modal dialog displayed when Bluetooth adapter is missing, disabled, or fails.
+
+    Dismiss values
+    --------------
+    ``"retry"``   - user pressed *Retry Adapter*
+    ``"lan"``     - user pressed *Continue with LAN*
+    ``None``      - user pressed *Continue Offline* or dismissed with Escape/Q
+    """
 
     BINDINGS: ClassVar[list[BindingType]] = [
         ("escape", "dismiss_modal", "Close"),
@@ -29,6 +36,7 @@ class BLEErrorModal(ModalScreen[bool]):
         central_active: bool = False,
         peripheral_failure: bool = False,
         peripheral_supported: bool = True,
+        lan_available: bool = True,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -37,6 +45,7 @@ class BLEErrorModal(ModalScreen[bool]):
         self.central_active = central_active
         self.peripheral_failure = peripheral_failure
         self.peripheral_supported = peripheral_supported
+        self.lan_available = lan_available
 
     def compose(self) -> ComposeResult:
         if self.bluetooth_available:
@@ -104,15 +113,23 @@ class BLEErrorModal(ModalScreen[bool]):
 
             with Horizontal(id="ble-error-actions"):
                 yield Button("Retry Adapter", id="btn-ble-retry", classes="action-btn")
+                if self.lan_available:
+                    yield Button(
+                        "Continue with LAN",
+                        id="btn-ble-lan",
+                        classes="action-btn",
+                    )
                 yield Button(
                     "Continue Offline", id="btn-ble-close", classes="action-btn"
                 )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-ble-close":
-            self.dismiss(False)
+            self.dismiss(None)
         elif event.button.id == "btn-ble-retry":
-            self.dismiss(True)
+            self.dismiss("retry")
+        elif event.button.id == "btn-ble-lan":
+            self.dismiss("lan")
 
     def action_dismiss_modal(self) -> None:
-        self.dismiss()
+        self.dismiss(None)
