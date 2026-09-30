@@ -167,3 +167,7 @@ class BaseTransport(ABC):
     @abstractmethod
     def get_telemetry(self) -> dict[str, Any]:
         """Return comprehensive diagnostics telemetry for status reporting."""
+
+    def is_available(self) -> bool:
+        """Return True if the underlying transport medium is available."""
+        return self.state not in (TransportState.UNAVAILABLE, TransportState.DISABLED)

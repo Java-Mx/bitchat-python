@@ -1,4 +1,4 @@
-"""Bluetooth error recovery and hardware diagnosis modal dialog."""
+"""Bluetooth and LAN error recovery and hardware diagnosis modal dialog."""
 
 from __future__ import annotations
 
@@ -14,12 +14,13 @@ if TYPE_CHECKING:
 
 
 class BLEErrorModal(ModalScreen[str | None]):
-    """Modal dialog displayed when Bluetooth adapter is missing, disabled, or fails.
+    """Modal dialog displayed when Bluetooth or LAN transport encounters an error.
 
     Dismiss values
     --------------
-    ``"retry"``   - user pressed *Retry Adapter*
+    ``"retry"``   - user pressed *Retry Adapter* / *Retry LAN*
     ``"lan"``     - user pressed *Continue with LAN*
+    ``"ble"``     - user pressed *Switch to BLE*
     ``None``      - user pressed *Continue Offline* or dismissed with Escape/Q
     """
 
@@ -32,22 +33,70 @@ class BLEErrorModal(ModalScreen[str | None]):
         self,
         error_message: str = "Bluetooth adapter not found or disabled.",
         *,
+        transport: str = "bluetooth",
         bluetooth_available: bool = False,
         central_active: bool = False,
         peripheral_failure: bool = False,
         peripheral_supported: bool = True,
         lan_available: bool = True,
+        ble_available: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.error_message = error_message
+        self.transport = transport.lower().strip()
         self.bluetooth_available = bluetooth_available
         self.central_active = central_active
         self.peripheral_failure = peripheral_failure
         self.peripheral_supported = peripheral_supported
         self.lan_available = lan_available
+        self.ble_available = ble_available
 
     def compose(self) -> ComposeResult:
+        if self.transport == "lan":
+            intro = (
+                "[bold #e6edf3]Local network connectivity is unavailable."
+                "[/bold #e6edf3]\n\n"
+            )
+            guidance = (
+                "[dim #8b949e]BitChat cannot currently use LAN/Wi-Fi transport.\n\n"
+                "Possible solutions:\n"
+                "  1. Ensure your network cable is plugged in or Wi-Fi is connected.\n"
+                "  2. Verify your router or local network configuration.\n"
+                "  3. Click 'Retry LAN' once connectivity is restored."
+                "[/dim #8b949e]\n\n"
+                "[bold #58a6ff]BitChat is operating safely in Offline / Local Mode."
+                "[/bold #58a6ff]"
+            )
+
+            with Vertical(id="ble-error-dialog"):
+                yield Label(
+                    "[bold #f85149]! LAN / Network Connection Lost[/bold #f85149]",
+                    id="ble-error-title",
+                )
+
+                with Vertical(id="ble-error-content"):
+                    yield Static(
+                        intro
+                        + "[#f85149]Details:[/#f85149] [dim #e6edf3]"
+                        + f"{self.error_message}[/dim #e6edf3]\n\n"
+                        + guidance,
+                        classes="ble-error-text",
+                    )
+
+                with Horizontal(id="ble-error-actions"):
+                    if self.ble_available:
+                        yield Button(
+                            "Switch to BLE",
+                            id="btn-lan-ble",
+                            classes="action-btn",
+                        )
+                    yield Button("Retry LAN", id="btn-lan-retry", classes="action-btn")
+                    yield Button(
+                        "Continue Offline", id="btn-lan-close", classes="action-btn"
+                    )
+            return
+
         if self.bluetooth_available:
             intro = (
                 "[bold #e6edf3]Bluetooth radio is ON; "
@@ -124,12 +173,19 @@ class BLEErrorModal(ModalScreen[str | None]):
                 )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-ble-close":
+        if event.button.id in ("btn-ble-close", "btn-lan-close"):
             self.dismiss(None)
-        elif event.button.id == "btn-ble-retry":
+        elif event.button.id in ("btn-ble-retry", "btn-lan-retry", "btn-retry-lan"):
             self.dismiss("retry")
         elif event.button.id == "btn-ble-lan":
             self.dismiss("lan")
+        elif event.button.id in ("btn-lan-ble", "btn-switch-ble"):
+            self.dismiss("ble")
 
     def action_dismiss_modal(self) -> None:
         self.dismiss(None)
+
+
+# Aliases for unified modal screen reuse across transports
+TransportErrorModal = BLEErrorModal
+LANErrorModal = BLEErrorModal

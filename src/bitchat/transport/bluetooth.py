@@ -103,6 +103,22 @@ class BluetoothTransport(BaseTransport):
             return False
         return bool(self.ble_manager.scanner.is_scanning)
 
+    def is_available(self) -> bool:
+        """Return True if Bluetooth hardware is available on the system."""
+        if not self.ble_manager or not self.ble_server:
+            return False
+        adapter = self.ble_manager.adapter_manager.current_info
+        if adapter.is_available:
+            return True
+        if self._uses_injected_test_backend():
+            if (
+                getattr(self.ble_manager.adapter_manager, "_custom_backend", None)
+                is not None
+            ):
+                return adapter.is_available
+            return True
+        return False
+
     def _set_state(self, new_state: TransportState) -> None:
         if self._state != new_state:
             self._state = new_state

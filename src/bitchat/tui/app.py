@@ -50,6 +50,14 @@ class BleErrorReported(Message):
         self.error_message = error_message
 
 
+class LanErrorReported(Message):
+    """LAN network error forwarded from coordinator or transport callbacks."""
+
+    def __init__(self, error_message: str) -> None:
+        super().__init__()
+        self.error_message = error_message
+
+
 class BleWarningReported(Message):
     """BLE capability warning forwarded from transport startup."""
 
@@ -143,6 +151,7 @@ class BitChatApp(App[None]):
             self.coordinator.on_handshake_completed = self._on_coordinator_handshake
             self.coordinator.on_ble_error = self._on_coordinator_ble_error
             self.coordinator.on_ble_warning = self._on_coordinator_ble_warning
+            self.coordinator.on_lan_error = self._on_coordinator_lan_error
 
     def _spawn_task(self, coro: Any) -> asyncio.Task[Any]:
         """Spawn background task and keep reference until completed."""
@@ -261,7 +270,10 @@ class BitChatApp(App[None]):
                     logger.warning("Coordinator start error: %s", e)
                     if hasattr(coord, "ble_status"):
                         coord.ble_status = "unavailable"
-                    self._on_coordinator_ble_error(str(e))
+                    if getattr(coord, "active_transport_name", "") == "lan":
+                        self._on_coordinator_lan_error(str(e))
+                    else:
+                        self._on_coordinator_ble_error(str(e))
                 finally:
                     self._refresh_peer_lists()
 
@@ -313,12 +325,16 @@ class BitChatApp(App[None]):
 
         # Truthful state reporting
         if connected_addrs:
-            medium_label = "LAN / Wi-Fi Mesh" if trans_name == "lan" else "Local Mesh"
-            connection_label = (
-                f"TCP active ({len(connected_addrs)} connections)"
-                if trans_name == "lan"
-                else f"Connected ({len(connected_addrs)} peers)"
-            )
+            if trans_name == "lan":
+                iface = telemetry.get("interface", "")
+                iface_label = (
+                    f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
+                )
+                medium_label = f"{iface_label} Mesh"
+                connection_label = f"TCP active ({len(connected_addrs)} connections)"
+            else:
+                medium_label = "Local Mesh"
+                connection_label = f"Connected ({len(connected_addrs)} peers)"
             status_bar.mesh_status = f"● {connection_label} • {medium_label}"
         elif trans_name == "bluetooth" and telemetry.get("adapter_state") == "On":
             central_active = telemetry.get("scanner_status") == "Active"
@@ -339,15 +355,18 @@ class BitChatApp(App[None]):
                 status_lbl = "Bluetooth Available"
             status_bar.mesh_status = f"● {status_lbl}"
         elif self.coordinator.ble_status in ("active", "ready", "scanning"):
-            status_lbl = (
-                "LAN / Wi-Fi Ready • Local Mesh"
-                if trans_name == "lan"
-                else (
+            if trans_name == "lan":
+                iface = telemetry.get("interface", "")
+                iface_label = (
+                    f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
+                )
+                status_lbl = f"{iface_label} Ready • Local Mesh"
+            else:
+                status_lbl = (
                     "BLE Central Scanning"
                     if telemetry.get("scanner_status") == "Active"
                     else "BLE Ready"
                 )
-            )
             status_bar.mesh_status = f"● {status_lbl}"
         elif trans_name == "bluetooth" and telemetry.get("adapter_state") == "Off":
             status_bar.mesh_status = "✕ BLE Offline • Bluetooth Disabled"
@@ -358,19 +377,31 @@ class BitChatApp(App[None]):
             status_bar.mesh_status = "✕ BLE Offline • Bluetooth Unavailable"
         elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
             status_lbl = (
-                "LAN Offline • Network Unavailable"
+                "LAN (offline) • Reason: Local network connection unavailable"
                 if trans_name == "lan"
                 else "BLE Offline • Bluetooth Unavailable"
             )
             status_bar.mesh_status = f"✕ {status_lbl}"
-        elif self.coordinator.ble_status in ("offline", "checking"):
+        elif self.coordinator.ble_status == "offline":
+            status_lbl = (
+                "LAN (offline) • Reason: Local network connection unavailable"
+                if trans_name == "lan"
+                else f"◌ Initializing {trans_name.upper()}..."
+            )
+            status_bar.mesh_status = (
+                f"✕ {status_lbl}" if trans_name == "lan" else status_lbl
+            )
+        elif self.coordinator.ble_status == "checking":
             status_bar.mesh_status = f"◌ Initializing {trans_name.upper()}..."
         else:
-            status_lbl = (
-                "LAN / Wi-Fi Ready • Local Mesh"
-                if trans_name == "lan"
-                else "BitChat Ready • Local Mesh"
-            )
+            if trans_name == "lan":
+                iface = telemetry.get("interface", "")
+                iface_label = (
+                    f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
+                )
+                status_lbl = f"{iface_label} Ready • Local Mesh"
+            else:
+                status_lbl = "BitChat Ready • Local Mesh"
             status_bar.mesh_status = f"● {status_lbl}"
 
         self._update_target_status()
@@ -401,13 +432,29 @@ class BitChatApp(App[None]):
         else:
             status_bar.target_status = f"Target: {self.active_context}"
 
+    def _safe_post_message(self, message: Message) -> None:
+        """Post a Textual message safely across threads and lifecycle states."""
+        import threading
+
+        try:
+            if getattr(self, "_thread_id", None) == threading.get_ident():
+                self.post_message(message)
+            else:
+                self.call_from_thread(self.post_message, message)
+        except Exception as e:
+            logger.debug("Failed to post message %s: %s", message, e)
+
     def _on_coordinator_ble_error(self, err_msg: str) -> None:
         """Queue BLE failures for handling inside the active Textual app context."""
-        self.post_message(BleErrorReported(err_msg))
+        self._safe_post_message(BleErrorReported(err_msg))
 
     def _on_coordinator_ble_warning(self, warning: str) -> None:
         """Queue non-fatal BLE role limitations inside the Textual app context."""
-        self.post_message(BleWarningReported(warning))
+        self._safe_post_message(BleWarningReported(warning))
+
+    def _on_coordinator_lan_error(self, err_msg: str) -> None:
+        """Queue LAN failures for handling inside the active Textual app context."""
+        self._safe_post_message(LanErrorReported(err_msg))
 
     def on_ble_warning_reported(self, event: BleWarningReported) -> None:
         """Present a BLE role limitation without marking Bluetooth offline."""
@@ -486,11 +533,42 @@ class BitChatApp(App[None]):
                 self._on_ble_modal_dismissed,
             )
 
+    def on_lan_error_reported(self, event: LanErrorReported) -> None:
+        """Present a coordinator LAN failure from the Textual message loop."""
+        chat = self.query_one(ChatView)
+        chat.add_error_message(f"LAN Error: {event.error_message}")
+        guidance = (
+            "Local network connectivity is unavailable. "
+            "BitChat cannot currently use LAN/Wi-Fi transport."
+        )
+        chat.add_system_message(guidance)
+        self._refresh_peer_lists()
+        if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+            ble_available = self._is_ble_available()
+            self.push_screen(
+                BLEErrorModal(
+                    error_message=event.error_message,
+                    transport="lan",
+                    ble_available=ble_available,
+                ),
+                self._on_lan_modal_dismissed,
+            )
+
     def _on_ble_modal_dismissed(self, result: str | None) -> None:
         if result == "retry":
             self._spawn_task(self._handle_ble_retry())
         elif result == "lan":
             self._handle_lan_fallback()
+        else:
+            self._handle_continue_offline()
+
+    def _on_lan_modal_dismissed(self, result: str | None) -> None:
+        if result == "retry":
+            self._spawn_task(self._handle_lan_retry())
+        elif result in ("ble", "switch_ble"):
+            self._handle_ble_fallback()
+        else:
+            self._handle_continue_offline()
 
     def _handle_lan_fallback(self) -> None:
         """Switch to LAN transport after BLE failure, reusing existing switch path."""
@@ -499,6 +577,56 @@ class BitChatApp(App[None]):
             "Switching to LAN / Wi-Fi transport. Discovering local peers..."
         )
         self._handle_transport_switch("lan")
+
+    def _handle_ble_fallback(self) -> None:
+        """Switch to BLE transport after LAN failure, reusing existing switch path."""
+        chat = self.query_one(ChatView)
+        chat.add_system_message(
+            "Switching to Bluetooth Low Energy transport. Scanning for local peers..."
+        )
+        self._handle_transport_switch("bluetooth")
+
+    async def _handle_lan_retry(self) -> None:
+        """Attempt to re-initialize LAN services and notify user."""
+        chat = self.query_one(ChatView)
+        chat.add_system_message("Retrying LAN initialization...")
+        if self.coordinator:
+            success = await self.coordinator.retry_lan()
+            if success:
+                telemetry = self.coordinator.active_transport.get_telemetry()
+                iface = telemetry.get("interface", "Network")
+                chat.add_system_message(
+                    f"LAN reconnected successfully on {iface}. LAN Mesh Active."
+                )
+                self._refresh_peer_lists()
+            else:
+                err = (
+                    self.coordinator.ble_error_message
+                    or "Local network connection unavailable"
+                )
+                chat.add_error_message(
+                    f"LAN retry failed: {err}. Remaining in offline mode."
+                )
+                self._refresh_peer_lists()
+
+    def _handle_continue_offline(self) -> None:
+        """Leave network transport in a valid offline state without crashing."""
+        if self.coordinator:
+            self.coordinator.ble_status = "offline"
+            if self.coordinator.active_transport_name == "lan":
+                lan_trans = self.coordinator.active_transport
+                pause_fn = getattr(lan_trans, "_pause_lan_services", None)
+                if callable(pause_fn):
+                    self._spawn_task(pause_fn())
+            self._refresh_peer_lists()
+        chat = self.query_one(ChatView)
+        chat.add_system_message("Operating in Offline Mode.")
+
+    def _is_ble_available(self) -> bool:
+        """Check if Bluetooth transport is registered and adapter is available."""
+        if not self.coordinator:
+            return False
+        return self.coordinator.is_ble_available()
 
     def _resolve_peer_address(self, target: str) -> str | None:
         """Resolve a nickname, peer ID prefix, or discovered device
@@ -557,7 +685,7 @@ class BitChatApp(App[None]):
                     self._authenticated_peer_addresses.pop(peer_id, None)
                     self._authenticated_transport_peers.discard(peer_id)
 
-            if status.casefold() != "connected":
+            if peer != "mesh" and status.casefold() != "connected":
                 chat.add_system_message(f"Peer {peer}: {status}")
             self._refresh_peer_lists()
 
@@ -1338,13 +1466,13 @@ class BitChatApp(App[None]):
 
         status = self.coordinator.get_detailed_status()
         if status.get("transport") == "lan":
+            iface = status.get("interface", "Unknown")
+            trans_lbl = f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
             chat.add_system_message("══════════ BitChat LAN Status ══════════")
             chat.add_system_message(
-                f"Transport:         LAN / Wi-Fi ({status.get('state', 'unknown')})"
+                f"Transport:         {trans_lbl} ({status.get('state', 'unknown')})"
             )
-            chat.add_system_message(
-                f"Interface:         {status.get('interface', 'Unknown')}"
-            )
+            chat.add_system_message(f"Interface:         {iface}")
             chat.add_system_message(
                 f"Wi-Fi SSID:        {status.get('ssid') or 'unavailable'}"
             )

@@ -76,6 +76,7 @@ class SessionCoordinator:
         self.on_handshake_completed = on_handshake_completed
         self.on_ble_error: Callable[[str], None] | None = None
         self.on_ble_warning: Callable[[str], None] | None = None
+        self.on_lan_error: Callable[[str], None] | None = None
         self.ble_status: str = "offline"
         self.ble_error_message: str | None = None
 
@@ -149,8 +150,14 @@ class SessionCoordinator:
 
     def _handle_transport_error(self, err_msg: str) -> None:
         self.ble_error_message = err_msg
-        if self.on_ble_error:
-            self.on_ble_error(err_msg)
+        if self.active_transport_name == "lan":
+            if self.on_lan_error:
+                self.on_lan_error(err_msg)
+            elif self.on_ble_error:
+                self.on_ble_error(err_msg)
+        else:
+            if self.on_ble_error:
+                self.on_ble_error(err_msg)
 
     def _handle_transport_warning(self, warning: str) -> None:
         if self.on_ble_warning:
@@ -302,8 +309,14 @@ class SessionCoordinator:
             )
             self.ble_status = self.active_transport.state.value
             self.ble_error_message = str(e)
-            if self.on_ble_error:
-                self.on_ble_error(self.ble_error_message)
+            if self.active_transport_name == "lan":
+                if self.on_lan_error:
+                    self.on_lan_error(self.ble_error_message)
+                elif self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
+            else:
+                if self.on_ble_error:
+                    self.on_ble_error(self.ble_error_message)
 
     def _transport_is_operational(self) -> bool:
         """Return True only if the active transport is actually usable."""
@@ -347,7 +360,21 @@ class SessionCoordinator:
         checker = getattr(ble, "_uses_injected_test_backend", None)
         return bool(checker()) if callable(checker) else False
 
-    async def retry_ble(self) -> bool:
+    def is_ble_available(self) -> bool:
+        """Return True if Bluetooth transport is registered and available."""
+        bt = self._transports.get("bluetooth")
+        if bt is None:
+            return False
+        return bt.is_available()
+
+    def is_lan_available(self) -> bool:
+        """Return True if LAN transport is registered and network is usable."""
+        lan = self._transports.get("lan")
+        if lan is None:
+            return False
+        return lan.is_available()
+
+    async def retry_active_transport(self) -> bool:
         """Re-initialize the active transport after failure. Success is operational."""
         async with self._retry_lock:
             self.ble_status = "checking"
@@ -371,9 +398,15 @@ class SessionCoordinator:
                 logger.warning("Retry active transport failed: %s", e)
                 self.ble_status = self.active_transport.state.value
                 self.ble_error_message = str(e)
-                if self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
                 return False
+
+    async def retry_ble(self) -> bool:
+        """Re-initialize the active Bluetooth transport after failure."""
+        return await self.retry_active_transport()
+
+    async def retry_lan(self) -> bool:
+        """Re-initialize the active LAN transport after failure."""
+        return await self.retry_active_transport()
 
     async def stop(self) -> None:
         """Shutdown coordinator, close sessions, and stop all transports."""

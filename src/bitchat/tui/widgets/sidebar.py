@@ -187,9 +187,7 @@ class PeerSidebar(Widget):
             view.clear()
             if is_offline:
                 unavail = (
-                    "LAN / Wi-Fi Unavailable"
-                    if transport == "lan"
-                    else "Bluetooth Unavailable"
+                    "LAN (offline)" if transport == "lan" else "Bluetooth Unavailable"
                 )
                 view.append(ListItem(Label(f"[dim red]{unavail}[/dim red]")))
             elif not self._discovered_peers:

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
 from textual.command import CommandPalette
-from textual.widgets import Button, Input, RadioButton, RichLog, Static
+from textual.widgets import Button, Input, Label, RadioButton, RichLog, Static
 
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.ble.adapter import AdapterInfo, BLEAdapterManager
@@ -17,13 +17,20 @@ from bitchat.ble.manager import BLEManager
 from bitchat.ble.models import DiscoveredPeer
 from bitchat.ble.server import BLEServer
 from bitchat.crypto.identity import LocalIdentity
+from bitchat.network.models import NetworkInfo
+from bitchat.network.transport import LANTransport
 from bitchat.storage.config import (
     DEFAULT_KEYBINDINGS,
     AppConfig,
     InMemoryStorage,
 )
+from bitchat.transport.base import TransportState
 from bitchat.tui.app import BitChatApp
-from bitchat.tui.screens.ble_error import BLEErrorModal
+from bitchat.tui.screens.ble_error import (
+    BLEErrorModal,
+    LANErrorModal,
+    TransportErrorModal,
+)
 from bitchat.tui.screens.edit_theme import EditThemeModal
 from bitchat.tui.screens.help import HelpScreen
 from bitchat.tui.screens.peer_info import PeerInfoModal
@@ -1903,3 +1910,457 @@ async def test_lan_fallback_handler_calls_transport_switch(
         await pilot.pause(1)
 
     assert "lan" in calls, "LAN fallback must invoke _handle_transport_switch('lan')"
+
+
+# =============================================================================
+# LAN / Network-Loss Recovery UX and Truthful Status Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_lan_wifi_drops_ethernet_remains_no_modal() -> None:
+    """Wi-Fi drops while Ethernet is connected -> LAN remains usable,
+    NO recovery modal, and status bar reflects 'LAN (Ethernet)'.
+    """
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        identity = LocalIdentity.generate()
+        server = BLEServer(backend=MockBLEServerBackend())
+        manager = BLEManager(
+            sender_id=identity.peer_id,
+            scanner_factory=lambda **kw: MockBleakScanner(
+                kw["detection_callback"], kw["service_uuids"]
+            ),
+        )
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            # Verify initial Wi-Fi status
+            status = app.query_one(StatusBar).status_message
+            assert "LAN (Wi-Fi)" in status
+
+            # Transition: Wi-Fi lost, Ethernet remains
+            eth_info = NetworkInfo(
+                status="Connected",
+                interface="Ethernet",
+                ssid="unavailable",
+                local_ip="192.168.1.100",
+            )
+            lan_trans = coord.active_transport
+            assert isinstance(lan_trans, LANTransport)
+            lan_trans.adapter_manager._current_info = eth_info
+            lan_trans._handle_network_changed(eth_info)
+            await pilot.pause()
+
+            # No recovery modal must appear
+            assert not any(isinstance(s, BLEErrorModal) for s in app._screen_stack)
+            # Status bar must reflect Ethernet
+            new_status = app.query_one(StatusBar).status_message
+            assert "LAN (Ethernet)" in new_status
+            assert lan_trans.state != TransportState.UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_lan_all_interfaces_disconnect_triggers_recovery_modal() -> None:
+    """When all LAN interfaces disconnect, LAN enters UNAVAILABLE,
+    recovery modal is requested, and truthful offline status is displayed.
+    """
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        identity = LocalIdentity.generate()
+        server = BLEServer(backend=MockBLEServerBackend())
+        manager = BLEManager(
+            sender_id=identity.peer_id,
+            scanner_factory=lambda **kw: MockBleakScanner(
+                kw["detection_callback"], kw["service_uuids"]
+            ),
+        )
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+
+            lan_trans = coord.active_transport
+            assert isinstance(lan_trans, LANTransport)
+
+            # All interfaces disconnect
+            disc_info = NetworkInfo(
+                status="Disconnected",
+                interface="Unavailable",
+                ssid="unavailable",
+                local_ip="",
+            )
+            lan_trans.adapter_manager._current_info = disc_info
+            lan_trans._handle_network_changed(disc_info)
+            await pilot.pause()
+
+            # LAN transport must be UNAVAILABLE
+            assert lan_trans.state == TransportState.UNAVAILABLE
+            # Modal must be presented
+            assert isinstance(app.screen, BLEErrorModal)
+            assert app.screen.transport == "lan"
+            # Title & guidance check
+            title_text = str(app.screen.query_one("#ble-error-title", Label).render())
+            assert "LAN / Network Connection Lost" in title_text
+            content_text = str(app.screen.query_one(".ble-error-text", Static).render())
+            assert "Local network connectivity is unavailable" in content_text
+            # Status bar must reflect truthful offline status
+            status = app.query_one(StatusBar).status_message
+            expected_status = (
+                "LAN (offline) • Reason: Local network connection unavailable"
+            )
+            assert expected_status in status
+
+
+@pytest.mark.asyncio
+async def test_lan_recovery_switch_to_ble_when_ble_available() -> None:
+    """'Switch to BLE' button switches transport to BLE without claiming connected."""
+    modal = BLEErrorModal(
+        error_message="Local network is disconnected.",
+        transport="lan",
+        ble_available=True,
+    )
+    identity = LocalIdentity.generate()
+    server = BLEServer(backend=MockBLEServerBackend())
+    manager = BLEManager(
+        sender_id=identity.peer_id,
+        scanner_factory=lambda **kw: MockBleakScanner(
+            kw["detection_callback"], kw["service_uuids"]
+        ),
+    )
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            await app.push_screen(modal, app._on_lan_modal_dismissed)
+            await pilot.pause()
+
+            assert isinstance(app.screen, BLEErrorModal)
+            buttons = {b.id for b in app.screen.query(Button)}
+            assert "btn-lan-ble" in buttons
+
+            await pilot.click("#btn-lan-ble")
+            await pilot.pause(1)
+
+            # Modal is dismissed
+            assert not isinstance(app.screen, BLEErrorModal)
+            # Transport switched to bluetooth
+            assert coord.active_transport_name == "bluetooth"
+
+            # Truthful status: must NOT falsely claim "Connected via BLE"
+            # or peer connected
+            chat_lines = "\n".join(
+                line.text for line in app.query_one("#chat-log", RichLog).lines
+            )
+            assert "Connected via BLE" not in chat_lines
+            assert "Connected via Bluetooth" not in chat_lines
+            status = app.query_one(StatusBar).status_message
+            assert "Connected (" not in status
+
+
+@pytest.mark.asyncio
+async def test_lan_recovery_modal_omits_ble_button_when_ble_unavailable() -> None:
+    """When BLE is unavailable, recovery modal omits 'Switch to BLE' button."""
+    modal = BLEErrorModal(
+        error_message="Local network is disconnected.",
+        transport="lan",
+        ble_available=False,
+    )
+    app = BitChatApp()
+    async with app.run_test(size=(120, 45)) as pilot:
+        await app.push_screen(modal)
+        await pilot.pause()
+
+        assert isinstance(app.screen, BLEErrorModal)
+        buttons = {b.id for b in app.screen.query(Button)}
+        assert "btn-lan-ble" not in buttons
+        assert "btn-lan-retry" in buttons
+        assert "btn-lan-close" in buttons
+
+
+@pytest.mark.asyncio
+async def test_lan_retry_success_reconnects_lan() -> None:
+    """'Retry LAN' succeeds when network returns and updates truthful status."""
+    identity = LocalIdentity.generate()
+    server = BLEServer(backend=MockBLEServerBackend())
+    manager = BLEManager(
+        sender_id=identity.peer_id,
+        scanner_factory=lambda **kw: MockBleakScanner(
+            kw["detection_callback"], kw["service_uuids"]
+        ),
+    )
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            modal = BLEErrorModal(
+                error_message="Local network is disconnected.",
+                transport="lan",
+                ble_available=False,
+            )
+            await app.push_screen(modal, app._on_lan_modal_dismissed)
+            await pilot.pause()
+
+            with patch.object(coord, "retry_lan", new=AsyncMock(return_value=True)):
+                await pilot.click("#btn-lan-retry")
+                await pilot.pause(1)
+
+            assert not isinstance(app.screen, BLEErrorModal)
+            chat_lines = "\n".join(
+                line.text for line in app.query_one("#chat-log", RichLog).lines
+            )
+            assert "LAN reconnected successfully" in chat_lines
+
+
+@pytest.mark.asyncio
+async def test_lan_retry_failure_remains_offline() -> None:
+    """'Retry LAN' handles failure gracefully and remains in offline mode."""
+    identity = LocalIdentity.generate()
+    server = BLEServer(backend=MockBLEServerBackend())
+    manager = BLEManager(
+        sender_id=identity.peer_id,
+        scanner_factory=lambda **kw: MockBleakScanner(
+            kw["detection_callback"], kw["service_uuids"]
+        ),
+    )
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            modal = BLEErrorModal(
+                error_message="Local network is disconnected.",
+                transport="lan",
+                ble_available=False,
+            )
+            await app.push_screen(modal, app._on_lan_modal_dismissed)
+            await pilot.pause()
+
+            with patch.object(coord, "retry_lan", new=AsyncMock(return_value=False)):
+                await pilot.click("#btn-lan-retry")
+                await pilot.pause(1)
+
+            chat_lines = " ".join(
+                " ".join(
+                    line.text for line in app.query_one("#chat-log", RichLog).lines
+                ).split()
+            )
+            assert "LAN retry failed" in chat_lines
+            assert "Remaining in offline mode" in chat_lines
+
+
+@pytest.mark.asyncio
+async def test_lan_continue_offline_pauses_services_and_enters_offline_mode() -> None:
+    """'Continue Offline' pauses LAN services and enters offline mode cleanly."""
+    identity = LocalIdentity.generate()
+    server = BLEServer(backend=MockBLEServerBackend())
+    manager = BLEManager(
+        sender_id=identity.peer_id,
+        scanner_factory=lambda **kw: MockBleakScanner(
+            kw["detection_callback"], kw["service_uuids"]
+        ),
+    )
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            modal = BLEErrorModal(
+                error_message="Local network is disconnected.",
+                transport="lan",
+                ble_available=False,
+            )
+            await app.push_screen(modal, app._on_lan_modal_dismissed)
+            await pilot.pause()
+
+            assert isinstance(app.screen, BLEErrorModal)
+            await pilot.click("#btn-lan-close")
+            await pilot.pause(1)
+
+            assert not isinstance(app.screen, BLEErrorModal)
+            assert coord.ble_status == "offline"
+
+            chat_lines = "\n".join(
+                line.text for line in app.query_one("#chat-log", RichLog).lines
+            )
+            assert "Operating in Offline Mode." in chat_lines
+
+            status = app.query_one(StatusBar).status_message
+            assert (
+                "LAN (offline) • Reason: Local network connection unavailable" in status
+            )
+
+
+@pytest.mark.asyncio
+async def test_lan_network_recovery_resumes_services_and_updates_status() -> None:
+    """When network reconnects after failure, LAN resumes services and status
+    becomes truthful.
+    """
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        identity = LocalIdentity.generate()
+        server = BLEServer(backend=MockBLEServerBackend())
+        manager = BLEManager(
+            sender_id=identity.peer_id,
+            scanner_factory=lambda **kw: MockBleakScanner(
+                kw["detection_callback"], kw["service_uuids"]
+            ),
+        )
+        coord = SessionCoordinator(
+            local_identity=identity,
+            ble_manager=manager,
+            ble_server=server,
+            storage=InMemoryStorage(),
+            nickname="Alice",
+            initial_transport="lan",
+        )
+        app = BitChatApp(coordinator=coord)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            lan_trans = coord.active_transport
+            assert isinstance(lan_trans, LANTransport)
+
+            # Disconnect all
+            disc_info = NetworkInfo(
+                status="Disconnected",
+                interface="Unavailable",
+                ssid="unavailable",
+                local_ip="",
+            )
+            lan_trans.adapter_manager._current_info = disc_info
+            lan_trans._handle_network_changed(disc_info)
+            await pilot.pause()
+            assert lan_trans.state == TransportState.UNAVAILABLE
+
+            # Network recovers
+            recov_info = NetworkInfo(
+                status="Connected",
+                interface="Wi-Fi",
+                ssid="OfficeWiFi",
+                local_ip="192.168.1.50",
+            )
+            lan_trans.adapter_manager._current_info = recov_info
+            lan_trans._handle_network_changed(recov_info)
+            await pilot.pause(1)
+
+            assert lan_trans.state in (TransportState.SCANNING, TransportState.READY)
+            status = app.query_one(StatusBar).status_message
+            assert "LAN (Wi-Fi)" in status
+
+
+@pytest.mark.asyncio
+async def test_lan_textual_lifecycle_safety_from_background_thread() -> None:
+    """Errors dispatched from a background thread do not raise NoActiveAppError."""
+    app = BitChatApp()
+    async with app.run_test(size=(120, 45)) as pilot:
+        error_raised = False
+
+        def _bg_error() -> None:
+            nonlocal error_raised
+            try:
+                app._on_coordinator_lan_error("Background monitor error")
+            except Exception:
+                error_raised = True
+
+        await asyncio.to_thread(_bg_error)
+        await pilot.pause(1)
+        assert not error_raised
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.transport == "lan"
+
+
+def test_modal_aliases_and_ble_regression() -> None:
+    """Modal aliases match BLEErrorModal, and BLE modal retains standard buttons."""
+    assert LANErrorModal is BLEErrorModal
+    assert TransportErrorModal is BLEErrorModal
+
+    ble_modal = BLEErrorModal(
+        error_message="Bluetooth adapter disabled",
+        transport="bluetooth",
+        bluetooth_available=False,
+    )
+    assert ble_modal.transport == "bluetooth"

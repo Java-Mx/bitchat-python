@@ -178,6 +178,13 @@ class LANTransport(BaseTransport):
         else:
             if self._state in (TransportState.UNAVAILABLE, TransportState.ERROR):
                 self._spawn_task(self._resume_lan_services())
+            elif self.on_state_changed:
+                with contextlib.suppress(Exception):
+                    self.on_state_changed(self._state)
+
+    def is_available(self) -> bool:
+        """Return True if host network interface is connected with usable IP."""
+        return self.adapter_manager.current_info.is_connected
 
     async def _pause_lan_services(self) -> None:
         """Stop discovery and listening when the host network is gone."""
