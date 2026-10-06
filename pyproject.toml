@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "textual>=8.2.8",
     "bleak>=3.0.2",
-    "cryptography>=50.0.1",
+    "cryptography>=50.0.2",
 ]
 
 [project.scripts]
