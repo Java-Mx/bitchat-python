@@ -322,7 +322,12 @@ class CommandParser:
                 args=[tokens[1]],
             )
 
-        if first_token in ("configure", "/configure"):
+        if first_token in (
+            "configure",
+            "/configure",
+            "diagnostics",
+            "/diagnostics",
+        ):
             return Command(
                 command_type=CommandType.CONFIGURE,
                 raw_input=text,

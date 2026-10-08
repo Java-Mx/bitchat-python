@@ -172,6 +172,10 @@ class TestCommandParser:
         assert len(co_sug) == 1
         assert co_sug[0].name == "/connect"
 
+        conf_sug = get_command_suggestions("/conf")
+        assert len(conf_sug) == 1
+        assert conf_sug[0].name == "/configure"
+
         d_sug = get_command_suggestions("/d")
         d_names = [s.name for s in d_sug]
         assert "/dm" in d_names

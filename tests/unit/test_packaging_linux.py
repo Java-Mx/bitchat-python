@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import sys
+import tarfile
 import tomllib
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 LINUX_PKG_DIR = REPO_ROOT / "packaging" / "linux"
@@ -169,3 +175,84 @@ def test_build_appimage_package(tmp_path: Path) -> None:
     content = appimage_file.read_bytes()
     assert b"BitChat Universal Portable" in content
     assert b"__APPIMAGE_PAYLOAD_BELOW__" in content
+    assert b"EXE_HASH" in content
+    assert b".extracted" in content
+
+
+def test_deb_package_metadata_fields(tmp_path: Path) -> None:
+    """Debian package control file and data directory contain all required metadata."""
+    version = linux_build.get_authoritative_version()
+
+    source_dir = tmp_path / "bitchat_bundle"
+    source_dir.mkdir()
+    (source_dir / "bitchat").write_text("#!/bin/sh\necho bitchat\n", encoding="utf-8")
+
+    output_dir = tmp_path / "dist"
+    output_dir.mkdir()
+
+    deb_file = build_deb.build_deb_package(
+        source_dir=source_dir,
+        output_dir=output_dir,
+        force_pure_python=True,
+    )
+
+    deb_bytes = deb_file.read_bytes()
+    ctrl_marker = b"control.tar.gz"
+    idx = deb_bytes.find(ctrl_marker)
+    assert idx != -1
+
+    hdr = deb_bytes[idx : idx + 60]
+    size = int(hdr[48:58].decode("ascii").strip())
+    content_start = idx + 60
+    ctrl_tar_bytes = deb_bytes[content_start : content_start + size]
+
+    with tarfile.open(fileobj=io.BytesIO(ctrl_tar_bytes), mode="r:gz") as tar:
+        names = tar.getnames()
+        assert "./control" in names or "control" in names
+        ctrl_f = tar.extractfile("./control" if "./control" in names else "control")
+        assert ctrl_f is not None
+        control_text = ctrl_f.read().decode("utf-8")
+
+    assert "Package: bitchat" in control_text
+    assert f"Version: {version}" in control_text
+    assert "Architecture: amd64" in control_text
+    assert "Maintainer: BitChat Contributors" in control_text
+    assert "Homepage: https://github.com/Java-Mx/bitchat-python" in control_text
+    assert "Section: net" in control_text
+
+
+def test_executable_entry_point_version_and_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Application CLI entry point supports --version, --help, and --configure."""
+    from bitchat import __version__
+    from bitchat.__main__ import main
+
+    # 1. --version
+    with patch.object(sys, "argv", ["bitchat", "--version"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert __version__ in captured.out or __version__ in captured.err
+
+    # 2. --help
+    with patch.object(sys, "argv", ["bitchat", "--help"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "BitChat" in captured.out
+        assert "--configure" in captured.out
+
+    # 3. --configure
+    with patch.object(sys, "argv", ["bitchat", "--configure"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "BitChat Configuration" in captured.out
+        assert "System" in captured.out
+        assert "Bluetooth" in captured.out
+        assert "Network" in captured.out
+        assert "LAN" in captured.out

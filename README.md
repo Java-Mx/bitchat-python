@@ -182,7 +182,7 @@ Flatpak delivers a secure, containerized sandbox adhering strictly to the princi
 To build and run the Flatpak locally:
 ```bash
 flatpak install flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
-flatpak-builder --user --install --force-clean build-dir packaging/linux/flatpak/io.github.java_mx.bitchat.yaml
+flatpak-builder --user --install --force-clean --share=network build-dir packaging/linux/flatpak/io.github.java_mx.bitchat.yaml
 flatpak run io.github.java_mx.bitchat
 ```
 

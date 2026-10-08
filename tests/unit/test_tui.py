@@ -7,7 +7,11 @@ import contextvars
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
+from tests.ble.mocks import (
+    MockBleakClient,
+    MockBleakScanner,
+    MockBLEServerBackend,
+)
 from textual.command import CommandPalette
 from textual.widgets import Button, Input, Label, RadioButton, RichLog, Static
 
@@ -52,6 +56,7 @@ def test_coordinator() -> SessionCoordinator:
         scanner_factory=lambda **kw: MockBleakScanner(
             kw["detection_callback"], kw["service_uuids"]
         ),
+        client_factory=lambda address, **kw: MockBleakClient(address=address, **kw),
     )
     storage = InMemoryStorage()
     return SessionCoordinator(

@@ -121,7 +121,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev dpkg-dev
+          sudo apt-get install -y libdbus-1-dev dpkg-dev flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+          flatpak install --user -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08 || true
 
       - name: Install dependencies (uv sync --all-groups)
         run: uv sync --all-groups
@@ -137,14 +139,15 @@ jobs:
       - name: Run Packaging Unit Tests
         run: uv run pytest tests/unit/test_packaging_linux.py tests/unit/test_package.py
 
-      - name: Build Linux Distributables (.deb & AppImage)
-        run: uv run python packaging/linux/build.py
+      - name: Build Linux Distributables (.deb, AppImage & Flatpak)
+        run: uv run python packaging/linux/build.py --build-flatpak
 
       - name: Verify Linux Packaging Artifacts
         run: |
           version=$(grep '^version = ' pyproject.toml | cut -d '"' -f 2)
           deb_file="dist/bitchat_${version}_amd64.deb"
           appimage_file="dist/BitChat-${version}-x86_64.AppImage"
+          flatpak_bundle="dist/io.github.java_mx.bitchat.flatpak"
           
           if [ ! -f "$deb_file" ]; then
             echo "Expected .deb package $deb_file not found!" >&2
@@ -171,6 +174,15 @@ jobs:
           ./"$appimage_file" --help
           ./"$appimage_file" --configure
           
+          # Test Flatpak execution if bundle was created
+          if [ -f "$flatpak_bundle" ]; then
+            echo "Testing Flatpak bundle installation and execution..."
+            flatpak install --user -y "$flatpak_bundle"
+            flatpak run io.github.java_mx.bitchat --version
+            flatpak run io.github.java_mx.bitchat --help
+            flatpak uninstall --user -y io.github.java_mx.bitchat
+          fi
+          
           echo "Linux artifact validation succeeded!"
 
       - name: Upload Linux Packaging Artifacts
@@ -182,5 +194,7 @@ jobs:
             dist/*.deb.sha256
             dist/*-x86_64.AppImage
             dist/*-x86_64.AppImage.sha256
+            dist/*.flatpak
+            dist/*.flatpak.sha256
             packaging/linux/flatpak/
 

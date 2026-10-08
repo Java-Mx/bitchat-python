@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -94,9 +95,15 @@ def build_pyinstaller(spec_file: Path) -> Path:
             f"PyInstaller build failed with exit code {result.returncode}"
         )
 
-    exe_path = DIST_DIR / "bitchat" / "bitchat"
+    exe_name = "bitchat.exe" if sys.platform == "win32" else "bitchat"
+    exe_path = DIST_DIR / "bitchat" / exe_name
     if not exe_path.is_file():
-        raise FileNotFoundError(f"Expected binary not found at {exe_path}")
+        alt_name = "bitchat" if sys.platform == "win32" else "bitchat.exe"
+        alt_path = DIST_DIR / "bitchat" / alt_name
+        if alt_path.is_file():
+            exe_path = alt_path
+        else:
+            raise FileNotFoundError(f"Expected binary not found at {exe_path}")
 
     print(f"[+] PyInstaller build succeeded: {exe_path}")
     return exe_path
@@ -197,6 +204,60 @@ def validate_flatpak_metadata(expected_version: str) -> None:
     print("[+] Flatpak manifest and AppStream metadata verified.")
 
 
+def build_flatpak_bundle(output_dir: Path | None = None) -> Path | None:
+    """Build single-file Flatpak bundle if flatpak-builder and flatpak are available."""
+    out_dir = output_dir or DIST_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest_file = LINUX_PACKAGING_DIR / "flatpak" / "io.github.java_mx.bitchat.yaml"
+    bundle_path = out_dir / "io.github.java_mx.bitchat.flatpak"
+
+    flatpak_builder = shutil.which("flatpak-builder")
+    flatpak = shutil.which("flatpak")
+
+    if not (flatpak_builder and flatpak):
+        print(
+            "[*] flatpak-builder or flatpak not found on PATH. Validated metadata only."
+        )
+        return None
+
+    print(f"[*] Building Flatpak bundle with {flatpak_builder}...")
+    build_dir = BUILD_DIR / "flatpak_build"
+    repo_dir = BUILD_DIR / "flatpak_repo"
+
+    builder_cmd = [
+        flatpak_builder,
+        "--force-clean",
+        "--repo=" + str(repo_dir),
+        "--share=network",
+        str(build_dir),
+        str(manifest_file),
+    ]
+    res = subprocess.run(builder_cmd, cwd=str(REPO_ROOT), check=False)
+    if res.returncode != 0:
+        print(f"[!] flatpak-builder failed with return code {res.returncode}")
+        return None
+
+    bundle_cmd = [
+        flatpak,
+        "build-bundle",
+        str(repo_dir),
+        str(bundle_path),
+        "io.github.java_mx.bitchat",
+    ]
+    res_bundle = subprocess.run(bundle_cmd, cwd=str(REPO_ROOT), check=False)
+    if res_bundle.returncode != 0 or not bundle_path.is_file():
+        print(
+            f"[!] flatpak build-bundle failed with return code {res_bundle.returncode}"
+        )
+        return None
+
+    sha = calculate_sha256(bundle_path)
+    sha_file = out_dir / f"{bundle_path.name}.sha256"
+    sha_file.write_text(f"{sha} *{bundle_path.name}\n", encoding="utf-8")
+    print(f"[+] Flatpak bundle ready: {bundle_path} (SHA-256: {sha})")
+    return bundle_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="BitChat Linux Packaging Builder")
     parser.add_argument(
@@ -210,6 +271,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--skip-flatpak", action="store_true", help="Skip Flatpak validation"
+    )
+    parser.add_argument(
+        "--build-flatpak", action="store_true", help="Build single-file Flatpak bundle"
     )
     args = parser.parse_args()
 
@@ -248,9 +312,14 @@ def main() -> int:
         appimage_file = appimage_mod.build_appimage_package(source_bundle)
         print(f"[+] AppImage ready: {appimage_file}")
 
-    # 4. Flatpak Validation
+    # 4. Flatpak Validation & Bundle Build
     if not args.skip_flatpak:
         validate_flatpak_metadata(version)
+        should_build = args.build_flatpak or (
+            sys.platform.startswith("linux") and bool(shutil.which("flatpak-builder"))
+        )
+        if should_build:
+            build_flatpak_bundle()
 
     print(f"=== Linux Packaging finished successfully for BitChat v{version} ===")
     return 0

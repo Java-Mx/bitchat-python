@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
+from unittest.mock import patch
 
 from bitchat.app.application import Application
 from bitchat.commands.parser import CommandParser, CommandType
@@ -33,6 +35,12 @@ def test_command_parser_configure() -> None:
     cmd3 = parser.parse("  /configure  --verbose  ")
     assert cmd3.command_type == CommandType.CONFIGURE
     assert cmd3.args == ["--verbose"]
+
+    cmd4 = parser.parse("/diagnostics")
+    assert cmd4.command_type == CommandType.CONFIGURE
+
+    cmd5 = parser.parse("diagnostics")
+    assert cmd5.command_type == CommandType.CONFIGURE
 
 
 def test_detect_system_info() -> None:
@@ -283,3 +291,45 @@ def test_application_cli_configure_dispatch() -> None:
     assert "Network" in output
     assert "LAN" in output
     assert "Configuration" in output
+
+
+def test_detect_linux_interfaces_prioritizes_connected(tmp_path: Path) -> None:
+    """_detect_linux_interfaces prioritizes active interfaces over inactive ones."""
+    from bitchat.platform.capabilities import _detect_linux_interfaces
+
+    net_dir = tmp_path / "sys_class_net"
+    net_dir.mkdir()
+
+    # wlan0: up, wireless
+    wlan0 = net_dir / "wlan0"
+    wlan0.mkdir()
+    (wlan0 / "wireless").mkdir()
+    (wlan0 / "operstate").write_text("up\n", encoding="utf-8")
+
+    # wlan1: down, wireless
+    wlan1 = net_dir / "wlan1"
+    wlan1.mkdir()
+    (wlan1 / "wireless").mkdir()
+    (wlan1 / "operstate").write_text("down\n", encoding="utf-8")
+
+    # eth0: up, ethernet
+    eth0 = net_dir / "eth0"
+    eth0.mkdir()
+    (eth0 / "type").write_text("1\n", encoding="utf-8")
+    (eth0 / "operstate").write_text("up\n", encoding="utf-8")
+
+    # eth1: down, ethernet
+    eth1 = net_dir / "eth1"
+    eth1.mkdir()
+    (eth1 / "type").write_text("1\n", encoding="utf-8")
+    (eth1 / "operstate").write_text("down\n", encoding="utf-8")
+
+    def _mock_path(p: str | Path) -> Path:
+        return net_dir if str(p) == "/sys/class/net" else Path(p)
+
+    with patch("bitchat.platform.capabilities.Path", side_effect=_mock_path):
+        wifi_str, eth_str = _detect_linux_interfaces()
+
+    assert "wlan0" in wifi_str or wifi_str.startswith("Connected")
+    assert "down" not in wifi_str
+    assert eth_str == "Connected (eth0)"

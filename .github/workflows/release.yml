@@ -38,7 +38,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev dpkg-dev
+          sudo apt-get install -y libdbus-1-dev dpkg-dev flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+          flatpak install --user -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08 || true
 
       - name: Install dependencies (uv sync --all-groups)
         run: uv sync --all-groups
@@ -57,8 +59,8 @@ jobs:
       - name: Build Python Packages (Wheel & sdist)
         run: uv build
 
-      - name: Build Linux Distributables (.deb & AppImage)
-        run: uv run python packaging/linux/build.py
+      - name: Build Linux Distributables (.deb, AppImage & Flatpak)
+        run: uv run python packaging/linux/build.py --build-flatpak
 
       - name: Upload Linux Distributables
         uses: actions/upload-artifact@v4
@@ -71,6 +73,8 @@ jobs:
             dist/*.deb.sha256
             dist/*-x86_64.AppImage
             dist/*-x86_64.AppImage.sha256
+            dist/*.flatpak
+            dist/*.flatpak.sha256
 
   build-windows:
     name: Build Windows Distributables (.exe & WinGet)
@@ -185,6 +189,8 @@ jobs:
             dist/*.deb.sha256
             dist/*-x86_64.AppImage
             dist/*-x86_64.AppImage.sha256
+            dist/*.flatpak
+            dist/*.flatpak.sha256
             packaging/windows/winget/Java-Mx.BitChat.yaml
 
       - name: Submit to Microsoft winget-pkgs (Optional automated submission)

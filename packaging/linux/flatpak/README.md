@@ -39,10 +39,10 @@ flatpak install flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.
 cd packaging/linux/flatpak
 
 # Build the flatpak bundle into build-dir
-flatpak-builder --force-clean build-dir io.github.java_mx.bitchat.yaml
+flatpak-builder --force-clean --share=network build-dir io.github.java_mx.bitchat.yaml
 
 # Install for current user
-flatpak-builder --user --install --force-clean build-dir io.github.java_mx.bitchat.yaml
+flatpak-builder --user --install --force-clean --share=network build-dir io.github.java_mx.bitchat.yaml
 
 # Run BitChat
 flatpak run io.github.java_mx.bitchat

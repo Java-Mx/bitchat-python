@@ -19,7 +19,7 @@ modules:
   - name: python3-dependencies
     buildsystem: simple
     build-commands:
-      - pip3 install --prefix=/app --no-build-isolation "textual>=8.2.8" "bleak>=3.0.2" "cryptography>=50.0.1"
+      - pip3 install --prefix=/app --no-build-isolation hatchling "textual>=8.2.8" "bleak>=3.0.2" "cryptography>=50.0.1"
     sources: []
 
   - name: bitchat
@@ -29,6 +29,5 @@ modules:
       - install -Dm644 packaging/linux/flatpak/io.github.java_mx.bitchat.desktop /app/share/applications/io.github.java_mx.bitchat.desktop
       - install -Dm644 packaging/linux/flatpak/io.github.java_mx.bitchat.metainfo.xml /app/share/metainfo/io.github.java_mx.bitchat.metainfo.xml
     sources:
-      - type: git
-        url: https://github.com/Java-Mx/bitchat-python.git
-        tag: v0.1.0
+      - type: dir
+        path: ../../../

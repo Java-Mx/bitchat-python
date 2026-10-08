@@ -150,16 +150,21 @@ def create_standalone_appimage_bundle(
 # Version: {version}
 set -e
 
-# Identify runtime cache directory
-CACHEDIR="${{HOME:-/tmp}}/.cache/bitchat/appimage/{version}"
+# Identify runtime cache directory using executable hash to prevent stale caching
+EXE_HASH=$(md5sum "$0" 2>/dev/null | cut -d' ' -f1 || true)
+if [ -z "${{EXE_HASH}}" ]; then
+    EXE_HASH=$(cksum "$0" 2>/dev/null | cut -d' ' -f1 || echo "default")
+fi
+CACHEDIR="${{HOME:-/tmp}}/.cache/bitchat/appimage/{version}_${{EXE_HASH}}"
 
-if [ ! -x "${{CACHEDIR}}/AppRun" ]; then
+if [ ! -f "${{CACHEDIR}}/.extracted" ] || [ ! -x "${{CACHEDIR}}/AppRun" ]; then
     mkdir -p "${{CACHEDIR}}"
     PAYLOAD_LINE=$(awk '/^__APPIMAGE_PAYLOAD_BELOW__/ {{print NR + 1; exit 0; }}' "$0")
-    tail -n +"${{PAYLOAD_LINE}}" "$0" | tar -xz -C "${{CACHEDIR}}" 2>/dev/null
+    tail -n +"${{PAYLOAD_LINE}}" "$0" | tar -xz -C "${{CACHEDIR}}"
     chmod -R +x "${{CACHEDIR}}/usr/bin" 2>/dev/null || true
     chmod +x "${{CACHEDIR}}/AppRun" 2>/dev/null || true
     chmod +x "${{CACHEDIR}}/usr/lib/bitchat/bitchat" 2>/dev/null || true
+    touch "${{CACHEDIR}}/.extracted"
 fi
 
 exec "${{CACHEDIR}}/AppRun" "$@"

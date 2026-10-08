@@ -13,6 +13,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from bitchat.network.adapter import get_local_ip, get_wifi_ssid_and_state
 
@@ -196,63 +197,73 @@ async def _detect_linux_bluetooth() -> BluetoothCapabilities:
         from dbus_fast.aio import MessageBus  # pyright: ignore[reportMissingImports]
 
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-        # Query NameOwner for org.bluez
-        reply = await bus.call(
-            Message(
-                destination="org.freedesktop.DBus",
-                path="/org/freedesktop/DBus",
-                interface="org.freedesktop.DBus",
-                member="GetNameOwner",
-                signature="s",
-                body=["org.bluez"],
-            )
-        )
-        if reply.message_type == MessageType.METHOD_RETURN:
-            bluez_state = "Available"
-            permissions = "Granted"
-
-            # Query managed objects for adapter capabilities
-            obj_reply = await bus.call(
+        try:
+            # Query NameOwner for org.bluez
+            reply = await bus.call(
                 Message(
-                    destination="org.bluez",
-                    path="/",
-                    interface="org.freedesktop.DBus.ObjectManager",
-                    member="GetManagedObjects",
+                    destination="org.freedesktop.DBus",
+                    path="/org/freedesktop/DBus",
+                    interface="org.freedesktop.DBus",
+                    member="GetNameOwner",
+                    signature="s",
+                    body=["org.bluez"],
                 )
             )
-            if obj_reply.message_type == MessageType.METHOD_RETURN and obj_reply.body:
-                managed = obj_reply.body[0]
-                # Look for adapter objects
-                for path, ifaces in managed.items():
-                    if "org.bluez.Adapter1" in ifaces:
-                        props = ifaces["org.bluez.Adapter1"]
-                        alias = props.get("Alias", {}).value if "Alias" in props else ""
-                        name = props.get("Name", {}).value if "Name" in props else ""
-                        adapter_name = alias or name or str(path).split("/")[-1]
-                        powered = (
-                            props.get("Powered", {}).value
-                            if "Powered" in props
-                            else True
-                        )
+            if reply.message_type == MessageType.METHOD_RETURN:
+                bluez_state = "Available"
+                permissions = "Granted"
 
-                        if not powered:
-                            ble_central = "Disabled (Radio Off)"
-                            ble_peripheral = "Disabled (Radio Off)"
-                            gatt_cap = "Disabled (Radio Off)"
-                        else:
-                            ble_central = "Available"
-                            if "org.bluez.LEAdvertisingManager1" in ifaces:
-                                ble_peripheral = "Available"
-                            else:
-                                ble_peripheral = "Unsupported"
+                # Query managed objects for adapter capabilities
+                obj_reply = await bus.call(
+                    Message(
+                        destination="org.bluez",
+                        path="/",
+                        interface="org.freedesktop.DBus.ObjectManager",
+                        member="GetManagedObjects",
+                    )
+                )
+                if (
+                    obj_reply.message_type == MessageType.METHOD_RETURN
+                    and obj_reply.body
+                ):
+                    managed = obj_reply.body[0]
 
-                            if "org.bluez.GattManager1" in ifaces:
-                                gatt_cap = "Available"
+                    def _extract(props: dict[str, Any], key: str, default: Any) -> Any:
+                        val = props.get(key)
+                        if val is None:
+                            return default
+                        return getattr(val, "value", val)
+
+                    # Look for adapter objects
+                    for path, ifaces in managed.items():
+                        if "org.bluez.Adapter1" in ifaces:
+                            props = ifaces["org.bluez.Adapter1"]
+                            alias = str(_extract(props, "Alias", ""))
+                            name = str(_extract(props, "Name", ""))
+                            adapter_name = alias or name or str(path).split("/")[-1]
+                            powered = bool(_extract(props, "Powered", True))
+
+                            if not powered:
+                                ble_central = "Disabled (Radio Off)"
+                                ble_peripheral = "Disabled (Radio Off)"
+                                gatt_cap = "Disabled (Radio Off)"
                             else:
-                                gatt_cap = "Unsupported"
-                        break
-        else:
-            bluez_state = "Not running"
+                                ble_central = "Available"
+                                if "org.bluez.LEAdvertisingManager1" in ifaces:
+                                    ble_peripheral = "Available"
+                                else:
+                                    ble_peripheral = "Unsupported"
+
+                                if "org.bluez.GattManager1" in ifaces:
+                                    gatt_cap = "Available"
+                                else:
+                                    gatt_cap = "Unsupported"
+                            break
+            else:
+                bluez_state = "Not running"
+        finally:
+            with contextlib.suppress(Exception):
+                bus.disconnect()
 
     except PermissionError:
         bluez_state = "Permission denied"
@@ -422,8 +433,11 @@ def _detect_linux_interfaces() -> tuple[str, str]:
         if (iface_dir / "wireless").is_dir():
             ssid = _detect_linux_wifi_ssid(name)
             if operstate == "up":
-                wifi_str = f"Connected ({ssid})" if ssid else f"Available ({name})"
-            else:
+                if ssid:
+                    wifi_str = f"Connected ({ssid})"
+                elif not wifi_str.startswith("Connected"):
+                    wifi_str = f"Available ({name})"
+            elif wifi_str == "Not detected":
                 wifi_str = f"Available ({name}, {operstate})"
 
         # Check Ethernet: type 1 is ARPHRD_ETHER
@@ -433,7 +447,7 @@ def _detect_linux_interfaces() -> tuple[str, str]:
                 if type_file.read_text(encoding="utf-8").strip() == "1":
                     if operstate == "up":
                         eth_str = f"Connected ({name})"
-                    else:
+                    elif eth_str == "Not detected":
                         eth_str = f"Available ({name}, {operstate})"
 
     return wifi_str, eth_str
