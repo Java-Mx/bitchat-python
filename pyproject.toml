@@ -44,7 +44,7 @@ Documentation = "https://github.com/Java-Mx/bitchat-python/tree/main/docs"
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
-    "ruff>=0.16.9",
+    "ruff>=0.16.10",
     "pyright>=1.1.414",
     "pyinstaller>=6.22.3",
 ]
