@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+# Resolve base directory of the AppImage mount
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+export PATH="${HERE}/usr/bin:${HERE}/usr/lib/bitchat:${PATH}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib/bitchat:${LD_LIBRARY_PATH}"
+export BITCHAT_APPIMAGE=1
+
+if [ -x "${HERE}/usr/lib/bitchat/bitchat" ]; then
+    exec "${HERE}/usr/lib/bitchat/bitchat" "$@"
+elif [ -x "${HERE}/usr/bin/bitchat" ]; then
+    exec "${HERE}/usr/bin/bitchat" "$@"
+else
+    echo "Error: BitChat executable not found in AppDir." >&2
+    exit 1
+fi

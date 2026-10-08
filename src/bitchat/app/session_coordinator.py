@@ -124,6 +124,10 @@ class SessionCoordinator:
                     local_nickname=self.nickname,
                 )
 
+            if sel == "auto":
+                bt_avail = self._transports["bluetooth"].is_available()
+                sel = "bluetooth" if bt_avail else "lan"
+
             if sel == "lan":
                 self.active_transport = self._transports["lan"]
                 self.active_transport_name = "lan"

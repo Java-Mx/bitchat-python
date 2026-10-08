@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
+    if [ -x /usr/bin/update-desktop-database ]; then
+        update-desktop-database -q /usr/share/applications 2>/dev/null || true
+    fi
+fi
+
+exit 0

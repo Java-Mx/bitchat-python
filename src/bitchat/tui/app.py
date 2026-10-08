@@ -1163,6 +1163,9 @@ class BitChatApp(App[None]):
             case CommandType.SETTINGS:
                 self.action_open_settings()
 
+            case CommandType.CONFIGURE:
+                self._display_configure_diagnostics(chat)
+
             case CommandType.EDIT:
                 self.action_open_edit_theme()
 
@@ -1457,6 +1460,26 @@ class BitChatApp(App[None]):
                             self._spawn_task(
                                 self.coordinator.send_broadcast_message(text)
                             )
+
+    def _display_configure_diagnostics(self, chat: ChatView) -> None:
+        """Run system, Bluetooth, and LAN capability diagnostics and display in chat."""
+        from bitchat.platform.capabilities import (
+            detect_system_capabilities,
+            format_configure_report,
+        )
+
+        chat.add_system_message("Running system configuration diagnostics...")
+
+        async def _run_diagnostics() -> None:
+            try:
+                report = await detect_system_capabilities()
+                formatted = format_configure_report(report)
+                for line in formatted.splitlines():
+                    chat.add_system_message(line)
+            except Exception as e:
+                chat.add_error_message(f"Diagnostics failed: {e}")
+
+        self._spawn_task(_run_diagnostics())
 
     def _display_status_diagnostics(self, chat: ChatView) -> None:
         """Display operational diagnostics in chat."""

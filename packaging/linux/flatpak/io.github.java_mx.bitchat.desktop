@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=BitChat
+GenericName=Peer-to-Peer Chat
+Comment=Secure peer-to-peer terminal chat client over BLE and LAN
+Exec=bitchat
+Icon=io.github.java_mx.bitchat
+Terminal=true
+Categories=Network;Chat;ConsoleOnly;
+Keywords=bluetooth;ble;chat;mesh;p2p;terminal;
+StartupNotify=false

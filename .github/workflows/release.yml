@@ -18,11 +18,9 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Publish Release Artifacts
-    runs-on: windows-latest
-    env:
-      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+  build-linux:
+    name: Build Linux Distributables (.deb & AppImage)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +34,11 @@ jobs:
 
       - name: Set up Python
         run: uv python install 3.12
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev dpkg-dev
 
       - name: Install dependencies (uv sync --all-groups)
         run: uv sync --all-groups
@@ -53,6 +56,41 @@ jobs:
 
       - name: Build Python Packages (Wheel & sdist)
         run: uv build
+
+      - name: Build Linux Distributables (.deb & AppImage)
+        run: uv run python packaging/linux/build.py
+
+      - name: Upload Linux Distributables
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-distributables
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*-x86_64.AppImage
+            dist/*-x86_64.AppImage.sha256
+
+  build-windows:
+    name: Build Windows Distributables (.exe & WinGet)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (uv sync --all-groups)
+        run: uv sync --all-groups
 
       - name: Setup Inno Setup
         shell: pwsh
@@ -90,7 +128,49 @@ jobs:
             Write-Host "Installer is compiled unsigned. Users may observe Windows SmartScreen prompts."
           }
 
-      - name: Create GitHub Release & Upload Assets
+      - name: Upload Windows Distributables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-distributables
+          path: |
+            dist/BitChat-*-windows-x64.exe
+            dist/BitChat-*-windows-x64.exe.sha256
+            packaging/windows/winget/Java-Mx.BitChat.yaml
+
+  publish:
+    name: Publish GitHub Release & WinGet
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux Distributables
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-distributables
+          path: dist/
+
+      - name: Download Windows Distributables
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-distributables
+          path: dist-win/
+
+      - name: Organize Artifacts
+        run: |
+          mkdir -p packaging/windows/winget/
+          cp -r dist-win/BitChat* dist/ 2>/dev/null || true
+          if [ -f dist-win/packaging/windows/winget/Java-Mx.BitChat.yaml ]; then
+            cp dist-win/packaging/windows/winget/Java-Mx.BitChat.yaml packaging/windows/winget/
+          elif [ -f dist-win/Java-Mx.BitChat.yaml ]; then
+            cp dist-win/Java-Mx.BitChat.yaml packaging/windows/winget/
+          fi
+          ls -la dist/
+
+      - name: Create GitHub Release & Upload All Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         with:
@@ -101,6 +181,10 @@ jobs:
             dist/*.tar.gz
             dist/BitChat-*-windows-x64.exe
             dist/BitChat-*-windows-x64.exe.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*-x86_64.AppImage
+            dist/*-x86_64.AppImage.sha256
             packaging/windows/winget/Java-Mx.BitChat.yaml
 
       - name: Submit to Microsoft winget-pkgs (Optional automated submission)

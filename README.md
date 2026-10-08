@@ -161,123 +161,195 @@ bitchat
 
 ---
 
-## Installation — Linux
+## Linux
 
-**Requirements:** Python 3.12 or 3.13. BlueZ for BLE. Any modern Linux with working networking for LAN.
+BitChat provides native, sandboxed, and portable Linux distributables that bundle all runtime dependencies (CPython runtime, Textual TUI, Bleak BLE stack, and Cryptography). Manual Python or pip installation is not required.
 
-### 1. Install Python
+### Recommended
 
-**Ubuntu / Debian:**
+#### Flatpak (Flathub)
 
+> [!NOTE]
+> **Status:** Flatpak packaging: configured and validated in [`packaging/linux/flatpak/`](packaging/linux/flatpak/).
+> Flathub submission is tracked under the reverse-DNS identifier `io.github.java_mx.bitchat`.
+> Built packages can be installed locally via `flatpak-builder`.
+
+Flatpak delivers a secure, containerized sandbox adhering strictly to the principle of least privilege:
+- BlueZ system D-Bus access (`--system-talk-name=org.bluez`) for BLE mesh communication.
+- Network access (`--share=network`) for LAN discovery (UDP port 24024) and TCP messaging (port 24025).
+- No unconfined host filesystem access (`--filesystem=host` is not requested).
+
+To build and run the Flatpak locally:
 ```bash
-sudo apt update
-sudo apt install -y python3.12 python3.12-venv python3-pip git
+flatpak install flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak-builder --user --install --force-clean build-dir packaging/linux/flatpak/io.github.java_mx.bitchat.yaml
+flatpak run io.github.java_mx.bitchat
 ```
 
-If Python 3.12 is not in your distro's default repositories, use the [deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa):
+To uninstall:
+```bash
+flatpak uninstall io.github.java_mx.bitchat
+```
+
+---
+
+### Debian / Ubuntu (.deb)
+
+The primary native package for Debian, Ubuntu, Linux Mint, Pop!_OS, and derivatives. Installs the self-contained executable to `/usr/lib/bitchat`, integrates the `/usr/bin/bitchat` launcher, and adds desktop application shortcuts.
+
+1. Download `bitchat_<version>_amd64.deb` and its SHA-256 checksum from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases).
+2. Install via `apt` (automatically handles system permissions):
+   ```bash
+   sudo apt install ./bitchat_<version>_amd64.deb
+   ```
+3. Launch BitChat directly from any terminal or application launcher:
+   ```bash
+   bitchat
+   ```
+4. Verify system hardware and transport capabilities:
+   ```bash
+   bitchat --configure
+   ```
+5. To uninstall cleanly:
+   ```bash
+   sudo apt remove bitchat
+   ```
+
+---
+
+### Universal Portable (AppImage)
+
+A standalone universal executable that runs on any modern 64-bit Linux distribution without installation or root privileges.
+
+1. Download `BitChat-<version>-x86_64.AppImage` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases).
+2. Grant execution permissions:
+   ```bash
+   chmod +x BitChat-<version>-x86_64.AppImage
+   ```
+3. Run BitChat:
+   ```bash
+   ./BitChat-<version>-x86_64.AppImage
+   ```
+4. Check version or run hardware diagnostics:
+   ```bash
+   ./BitChat-<version>-x86_64.AppImage --version
+   ./BitChat-<version>-x86_64.AppImage --configure
+   ```
+
+---
+
+### Snap (Evaluated / Secondary Target)
+
+> [!NOTE]
+> **Status:** Snapcraft configuration is maintained in [`packaging/linux/snap/`](packaging/linux/snap/).
+> Because the Canonical Snap Store classifies the `bluez` D-Bus interface as sensitive, strictly confined snaps require manual interface authorization (`sudo snap connect bitchat:bluez`) unless granted an official store declaration. Snap is maintained as a secondary packaging target.
 
 ```bash
-sudo add-apt-repository ppa:deadsnakes/ppa
+cd packaging/linux/snap
+snapcraft
+sudo snap install bitchat_*.snap --dangerous
+sudo snap connect bitchat:bluez
+bitchat
+```
+
+---
+
+### From Source (Developers)
+
+**Requirements:** Python 3.12 or 3.13, BlueZ 5.43+, D-Bus development headers.
+
+#### 1. System dependencies
+
+**Ubuntu / Debian:**
+```bash
 sudo apt update
-sudo apt install -y python3.12 python3.12-venv
+sudo apt install -y python3.12 python3.12-venv python3-pip git bluez dbus libdbus-1-dev
 ```
 
 **Fedora:**
-
 ```bash
-sudo dnf install -y python3.12 git
+sudo dnf install -y python3.12 git bluez dbus-devel
 ```
 
 **Arch Linux:**
-
 ```bash
-sudo pacman -S python git
+sudo pacman -S python git bluez bluez-utils
 ```
 
-Verify:
-
-```bash
-python3.12 --version
-```
-
-### 2. Clone the repository
+#### 2. Clone and install with `uv` (recommended)
 
 ```bash
 git clone https://github.com/Java-Mx/bitchat-python.git
 cd bitchat-python
-```
 
-### 3a. Install with `uv` (recommended)
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env   # or restart your shell
-
+# Install dependencies and run
 uv sync
 uv run bitchat
 ```
 
-### 3b. Install with standard venv + pip
-
+Or with standard virtual environment:
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -e .
 bitchat
 ```
 
-### 4. Development install
+---
 
+### Linux Bluetooth (BlueZ) Requirements & Permissions
+
+BitChat communicates with Bluetooth adapters via BlueZ over D-Bus:
+
+1. **Enable the Bluetooth daemon:**
+   ```bash
+   sudo systemctl enable --now bluetooth
+   ```
+
+2. **User permissions:**
+   Ensure your user has access to D-Bus Bluetooth interfaces:
+   ```bash
+   sudo usermod -aG bluetooth $USER
+   # Log out and log back in for group membership to apply
+   ```
+
+3. **Verify adapter state:**
+   ```bash
+   rfkill list bluetooth          # verify not blocked by hardware or software
+   bluetoothctl power on          # power on the radio
+   bluetoothctl show              # inspect adapter capabilities
+   ```
+
+### Linux LAN Requirements & Firewall
+
+LAN mesh transport requires local subnet communication:
+- **UDP Discovery:** Port `24024` (peer discovery announcements)
+- **TCP Transport:** Port `24025` (Noise XX direct messaging)
+
+If using `ufw`:
 ```bash
-uv sync --all-groups
-# or with pip:
-pip install -e ".[dev]"
+sudo ufw allow 24024/udp comment 'BitChat LAN discovery'
+sudo ufw allow 24025/tcp comment 'BitChat LAN transport'
 ```
 
-### Linux Bluetooth (BlueZ) setup
-
-BLE requires BlueZ and the Bluetooth service running:
-
-**Ubuntu / Debian:**
-
+If using `firewalld`:
 ```bash
-sudo apt install -y bluez dbus
-sudo systemctl enable --now bluetooth
+sudo firewall-cmd --add-port=24024/udp --permanent
+sudo firewall-cmd --add-port=24025/tcp --permanent
+sudo firewall-cmd --reload
 ```
 
-**Arch Linux:**
+### System Diagnostics with `/configure`
+
+At any time inside BitChat or from the command line, run the automated diagnostics workflow to inspect Bluetooth, BlueZ, network interfaces, and permissions:
 
 ```bash
-sudo pacman -S bluez bluez-utils
-sudo systemctl enable --now bluetooth
+# From command line
+bitchat --configure
+
+# Or within interactive chat
+/configure
 ```
-
-**Fedora:**
-
-```bash
-sudo dnf install -y bluez
-sudo systemctl enable --now bluetooth
-```
-
-**User permissions:**
-
-```bash
-sudo usermod -aG bluetooth $USER
-# Log out and back in for the group change to take effect
-```
-
-**Check adapter state:**
-
-```bash
-rfkill list bluetooth          # ensure not blocked
-bluetoothctl power on          # power on the adapter
-bluetoothctl show              # verify adapter properties
-```
-
-### Linux LAN notes
-
-LAN transport uses UDP broadcast (port 41234) and TCP (port 41235). These work on any standard Linux networking stack without extra configuration. If you run a firewall (`ufw`, `firewalld`, `iptables`), see [Troubleshooting — Linux Firewall](#linux-firewall-blocking-lan) below.
 
 ---
 

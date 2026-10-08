@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Ensure standard execution permissions
+    chmod 0755 /usr/lib/bitchat/bitchat 2>/dev/null || true
+    chmod 0755 /usr/bin/bitchat 2>/dev/null || true
+
+    # Update desktop entry cache if available
+    if [ -x /usr/bin/update-desktop-database ]; then
+        update-desktop-database -q /usr/share/applications 2>/dev/null || true
+    fi
+fi
+
+exit 0

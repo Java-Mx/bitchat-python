@@ -1,0 +1,13 @@
+Package: bitchat
+Version: {version}
+Section: net
+Priority: optional
+Architecture: amd64
+Installed-Size: {installed_size_kb}
+Maintainer: BitChat Contributors <https://github.com/Java-Mx/bitchat-python>
+Homepage: https://github.com/Java-Mx/bitchat-python
+Description: Python terminal client for the BitChat protocol over BLE and LAN
+ BitChat is a secure peer-to-peer terminal chat client operating over
+ Bluetooth Low Energy (BLE) and local area networks (LAN). It features
+ decentralized mesh networking, end-to-end encryption with Noise Protocol
+ (X25519 / AES-GCM), and an interactive terminal user interface built with Textual.

@@ -116,6 +116,8 @@ class Application:
                 return self._handle_clear(command)
             case CommandType.SETTINGS:
                 return self._handle_settings(command)
+            case CommandType.CONFIGURE:
+                return self._handle_configure(command)
             case CommandType.EDIT:
                 return self._handle_edit(command)
             case CommandType.STATUS:
@@ -376,6 +378,9 @@ class Application:
         self.stdout.write(
             "  /large <peer_id>          - Send 1000B fragmented test message\n"
         )
+        self.stdout.write(
+            "  /configure                - System hardware and network diagnostics\n"
+        )
         self.stdout.write("  /clear                    - Clear terminal screen\n")
         self.stdout.write("  help                      - Show this help message\n")
         self.stdout.write("  exit                      - Exit the application\n")
@@ -402,6 +407,18 @@ class Application:
     def _handle_settings(self, command: Command) -> bool:
         nick = self.config.nickname if self.config else "Anonymous"
         self.stdout.write(f"BitChat Configuration:\n  Nickname: {nick}\n")
+        self.stdout.flush()
+        return True
+
+    def _handle_configure(self, command: Command) -> bool:
+        from bitchat.platform.capabilities import (
+            detect_system_capabilities,
+            format_configure_report,
+        )
+
+        report = self._run_async(detect_system_capabilities())
+        formatted = format_configure_report(report)
+        self.stdout.write(f"\n{formatted}\n\n")
         self.stdout.flush()
         return True
 

@@ -28,7 +28,30 @@ def main() -> None:
         action="store_true",
         help="Force interactive TUI mode even if stdin is not a TTY",
     )
+    parser.add_argument(
+        "--configure",
+        action="store_true",
+        help="Run system configuration, hardware detection, and diagnostics",
+    )
     args = parser.parse_args()
+
+    if args.configure:
+        import asyncio
+        import contextlib
+
+        from bitchat.platform.capabilities import (
+            detect_system_capabilities,
+            format_configure_report,
+        )
+
+        reconfigure_fn = getattr(sys.stdout, "reconfigure", None)
+        if callable(reconfigure_fn):
+            with contextlib.suppress(Exception):
+                reconfigure_fn(encoding="utf-8", errors="replace")
+
+        report = asyncio.run(detect_system_capabilities())
+        print(format_configure_report(report))
+        sys.exit(0)
 
     use_cli = args.cli or (not args.tui and not sys.stdin.isatty())
 

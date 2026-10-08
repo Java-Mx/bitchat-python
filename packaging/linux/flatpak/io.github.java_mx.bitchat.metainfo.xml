@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.java_mx.bitchat</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>BitChat</name>
+  <summary>Terminal peer-to-peer chat client over Bluetooth Low Energy and LAN</summary>
+  <description>
+    <p>
+      BitChat is a decentralized, end-to-end encrypted terminal chat application
+      designed for resilient local communication over Bluetooth Low Energy (BLE)
+      and Local Area Networks (LAN) without requiring internet connectivity or servers.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Decentralized peer discovery over BLE advertisements and UDP broadcast</li>
+      <li>End-to-end encryption utilizing the Noise Protocol Framework (Noise XX handshake)</li>
+      <li>Multi-hop mesh message routing and automatic fragment reassembly</li>
+      <li>Interactive terminal user interface powered by Textual</li>
+      <li>Dual-stack BLE and LAN transport with automatic network loss recovery</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.java_mx.bitchat.desktop</launchable>
+  <url type="homepage">https://github.com/Java-Mx/bitchat-python</url>
+  <url type="bugtracker">https://github.com/Java-Mx/bitchat-python/issues</url>
+  <url type="vcs-browser">https://github.com/Java-Mx/bitchat-python</url>
+  <provides>
+    <binary>bitchat</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-08">
+      <description>
+        <p>Production release introducing native Linux packaging, LAN transport, and system diagnostics.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

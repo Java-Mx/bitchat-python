@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import platform
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -66,6 +67,8 @@ class BLEAdapterManager:
 
         if os.name == "nt":
             info = await self._check_windows_adapter()
+        elif platform.system() == "Linux":
+            info = await self._check_linux_adapter()
         else:
             info = await self._check_generic_adapter()
 
@@ -177,6 +180,45 @@ class BLEAdapterManager:
                 radio_state="unavailable",
                 name=f"Error: {e}",
             )
+
+    async def _check_linux_adapter(self) -> AdapterInfo:
+        """Query Linux BlueZ and D-Bus interfaces for real hardware capabilities."""
+        from bitchat.platform.capabilities import detect_bluetooth_info
+
+        try:
+            bt_cap = await detect_bluetooth_info()
+            if bt_cap.adapter == "Not detected" or bt_cap.bluez in (
+                "Not detected",
+                "Not running",
+            ):
+                return AdapterInfo(
+                    is_available=False,
+                    radio_state="unavailable",
+                    name="No Bluetooth Adapter"
+                    if bt_cap.adapter == "Not detected"
+                    else "BlueZ Not Running",
+                )
+
+            if bt_cap.permissions == "Permission denied":
+                return AdapterInfo(
+                    is_available=True,
+                    radio_state="disabled",
+                    name=f"{bt_cap.adapter} (Permission denied)",
+                )
+
+            is_radio_off = "Disabled" in bt_cap.ble_central
+            radio_st = "off" if is_radio_off else "on"
+
+            return AdapterInfo(
+                is_available=True,
+                radio_state=radio_st,
+                is_peripheral_supported=bt_cap.is_peripheral_available,
+                is_central_supported=bt_cap.is_central_available,
+                name=bt_cap.adapter,
+            )
+        except Exception as e:
+            logger.debug("Linux Bluetooth capability check failed: %s", e)
+            return await self._check_generic_adapter()
 
     async def _check_generic_adapter(self) -> AdapterInfo:
         """Generic fallback adapter check for non-Windows platforms."""

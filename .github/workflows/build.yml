@@ -102,3 +102,85 @@ jobs:
             dist/BitChat-*-windows-x64.exe.sha256
             manifests/
             packaging/windows/winget/
+
+  package-linux:
+    name: Build & Validate Linux Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev dpkg-dev
+
+      - name: Install dependencies (uv sync --all-groups)
+        run: uv sync --all-groups
+
+      - name: Run Ruff Checks
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Run Pyright Type Checking
+        run: uv run pyright
+
+      - name: Run Packaging Unit Tests
+        run: uv run pytest tests/unit/test_packaging_linux.py tests/unit/test_package.py
+
+      - name: Build Linux Distributables (.deb & AppImage)
+        run: uv run python packaging/linux/build.py
+
+      - name: Verify Linux Packaging Artifacts
+        run: |
+          version=$(grep '^version = ' pyproject.toml | cut -d '"' -f 2)
+          deb_file="dist/bitchat_${version}_amd64.deb"
+          appimage_file="dist/BitChat-${version}-x86_64.AppImage"
+          
+          if [ ! -f "$deb_file" ]; then
+            echo "Expected .deb package $deb_file not found!" >&2
+            exit 1
+          fi
+          if [ ! -f "$appimage_file" ]; then
+            echo "Expected AppImage $appimage_file not found!" >&2
+            exit 1
+          fi
+          
+          # Test .deb installation and uninstallation
+          echo "Testing .deb installation..."
+          sudo dpkg -i "$deb_file"
+          which bitchat
+          bitchat --version
+          bitchat --help
+          bitchat --configure
+          sudo dpkg -r bitchat
+          
+          # Test AppImage execution
+          echo "Testing AppImage execution..."
+          chmod +x "$appimage_file"
+          ./"$appimage_file" --version
+          ./"$appimage_file" --help
+          ./"$appimage_file" --configure
+          
+          echo "Linux artifact validation succeeded!"
+
+      - name: Upload Linux Packaging Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-distributables
+          path: |
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*-x86_64.AppImage
+            dist/*-x86_64.AppImage.sha256
+            packaging/linux/flatpak/
+

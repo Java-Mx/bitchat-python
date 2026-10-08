@@ -24,6 +24,7 @@ class CommandType(StrEnum):
     INFO = "info"
     PUBLIC = "public"
     TRANSPORT = "transport"
+    CONFIGURE = "configure"
     EMPTY = "empty"
     UNKNOWN = "unknown"
 
@@ -151,6 +152,13 @@ COMMAND_REGISTRY: list[CommandSpec] = [
     ),
 ]
 
+CONFIGURE_SPEC = CommandSpec(
+    name="/configure",
+    usage="/configure",
+    description="Run system configuration and hardware diagnostics",
+    category="System",
+)
+
 
 def get_command_suggestions(prefix: str) -> list[CommandSpec]:
     """Return matching CommandSpecs given an input prefix starting with '/'."""
@@ -159,7 +167,10 @@ def get_command_suggestions(prefix: str) -> list[CommandSpec]:
         return []
     if norm == "/":
         return list(COMMAND_REGISTRY)
-    return [spec for spec in COMMAND_REGISTRY if spec.name.lower().startswith(norm)]
+    results = [spec for spec in COMMAND_REGISTRY if spec.name.lower().startswith(norm)]
+    if norm.startswith("/conf") and CONFIGURE_SPEC not in results:
+        results.append(CONFIGURE_SPEC)
+    return results
 
 
 @dataclass(frozen=True)
@@ -309,6 +320,13 @@ class CommandParser:
                 command_type=CommandType.INFO,
                 raw_input=text,
                 args=[tokens[1]],
+            )
+
+        if first_token in ("configure", "/configure"):
+            return Command(
+                command_type=CommandType.CONFIGURE,
+                raw_input=text,
+                args=tokens[1:],
             )
 
         if first_token in ("settings", "/settings", "config", "/config"):

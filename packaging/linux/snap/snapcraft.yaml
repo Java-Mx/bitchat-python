@@ -1,0 +1,34 @@
+name: bitchat
+base: core24
+version: '0.1.0'
+summary: Python terminal client for BitChat BLE and LAN mesh messaging
+description: |
+  BitChat is a decentralized peer-to-peer terminal chat client operating
+  over Bluetooth Low Energy (BLE) and Local Area Networks (LAN) with end-to-end
+  encryption using the Noise Protocol (X25519 / AES-GCM) and an interactive
+  terminal user interface built with Textual.
+
+grade: stable
+confinement: strict
+
+apps:
+  bitchat:
+    command: bin/bitchat
+    plugs:
+      - network
+      - network-bind
+      - bluez
+    environment:
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+
+parts:
+  bitchat:
+    plugin: python
+    source: .
+    build-packages:
+      - gcc
+      - libdbus-1-dev
+      - pkg-config
+    stage-packages:
+      - libdbus-1-3
