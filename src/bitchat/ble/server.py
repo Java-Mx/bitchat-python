@@ -207,9 +207,10 @@ class BLEServer:
                 await self._wait_for_gatt_advertisement_status(self._provider)
             except BLEError as adv_err:
                 # GATT advertising failed (e.g., hardware without peripheral support).
-                # Log a warning and fall back to central‑only mode instead of aborting.
+                # Log a warning and fall back to central-only mode instead of aborting.
                 logger.warning(
-                    "GATT service advertising failed (%s); continuing without peripheral role",
+                    "GATT service advertising failed (%s); "
+                    "continuing without peripheral role",
                     adv_err,
                 )
                 self._is_advertising = False
