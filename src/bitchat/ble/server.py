@@ -203,7 +203,19 @@ class BLEServer:
             advertising_params.is_connectable = True
             advertising_params.is_discoverable = True
             self._provider.start_advertising_with_parameters(advertising_params)
-            await self._wait_for_gatt_advertisement_status(self._provider)
+            try:
+                await self._wait_for_gatt_advertisement_status(self._provider)
+            except BLEError as adv_err:
+                # GATT advertising failed (e.g., hardware without peripheral support).
+                # Log a warning and fall back to central‑only mode instead of aborting.
+                logger.warning(
+                    "GATT service advertising failed (%s); continuing without peripheral role",
+                    adv_err,
+                )
+                self._is_advertising = False
+                # Clean up any partially created WinRT resources.
+                self._cleanup_windows_resources()
+                return
 
             # Broadcast companion manufacturer advertisement so nodes detect BitChat
             try:
