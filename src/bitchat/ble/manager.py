@@ -69,7 +69,10 @@ class BLEManager:
             raise ValueError(
                 f"sender_id must be {SENDER_ID_SIZE} bytes, got {len(sender_id)}"
             )
-        self.sender_id = bytes(sender_id)
+        new_id = bytes(sender_id)
+        if new_id != self.sender_id:
+            self.scanner.clear()
+        self.sender_id = new_id
         for transport in self._transports.values():
             transport.sender_id = self.sender_id
 

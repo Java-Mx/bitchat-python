@@ -171,3 +171,280 @@ async def test_transport_switching_lifecycle(
         assert "Unknown transport" in bad_msg
 
         await coordinator.stop()
+
+
+@pytest.mark.asyncio
+async def test_switch_transport_stops_ble_and_lan_services_and_clears_peers(
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
+) -> None:
+    from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
+
+    from bitchat.network.adapter import NetworkInfo
+
+    server_backend = MockBLEServerBackend()
+    ble_manager = BLEManager(
+        sender_id=test_identity.peer_id,
+        scanner_factory=lambda **kw: MockBleakScanner(
+            kw["detection_callback"], kw["service_uuids"]
+        ),
+    )
+    ble_server = BLEServer(backend=server_backend)
+    coordinator = SessionCoordinator(
+        local_identity=test_identity,
+        ble_manager=ble_manager,
+        ble_server=ble_server,
+        mesh_router=MeshRouter(test_identity.peer_id),
+        nickname="AliceNode",
+        storage=mock_storage,
+    )
+
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="TestLAN",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        await coordinator.start()
+        bt_transport: Any = coordinator._transports["bluetooth"]
+        lan_transport: Any = coordinator._transports["lan"]
+        assert bt_transport.is_scanning is True
+        assert bt_transport.ble_server.is_advertising is True
+
+        # Switch BLE -> LAN: BLE scanning and advertising must stop
+        ok_lan, _ = await coordinator.switch_transport("lan")
+        assert ok_lan is True
+        assert bt_transport.is_scanning is False
+        assert bt_transport.ble_server.is_advertising is False
+        assert lan_transport.discovery.is_running is True
+        assert lan_transport.server.is_listening is True
+
+        # Populate LAN discovered peer and switch LAN -> BLE
+        lan_transport.discovery._discovered_peers["192.168.1.99:41235"] = (
+            LANDiscoveredPeer(
+                address="192.168.1.99:41235",
+                ip="192.168.1.99",
+                port=41235,
+                peer_id="fedcba9876543210",
+                nickname="Bob",
+            )
+        )
+        coordinator._handle_peer_discovered(
+            lan_transport.discovery._discovered_peers["192.168.1.99:41235"]
+        )
+        assert "fedcba9876543210" in coordinator.peer_addresses
+
+        ok_bt, _ = await coordinator.switch_transport("bluetooth")
+        assert ok_bt is True
+        assert lan_transport.discovery.is_running is False
+        assert lan_transport.server.is_listening is False
+        assert lan_transport.discovered_peers == {}
+        assert coordinator.peer_addresses == {}
+        assert bt_transport.is_scanning is True
+        assert bt_transport.ble_server.is_advertising is True
+
+        await coordinator.stop()
+
+
+def test_coordinator_suppresses_duplicate_discovered_status_for_same_peer_id(
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
+) -> None:
+    coordinator = SessionCoordinator(
+        local_identity=test_identity,
+        ble_manager=BLEManager(sender_id=test_identity.peer_id),
+        ble_server=BLEServer(),
+        mesh_router=MeshRouter(test_identity.peer_id),
+        nickname="Local",
+        storage=mock_storage,
+    )
+    events: list[tuple[str, str]] = []
+    coordinator.on_peer_status_changed = lambda addr, status: events.append(
+        (addr, status)
+    )
+
+    peer_port_1 = LANDiscoveredPeer(
+        address="192.168.56.1:52616",
+        ip="192.168.56.1",
+        port=52616,
+        peer_id="fedcba9876543210",
+        nickname="Alice",
+    )
+    peer_port_2 = LANDiscoveredPeer(
+        address="192.168.56.1:55250",
+        ip="192.168.56.1",
+        port=55250,
+        peer_id="fedcba9876543210",
+        nickname="Alice",
+    )
+
+    coordinator._handle_peer_discovered(peer_port_1)
+    coordinator._handle_peer_discovered(peer_port_1)
+    coordinator._handle_peer_discovered(peer_port_2)
+
+    discovered_msgs = [s for _, s in events if s.startswith("Discovered:")]
+    assert discovered_msgs == ["Discovered: Alice"]
+    assert coordinator.peer_addresses["fedcba9876543210"] == "192.168.56.1:55250"
+    assert "192.168.56.1:52616" not in coordinator.address_to_peer_id
+    assert coordinator.address_to_peer_id["192.168.56.1:55250"] == "fedcba9876543210"
+
+
+@pytest.mark.asyncio
+async def test_rapid_concurrent_transport_switches_are_serialized_and_preserve_state(
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
+) -> None:
+    import asyncio
+
+    from tests.ble.mocks import MockBleakScanner, MockBLEServerBackend
+
+    from bitchat.network.adapter import NetworkInfo
+    from bitchat.transport.base import TransportState
+
+    server_backend = MockBLEServerBackend()
+    ble_manager = BLEManager(
+        sender_id=test_identity.peer_id,
+        scanner_factory=lambda **kw: MockBleakScanner(
+            kw["detection_callback"], kw["service_uuids"]
+        ),
+    )
+    ble_server = BLEServer(backend=server_backend)
+    coordinator = SessionCoordinator(
+        local_identity=test_identity,
+        ble_manager=ble_manager,
+        ble_server=ble_server,
+        mesh_router=MeshRouter(test_identity.peer_id),
+        nickname="AliceNode",
+        storage=mock_storage,
+    )
+
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="TestLAN",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        await coordinator.start()
+        results = await asyncio.gather(
+            coordinator.switch_transport("lan"),
+            coordinator.switch_transport("bluetooth"),
+            coordinator.switch_transport("lan"),
+        )
+        assert all(ok for ok, _ in results)
+        assert coordinator.active_transport_name == "lan"
+        assert coordinator.active_transport.is_running is True
+        await coordinator.stop()
+
+    # Failed switch to LAN when disconnected preserves UNAVAILABLE state & error
+    disc_info = NetworkInfo(
+        status="Disconnected",
+        interface="Unavailable",
+        ssid="unavailable",
+        local_ip="",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=disc_info):
+        ok, _ = await coordinator.switch_transport("lan")
+        assert ok is False
+        assert coordinator.active_transport.state == TransportState.UNAVAILABLE
+        assert (
+            coordinator.active_transport.get_telemetry()["error_message"]
+            == "Local network is disconnected."
+        )
+
+
+def test_ble_scanner_cleared_and_mac_rotation_deduplicated_on_identity_and_scan(
+    test_identity: LocalIdentity,
+) -> None:
+    import uuid
+
+    from bitchat.ble.scanner import BLEScanner
+    from bitchat.protocol.constants import BITCHAT_SERVICE_UUID
+
+    scanner = BLEScanner()
+    srv_bytes = uuid.UUID(BITCHAT_SERVICE_UUID).bytes
+
+    class _Dev:
+        def __init__(self, address: str) -> None:
+            self.address = address
+            self.name = "BitChat_Alice"
+
+    class _Adv:
+        def __init__(self) -> None:
+            self.service_uuids = [BITCHAT_SERVICE_UUID]
+            self.manufacturer_data = {
+                0xFFFF: b"BC" + srv_bytes + b"fedcba9876543210|Alice"
+            }
+            self.local_name = "BitChat_Alice"
+            self.rssi = -55
+
+    dev1: Any = _Dev("AA:BB:CC:DD:EE:01")
+    dev2: Any = _Dev("AA:BB:CC:DD:EE:02")
+    adv: Any = _Adv()
+    scanner._detection_callback(dev1, adv)
+    scanner._detection_callback(dev2, adv)
+
+    assert list(scanner.discovered_peers.keys()) == ["AA:BB:CC:DD:EE:02"]
+    assert scanner.discovered_peers["AA:BB:CC:DD:EE:02"].peer_id == "fedcba9876543210"
+    assert scanner.discovered_peers["AA:BB:CC:DD:EE:02"].nickname == "Alice"
+
+    ble_manager = BLEManager(sender_id=test_identity.peer_id)
+    ble_manager.scanner._discovered_peers.update(scanner.discovered_peers)
+    new_identity = LocalIdentity.generate()
+    ble_manager.update_sender_id(new_identity.peer_id)
+    assert ble_manager.scanner.discovered_peers == {}
+
+
+@pytest.mark.asyncio
+async def test_inbound_lan_unicast_and_disconnect_preserves_discovered_endpoint(
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
+) -> None:
+    from bitchat.protocol.constants import MessageType
+    from bitchat.protocol.packet import BitchatPacket
+
+    coordinator = SessionCoordinator(
+        local_identity=test_identity,
+        ble_manager=BLEManager(sender_id=test_identity.peer_id),
+        ble_server=BLEServer(),
+        mesh_router=MeshRouter(test_identity.peer_id),
+        nickname="Local",
+        storage=mock_storage,
+        initial_transport="lan",
+    )
+    lan_transport: Any = coordinator.active_transport
+    disc_peer = LANDiscoveredPeer(
+        address="192.168.1.99:41235",
+        ip="192.168.1.99",
+        port=41235,
+        peer_id="fedcba9876543210",
+        nickname="Bob",
+    )
+    lan_transport.discovery._discovered_peers["192.168.1.99:41235"] = disc_peer
+    coordinator._handle_peer_discovered(disc_peer)
+
+    sent_to: list[tuple[str, BitchatPacket]] = []
+
+    class _InboundConn:
+        is_ready = True
+        is_inbound = True
+
+        async def send_packet(self, pkt: BitchatPacket) -> None:
+            sent_to.append(("192.168.1.99:61234", pkt))
+
+    lan_transport._connections["192.168.1.99:61234"] = _InboundConn()
+    coordinator.address_to_peer_id["192.168.1.99:61234"] = "fedcba9876543210"
+
+    pkt = BitchatPacket.create(
+        message_type=MessageType.Message,
+        sender_id=test_identity.peer_id,
+        payload=b"hello inbound",
+    )
+    await coordinator._send_packet("fedcba9876543210", pkt)
+    assert len(sent_to) == 1
+    assert sent_to[0][0] == "192.168.1.99:61234"
+
+    # Disconnect inbound socket while peer is still in discovered_peers
+    lan_transport._connections.pop("192.168.1.99:61234", None)
+    coordinator._handle_peer_disconnected("192.168.1.99:61234")
+    assert coordinator.peer_addresses.get("fedcba9876543210") == "192.168.1.99:41235"
+    assert (
+        coordinator.address_to_peer_id.get("192.168.1.99:41235") == "fedcba9876543210"
+    )

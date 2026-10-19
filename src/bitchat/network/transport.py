@@ -162,13 +162,18 @@ class LANTransport(BaseTransport):
         """Handle host network adapter changes (Wi-Fi disconnect/reconnect,
         IP change).
         """
+        if not self._is_running and self._state == TransportState.OFFLINE:
+            return
+
         logger.info(
             "LANTransport network change: status=%s, interface=%s, ip=%s",
             info.status,
             info.interface,
             info.local_ip,
         )
-        self.discovery.ssid = info.ssid
+        self.discovery.ssid = (
+            info.ssid if info.ssid and info.ssid.lower() != "unavailable" else ""
+        )
         if not info.is_connected:
             self._set_state(TransportState.UNAVAILABLE)
             self._error_message = "Local network is disconnected."
@@ -201,6 +206,7 @@ class LANTransport(BaseTransport):
                 self.discovery.update_listening_port(self.server.bound_port)
             if not self.discovery.is_running:
                 await self.discovery.start()
+            self._is_running = True
             self._error_message = None
             self._set_state(TransportState.SCANNING)
         except Exception as e:
@@ -208,6 +214,19 @@ class LANTransport(BaseTransport):
             self._error_message = f"LAN recovery failed: {e}"
             if self.on_error:
                 self.on_error(self._error_message)
+
+    async def _release_partial_start(self) -> None:
+        """Stop services a failed ``start()`` may already have brought up."""
+        for label, stop in (
+            ("discovery", self.discovery.stop),
+            ("TCP server", self.server.stop),
+        ):
+            try:
+                await stop()
+            except Exception as e:
+                logger.warning(
+                    "Failed releasing LAN %s after failed start: %s", label, e
+                )
 
     async def start(self) -> None:
         """Start network adapter monitoring, TCP server, and discovery beacon."""
@@ -221,7 +240,9 @@ class LANTransport(BaseTransport):
 
             # 1. Inspect network environment
             info = self.adapter_manager.refresh()
-            self.discovery.ssid = info.ssid
+            self.discovery.ssid = (
+                info.ssid if info.ssid and info.ssid.lower() != "unavailable" else ""
+            )
 
             if not info.is_connected:
                 await self.adapter_manager.start_monitoring(
@@ -241,6 +262,7 @@ class LANTransport(BaseTransport):
             except Exception as e:
                 self._is_running = False
                 logger.warning("Could not start LAN TCP server: %s", e)
+                await self._release_partial_start()
                 self._set_state(TransportState.ERROR)
                 self._error_message = f"LAN server failed: {e}"
                 if self.on_error:
@@ -253,6 +275,7 @@ class LANTransport(BaseTransport):
             except Exception as e:
                 self._is_running = False
                 logger.warning("Could not start LAN discovery: %s", e)
+                await self._release_partial_start()
                 self._set_state(TransportState.ERROR)
                 self._error_message = f"LAN discovery failed: {e}"
                 if self.on_error:
@@ -267,19 +290,22 @@ class LANTransport(BaseTransport):
 
     async def stop(self) -> None:
         """Cleanly stop discovery, TCP server, and disconnect all peers."""
-        self._is_running = False
-        self._set_state(TransportState.OFFLINE)
-        self._error_message = None
-
-        await self.adapter_manager.stop_monitoring()
-        await self.discovery.stop()
-        await self.server.stop()
-
-        for task in list(self._background_tasks):
-            task.cancel()
-        self._background_tasks.clear()
-
         async with self._lock:
+            self._is_running = False
+            self._set_state(TransportState.OFFLINE)
+            self._error_message = None
+
+            bg_tasks = list(self._background_tasks)
+            for task in bg_tasks:
+                task.cancel()
+            if bg_tasks:
+                await asyncio.gather(*bg_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+
+            await self.adapter_manager.stop_monitoring()
+            await self.discovery.stop()
+            await self.server.stop()
+
             conns = list(self._connections.values())
             self._connections.clear()
 

@@ -286,6 +286,19 @@ class BluetoothTransport(BaseTransport):
                         )
                         self._error_message = self._peripheral_error_message
                         logger.warning("%s", self._peripheral_error_message)
+                    else:
+                        if not self.ble_server.is_advertising:
+                            server_err = (
+                                self.ble_server.get_telemetry().get("last_error")
+                                if hasattr(self.ble_server, "get_telemetry")
+                                else None
+                            )
+                            if isinstance(server_err, str) and server_err:
+                                self._peripheral_error_message = (
+                                    f"BLE peripheral advertising failed: {server_err}"
+                                )
+                                self._error_message = self._peripheral_error_message
+                                logger.warning("%s", self._peripheral_error_message)
                 else:
                     self._peripheral_error_message = (
                         "BLE peripheral role is not supported by the adapter"

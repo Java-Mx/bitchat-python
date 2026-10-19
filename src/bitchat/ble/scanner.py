@@ -93,7 +93,7 @@ class BLEScanner:
 
         # 2. Match BitChat service UUID in service_data keys
         svc_data = getattr(advertisement_data, "service_data", None)
-        if not is_bitchat and svc_data:
+        if svc_data and (not is_bitchat or extracted_peer_id is None):
             for s_uuid, s_payload in svc_data.items():
                 if str(s_uuid).lower().replace("-", "") == norm_target:
                     is_bitchat = True
@@ -103,7 +103,7 @@ class BLEScanner:
 
         # 3. Match BitChat manufacturer signature in manufacturer_data
         mfg_data = getattr(advertisement_data, "manufacturer_data", None)
-        if not is_bitchat and mfg_data:
+        if mfg_data and (not is_bitchat or extracted_peer_id is None):
             for company_id, m_payload in mfg_data.items():
                 if company_id in (0xFFFF, 0x0000):
                     raw = bytes(m_payload)
@@ -153,6 +153,17 @@ class BLEScanner:
             peer_id=extracted_peer_id,
             nickname=extracted_nick,
         )
+
+        if extracted_peer_id:
+            stale_addrs = [
+                k
+                for k, known in self._discovered_peers.items()
+                if known.peer_id
+                and known.peer_id.lower() == extracted_peer_id.lower()
+                and k != addr
+            ]
+            for k in stale_addrs:
+                self._discovered_peers.pop(k, None)
 
         self._discovered_peers[addr] = peer
 

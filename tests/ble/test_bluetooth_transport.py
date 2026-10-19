@@ -223,3 +223,29 @@ async def test_peripheral_only_adapter_does_not_start_central_scanner() -> None:
     assert transport.state == TransportState.READY
 
     await transport.stop()
+
+
+@pytest.mark.asyncio
+async def test_windows_gatt_abort_fallback_records_peripheral_error() -> None:
+    transport, _ = make_transport(adapter_info())
+
+    async def abort_without_raising() -> None:
+        transport.ble_server._is_advertising = False
+        transport.ble_server._last_error = (
+            "Windows GATT service advertising aborted (status 3): "
+            "BLE peripheral role unavailable"
+        )
+
+    transport.ble_server.start = abort_without_raising  # type: ignore[method-assign]
+    warnings: list[str] = []
+    transport.on_warning = warnings.append
+
+    await transport.start()
+
+    telemetry = transport.get_telemetry()
+    assert telemetry["advertising_active"] is False
+    assert telemetry["gatt_server_status"] == "Failed"
+    assert "status 3" in telemetry["peripheral_error"]
+    assert warnings == [telemetry["peripheral_error"]]
+
+    await transport.stop()

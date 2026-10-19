@@ -13,13 +13,19 @@ if TYPE_CHECKING:
     from textual.binding import BindingType
 
 
+GATT_FAILURE_MESSAGE = (
+    "Bluetooth hardware was detected, but BitChat could not initialize or use "
+    "the BLE GATT service. Choose how you want to continue."
+)
+
+
 class BLEErrorModal(ModalScreen[str | None]):
     """Modal dialog displayed when Bluetooth or LAN transport encounters an error.
 
     Dismiss values
     --------------
     ``"retry"``   - user pressed *Retry Adapter* / *Retry LAN*
-    ``"lan"``     - user pressed *Continue with LAN*
+    ``"lan"``     - user pressed *Continue Wi-Fi/LAN*
     ``"ble"``     - user pressed *Switch to BLE*
     ``None``      - user pressed *Continue Offline* or dismissed with Escape/Q
     """
@@ -97,7 +103,20 @@ class BLEErrorModal(ModalScreen[str | None]):
                     )
             return
 
-        if self.bluetooth_available:
+        gatt_startup_failure = (
+            self.bluetooth_available
+            and not self.central_active
+            and self.peripheral_supported
+        )
+        if gatt_startup_failure:
+            intro = f"[bold #e6edf3]{GATT_FAILURE_MESSAGE}[/bold #e6edf3]\n\n"
+            guidance = (
+                "[dim #8b949e]Windows can abort GATT advertising even when the "
+                "Bluetooth radio is on.\n"
+                "Click 'Retry Adapter' to reset BLE and try again, or continue "
+                "without Bluetooth.[/dim #8b949e]"
+            )
+        elif self.bluetooth_available:
             intro = (
                 "[bold #e6edf3]Bluetooth radio is ON; "
                 + (
@@ -106,6 +125,11 @@ class BLEErrorModal(ModalScreen[str | None]):
                     else "BLE peripheral advertising is unavailable."
                 )
                 + "[/bold #e6edf3]\n\n"
+                + (
+                    f"[bold #e6edf3]{GATT_FAILURE_MESSAGE}[/bold #e6edf3]\n\n"
+                    if self.peripheral_failure
+                    else ""
+                )
             )
             guidance = (
                 "[dim #8b949e]Windows may abort GATT advertising even when "
@@ -140,12 +164,13 @@ class BLEErrorModal(ModalScreen[str | None]):
             yield Label(
                 (
                     "[bold #d2a8ff]! BLE Peripheral Mode Warning[/bold #d2a8ff]"
-                    if self.bluetooth_available and self.peripheral_failure
+                    if self.bluetooth_available
+                    and self.peripheral_failure
+                    and self.central_active
                     else "[bold #d2a8ff]! BLE Peripheral Role Unsupported"
                     "[/bold #d2a8ff]"
                     if self.bluetooth_available and not self.peripheral_supported
-                    else "[bold #f85149]! BLE Startup Error "
-                    "• Bluetooth Available[/bold #f85149]"
+                    else "[bold #f85149]! Bluetooth Unavailable[/bold #f85149]"
                     if self.bluetooth_available
                     else "[bold #f85149]! Bluetooth Hardware Error[/bold #f85149]"
                 ),
@@ -164,7 +189,7 @@ class BLEErrorModal(ModalScreen[str | None]):
                 yield Button("Retry Adapter", id="btn-ble-retry", classes="action-btn")
                 if self.lan_available:
                     yield Button(
-                        "Continue with LAN",
+                        "Continue Wi-Fi/LAN",
                         id="btn-ble-lan",
                         classes="action-btn",
                     )

@@ -168,8 +168,25 @@ class PeerSidebar(Widget):
         transport: str = "bluetooth",
     ) -> None:
         """Update discovered peers list."""
-        self._discovered_peers = {}
+        deduped_peers: dict[str, Any] = {}
+        seen_peer_ids: dict[str, tuple[str, float]] = {}
         for addr, p in peers.items():
+            p_id = (getattr(p, "peer_id", None) or "").lower()
+            last_seen = float(getattr(p, "last_seen", 0.0) or 0.0)
+            if p_id:
+                prev = seen_peer_ids.get(p_id)
+                if prev is not None:
+                    prev_addr, prev_seen = prev
+                    if last_seen >= prev_seen:
+                        deduped_peers.pop(prev_addr, None)
+                        deduped_peers[addr] = p
+                        seen_peer_ids[p_id] = (addr, last_seen)
+                    continue
+                seen_peer_ids[p_id] = (addr, last_seen)
+            deduped_peers[addr] = p
+
+        self._discovered_peers = {}
+        for addr, p in deduped_peers.items():
             if getattr(p, "transport", "bluetooth") == "lan":
                 nick = (
                     getattr(p, "nickname", None)
@@ -206,7 +223,7 @@ class PeerSidebar(Widget):
                     )
                     view.append(ListItem(Label(f"[dim]{no_peers_msg}[/dim]")))
             else:
-                for addr, p in peers.items():
+                for addr, p in deduped_peers.items():
                     is_lan = (
                         getattr(p, "transport", "bluetooth") == "lan"
                         or transport == "lan"
@@ -227,7 +244,12 @@ class PeerSidebar(Widget):
                             f"{ip_val}:{port_val}" if ip_val and port_val else addr
                         )
                         ssid = getattr(p, "ssid", None)
-                        net_str = f"Network: {ssid} • " if ssid else ""
+                        clean_ssid = (
+                            ssid
+                            if ssid and str(ssid).strip().lower() != "unavailable"
+                            else None
+                        )
+                        net_str = f"Network: {clean_ssid} • " if clean_ssid else ""
                         item = PeerListItem(
                             Label(
                                 f"[{color}]○ {name}[/{color}]\n"

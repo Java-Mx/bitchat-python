@@ -137,3 +137,37 @@ async def test_server_start_handles_gatt_abort(monkeypatch):
     # advertising off
     await server.start()
     assert server.is_advertising is False
+
+
+@pytest.mark.asyncio
+async def test_server_stop_cleans_up_partial_winrt_resources_when_not_advertising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BLEServer.stop() releases partial WinRT handles when _is_advertising is False."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    server = BLEServer()
+    provider_stopped = False
+    publisher_stopped = False
+
+    class PartialProvider:
+        def stop_advertising(self) -> None:
+            nonlocal provider_stopped
+            provider_stopped = True
+
+    class PartialPublisher:
+        def stop(self) -> None:
+            nonlocal publisher_stopped
+            publisher_stopped = True
+
+    server._provider = PartialProvider()
+    server._publisher = PartialPublisher()
+    server._characteristic = object()
+    server._is_advertising = False
+
+    await server.stop()
+
+    assert provider_stopped is True
+    assert publisher_stopped is True
+    assert server._provider is None
+    assert server._publisher is None
+    assert server._characteristic is None

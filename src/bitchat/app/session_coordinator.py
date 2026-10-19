@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 NOISE_HANDSHAKE_TIMEOUT_SECONDS: float = 10.0
+TRANSPORT_RETRY_TIMEOUT_SECONDS: float = 30.0
 
 
 def _decode_chat_payload(payload_bytes: bytes) -> str:
@@ -79,6 +80,7 @@ class SessionCoordinator:
         self.on_lan_error: Callable[[str], None] | None = None
         self.ble_status: str = "offline"
         self.ble_error_message: str | None = None
+        self.offline_mode: bool = False
 
         self._sessions: dict[str, NoiseSession] = {}
         self._pending_messages: dict[str, list[str]] = {}
@@ -285,42 +287,47 @@ class SessionCoordinator:
 
     async def start(self) -> None:
         """Initialize active transport, callbacks, and start peer discovery."""
-        if self._is_running:
-            return
+        error_to_notify: str | None = None
+        async with self._retry_lock:
+            if self._is_running:
+                return
 
-        self._is_running = True
-        self.ble_status = "checking"
-        self.ble_error_message = None
+            self._is_running = True
+            self.ble_status = "checking"
+            self.ble_error_message = None
 
-        if self.ble_server:
-            self.ble_server.on_data_received = self._handle_server_data_received
+            if self.ble_server:
+                self.ble_server.on_data_received = self._handle_server_data_received
 
-        self.active_transport.update_identity(
-            self.local_identity.peer_id_hex, self.nickname
-        )
-        self._wire_transport_callbacks(self.active_transport)
-
-        try:
-            await self.active_transport.start()
-            self.ble_status = self.active_transport.state.value
-            await self.send_announce()
-        except Exception as e:
-            self._is_running = False
-            logger.warning(
-                "Could not start active transport %s: %s",
-                self.active_transport_name,
-                e,
+            self.active_transport.update_identity(
+                self.local_identity.peer_id_hex, self.nickname
             )
-            self.ble_status = self.active_transport.state.value
-            self.ble_error_message = str(e)
+            self._wire_transport_callbacks(self.active_transport)
+
+            try:
+                await self.active_transport.start()
+                self.ble_status = self.active_transport.state.value
+                await self.send_announce()
+            except Exception as e:
+                self._is_running = False
+                logger.warning(
+                    "Could not start active transport %s: %s",
+                    self.active_transport_name,
+                    e,
+                )
+                self.ble_status = self.active_transport.state.value
+                self.ble_error_message = str(e)
+                error_to_notify = self.ble_error_message
+
+        if error_to_notify is not None:
             if self.active_transport_name == "lan":
                 if self.on_lan_error:
-                    self.on_lan_error(self.ble_error_message)
+                    self.on_lan_error(error_to_notify)
                 elif self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
+                    self.on_ble_error(error_to_notify)
             else:
                 if self.on_ble_error:
-                    self.on_ble_error(self.ble_error_message)
+                    self.on_ble_error(error_to_notify)
 
     def _transport_is_operational(self) -> bool:
         """Return True only if the active transport is actually usable."""
@@ -337,7 +344,10 @@ class SessionCoordinator:
         if self.active_transport_name == "bluetooth":
             if telem.get("adapter_state") != "On":
                 if self._uses_injected_ble_backend():
-                    return telem.get("scanner_status") == "Active"
+                    return bool(
+                        telem.get("scanner_status") == "Active"
+                        or telem.get("advertising_active")
+                    )
                 return False
             return bool(
                 (
@@ -378,29 +388,98 @@ class SessionCoordinator:
             return False
         return lan.is_available()
 
+    def _preserve_failed_transport_state(
+        self,
+        transport: BaseTransport,
+        failed_state: TransportState,
+        error_message: str,
+    ) -> TransportState:
+        """Restore failure state and error message after _stop_transport_safely."""
+        effective_state = (
+            failed_state
+            if failed_state
+            in (
+                TransportState.UNAVAILABLE,
+                TransportState.DISABLED,
+                TransportState.ERROR,
+            )
+            else TransportState.UNAVAILABLE
+        )
+        if hasattr(transport, "_state"):
+            transport._state = effective_state  # type: ignore[attr-defined]
+        if hasattr(transport, "_error_message"):
+            transport._error_message = error_message  # type: ignore[attr-defined]
+        return effective_state
+
     async def retry_active_transport(self) -> bool:
-        """Re-initialize the active transport after failure. Success is operational."""
+        """Re-initialize the active transport after failure. Success is operational.
+
+        The attempt is bounded by ``TRANSPORT_RETRY_TIMEOUT_SECONDS`` and
+        serialised by ``_retry_lock`` so repeated clicks cannot stack up
+        concurrent restarts. Failed resources are released before returning.
+        """
         async with self._retry_lock:
             self.ble_status = "checking"
             self.ble_error_message = None
-            with contextlib.suppress(Exception):
-                await self.active_transport.stop()
+            await self._stop_transport_safely(
+                self.active_transport_name, self.active_transport
+            )
             try:
-                await self.active_transport.start()
+                await asyncio.wait_for(
+                    self.active_transport.start(),
+                    timeout=TRANSPORT_RETRY_TIMEOUT_SECONDS,
+                )
                 self._is_running = True
                 self.ble_status = self.active_transport.state.value
                 if not self._transport_is_operational():
-                    self.ble_status = self.active_transport.state.value
-                    self.ble_error_message = (
+                    failed_state = self.active_transport.state
+                    failed_message = (
                         self.active_transport.get_telemetry().get("error_message")
                         or "Transport is not operational"
                     )
+                    await self._stop_transport_safely(
+                        self.active_transport_name, self.active_transport
+                    )
+                    effective_state = self._preserve_failed_transport_state(
+                        self.active_transport, failed_state, str(failed_message)
+                    )
+                    self._is_running = False
+                    self.ble_status = effective_state.value
+                    self.ble_error_message = str(failed_message)
                     return False
+                self.offline_mode = False
                 await self.send_announce()
                 return True
+            except TimeoutError:
+                logger.warning(
+                    "Retry of %s transport timed out after %.0fs",
+                    self.active_transport_name,
+                    TRANSPORT_RETRY_TIMEOUT_SECONDS,
+                )
+                err_msg = (
+                    f"Retry timed out after {TRANSPORT_RETRY_TIMEOUT_SECONDS:.0f}s"
+                )
+                await self._stop_transport_safely(
+                    self.active_transport_name, self.active_transport
+                )
+                self._preserve_failed_transport_state(
+                    self.active_transport, TransportState.UNAVAILABLE, err_msg
+                )
+                self._is_running = False
+                self.ble_status = "unavailable"
+                self.ble_error_message = err_msg
+                return False
             except Exception as e:
                 logger.warning("Retry active transport failed: %s", e)
-                self.ble_status = self.active_transport.state.value
+                failed_state = self.active_transport.state
+                await self._stop_transport_safely(
+                    self.active_transport_name, self.active_transport
+                )
+                effective_state = self._preserve_failed_transport_state(
+                    self.active_transport, failed_state, str(e)
+                )
+                self._is_running = False
+                self.ble_status = effective_state.value
                 self.ble_error_message = str(e)
                 return False
 
@@ -429,80 +508,156 @@ class SessionCoordinator:
             with contextlib.suppress(Exception):
                 await transport.stop()
 
-    async def switch_transport(self, target_transport: str) -> tuple[bool, str]:
-        """Switch between Bluetooth and LAN with session teardown and fresh identity."""
-        target = target_transport.lower().strip()
-        if target not in ("bluetooth", "lan"):
-            return False, f"Unknown transport: {target}"
+    def _detach_transport_callbacks(self, transport: BaseTransport) -> None:
+        """Stop a retired transport from delivering events to the coordinator."""
+        transport.on_packet_received = None
+        transport.on_peer_discovered = None
+        transport.on_peer_connected = None
+        transport.on_peer_disconnected = None
+        transport.on_state_changed = None
+        transport.on_error = None
+        transport.on_warning = None
 
-        if target == self.active_transport_name and self.active_transport.is_running:
-            return True, f"Already active on {target} transport."
+    async def _stop_transport_safely(self, name: str, transport: BaseTransport) -> None:
+        """Stop a transport, logging (not propagating) shutdown failures."""
+        try:
+            await transport.stop()
+        except Exception as e:
+            logger.warning("Error stopping %s transport: %s", name, e)
 
-        logger.info("Switching transport: %s -> %s", self.active_transport_name, target)
-
-        # 1. Stop old transport completely
-        await self.active_transport.stop()
-
-        # 2. Close active Noise sessions
+    async def _reset_session_state(self) -> None:
+        """Close Noise sessions and clear peer tables bound to a transport."""
         await self._cancel_handshake_timeouts()
         for session in self._sessions.values():
             session.close()
         self._sessions.clear()
-
-        # 3. Clear active peer tables and pending messages
         self.peer_addresses.clear()
         self.address_to_peer_id.clear()
         self.peer_nicknames.clear()
         self._announced_peers.clear()
         self._pending_messages.clear()
 
-        # 4. Generate fresh ephemeral transport identity
-        old_id = self.local_identity.peer_id_hex
-        self.local_identity = LocalIdentity.generate()
-        new_id = self.local_identity.peer_id_hex
-        self.mesh_router.local_peer_id = self.local_identity.peer_id
-        for transport in self._transports.values():
-            transport.update_identity(new_id, self.nickname)
-        logger.info(
-            "Transport switch (%s -> %s): generated fresh identity %s (old: %s)",
-            self.active_transport_name,
-            target,
-            new_id,
-            old_id,
-        )
+    async def go_offline(self) -> None:
+        """Deliberately disable all networking for this session.
 
-        # 5. Switch active transport
-        if target == "lan":
-            if "lan" not in self._transports:
-                self._transports["lan"] = LANTransport(
-                    local_peer_id=new_id,
-                    local_nickname=self.nickname,
-                )
-            self.active_transport = self._transports["lan"]
-        else:
-            if "bluetooth" not in self._transports:
+        Stops every transport (including their adapter/network monitors, so
+        nothing restarts in the background), closes sessions, and records that
+        the user chose offline mode. The persisted identity is untouched.
+        Idempotent and safe after partial initialization.
+        """
+        async with self._retry_lock:
+            self.offline_mode = True
+            for name, transport in self._transports.items():
+                await self._stop_transport_safely(name, transport)
+            await self._reset_session_state()
+            self._is_running = False
+            self.ble_status = "offline"
+            self.ble_error_message = None
+
+    async def switch_transport(self, target_transport: str) -> tuple[bool, str]:
+        """Switch between Bluetooth and LAN with session teardown and fresh identity."""
+        target = target_transport.lower().strip()
+        if target in ("wifi", "wi-fi", "lan", "ethernet"):
+            target = "lan"
+        elif target in ("ble", "bluetooth", "bt"):
+            target = "bluetooth"
+        if target not in ("bluetooth", "lan"):
+            return False, f"Unknown transport: {target}"
+
+        async with self._retry_lock:
+            if (
+                target == self.active_transport_name
+                and self.active_transport.is_running
+            ):
+                return True, f"Already active on {target} transport."
+
+            if target == "bluetooth" and "bluetooth" not in self._transports:
+                # Validate before tearing anything down or rotating identity.
                 return False, "Bluetooth transport not available"
-            self.active_transport = self._transports["bluetooth"]
 
-        self.active_transport_name = target
-        self._wire_transport_callbacks(self.active_transport)
-
-        # 6. Start new transport
-        try:
-            await self.active_transport.start()
-            self.ble_status = self.active_transport.state.value
-            await self.send_announce()
-            display_name = "LAN / Wi-Fi" if target == "lan" else "Bluetooth"
-            return True, (
-                f"Switched transport to {display_name}. "
-                f"New secure chat session created. "
-                f"New peer identity: {new_id[:12]}"
+            logger.info(
+                "Switching transport: %s -> %s", self.active_transport_name, target
             )
-        except Exception as e:
-            logger.error("Failed starting %s transport: %s", target, e)
-            self.ble_status = "unavailable"
-            self.ble_error_message = str(e)
-            return False, f"Failed starting {target} transport: {e}"
+
+            # 1. Stop old transport completely and detach it from the coordinator
+            old_transport = self.active_transport
+            await self._stop_transport_safely(self.active_transport_name, old_transport)
+            self._detach_transport_callbacks(old_transport)
+
+            # 2-3. Close active Noise sessions, clear peer tables and pending messages
+            await self._reset_session_state()
+
+            # 4. Generate fresh ephemeral transport identity (never persisted)
+            old_id = self.local_identity.peer_id_hex
+            self.local_identity = LocalIdentity.generate()
+            new_id = self.local_identity.peer_id_hex
+            self.mesh_router.local_peer_id = self.local_identity.peer_id
+            for transport in self._transports.values():
+                transport.update_identity(new_id, self.nickname)
+            logger.info(
+                "Transport switch (%s -> %s): generated fresh identity %s (old: %s)",
+                self.active_transport_name,
+                target,
+                new_id,
+                old_id,
+            )
+
+            # 5. Switch active transport
+            if target == "lan":
+                if "lan" not in self._transports:
+                    self._transports["lan"] = LANTransport(
+                        local_peer_id=new_id,
+                        local_nickname=self.nickname,
+                    )
+                self.active_transport = self._transports["lan"]
+            else:
+                self.active_transport = self._transports["bluetooth"]
+
+            self.active_transport_name = target
+            self._wire_transport_callbacks(self.active_transport)
+
+            # 6. Start new transport; report success only if it is really operational
+            try:
+                await self.active_transport.start()
+                if (
+                    not self.active_transport.is_running
+                    or self.active_transport.state
+                    in (
+                        TransportState.UNAVAILABLE,
+                        TransportState.DISABLED,
+                        TransportState.ERROR,
+                        TransportState.OFFLINE,
+                        TransportState.CHECKING,
+                    )
+                ):
+                    failed_message = (
+                        self.active_transport.get_telemetry().get("error_message")
+                        or f"{target} transport is not operational"
+                    )
+                    raise RuntimeError(failed_message)
+                self.ble_status = self.active_transport.state.value
+                self.ble_error_message = None
+                self.offline_mode = False
+                self._is_running = True
+                await self.send_announce()
+                display_name = "LAN / Wi-Fi" if target == "lan" else "Bluetooth"
+                return True, (
+                    f"Switched transport to {display_name}. "
+                    f"New secure chat session created. "
+                    f"New peer identity: {new_id[:12]}"
+                )
+            except Exception as e:
+                logger.error("Failed starting %s transport: %s", target, e)
+                failed_state = self.active_transport.state
+                # Release anything the failed start brought up (sockets, tasks).
+                await self._stop_transport_safely(target, self.active_transport)
+                effective_state = self._preserve_failed_transport_state(
+                    self.active_transport, failed_state, str(e)
+                )
+                self._is_running = False
+                self.ble_status = effective_state.value
+                self.ble_error_message = str(e)
+                return False, f"Failed starting {target} transport: {e}"
 
     def set_nickname(self, nickname: str) -> None:
         """Update local nickname across active transports."""
@@ -567,6 +722,18 @@ class SessionCoordinator:
         )
         await self._send_packet(target_peer_id_hex, packet)
 
+    def _resolve_connected_peer_address(self, target_peer_id_hex: str) -> str | None:
+        """Return an active connected transport address for target_peer_id_hex."""
+        connected = set(self.active_transport.connected_peers)
+        target_addr = self.peer_addresses.get(target_peer_id_hex)
+        if target_addr and target_addr in connected:
+            return target_addr
+        target_lower = target_peer_id_hex.lower()
+        for addr, pid in self.address_to_peer_id.items():
+            if pid.lower() == target_lower and addr in connected:
+                return addr
+        return None
+
     async def _send_packet(
         self, target_peer_id_hex: str | None, packet: BitchatPacket
     ) -> None:
@@ -574,9 +741,11 @@ class SessionCoordinator:
         self.mesh_router.deduplicator.record(packet)
 
         target_addr = (
-            self.peer_addresses.get(target_peer_id_hex) if target_peer_id_hex else None
+            self._resolve_connected_peer_address(target_peer_id_hex)
+            if target_peer_id_hex
+            else None
         )
-        if target_addr and target_addr in self.active_transport.connected_peers:
+        if target_addr:
             await self.active_transport.send_to_peer(target_addr, packet)
             return
 
@@ -662,12 +831,8 @@ class SessionCoordinator:
 
         try:
             if target_peer_id_hex:
-                target_addr = self.peer_addresses.get(target_peer_id_hex)
-                if (
-                    target_addr
-                    and target_addr in self.active_transport.connected_peers
-                    and target_addr != exclude_ingress
-                ):
+                target_addr = self._resolve_connected_peer_address(target_peer_id_hex)
+                if target_addr and target_addr != exclude_ingress:
                     try:
                         await self.active_transport.send_to_peer(target_addr, packet)
                         return
@@ -832,15 +997,41 @@ class SessionCoordinator:
 
     def _handle_peer_discovered(self, peer: Any) -> None:
         """Record a peer discovered by the active transport."""
-        if peer.peer_id:
-            clean_pid = peer.peer_id.lower()
+        clean_pid = peer.peer_id.lower() if getattr(peer, "peer_id", None) else ""
+        name = getattr(peer, "name", None) or getattr(peer, "nickname", None)
+        previous_nick = self.peer_nicknames.get(clean_pid) if clean_pid else None
+        announce_key = clean_pid or peer.address.lower()
+        already_announced = announce_key in self._announced_peers
+
+        if clean_pid:
+            previous_owner = self.address_to_peer_id.get(peer.address)
+            if previous_owner and previous_owner != clean_pid:
+                if self.peer_addresses.get(previous_owner) == peer.address:
+                    self.peer_addresses.pop(previous_owner, None)
+                    self.peer_nicknames.pop(previous_owner, None)
+                self._announced_peers.discard(previous_owner)
+            previous_address = self.peer_addresses.get(clean_pid)
+            if (
+                previous_address
+                and previous_address != peer.address
+                and previous_address not in self.active_transport.connected_peers
+                and self.address_to_peer_id.get(previous_address) == clean_pid
+            ):
+                self.address_to_peer_id.pop(previous_address, None)
             self.peer_addresses[clean_pid] = peer.address
             self.address_to_peer_id[peer.address] = clean_pid
-            if peer.nickname:
-                self.peer_nicknames[clean_pid] = peer.nickname
+            if name:
+                self.peer_nicknames[clean_pid] = name
+
+        self._announced_peers.add(announce_key)
 
         if self.on_peer_status_changed:
-            name = getattr(peer, "name", None) or getattr(peer, "nickname", None)
+            nick_changed = bool(
+                clean_pid and name and previous_nick and previous_nick != name
+            )
+            if already_announced and not nick_changed:
+                self.on_peer_status_changed("mesh", self.ble_status)
+                return
             status = f"Discovered: {name or 'Unknown'}"
             rssi = getattr(peer, "rssi", None)
             if rssi is not None:
@@ -865,10 +1056,22 @@ class SessionCoordinator:
 
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Callback when peer disconnects."""
+        self._announced_peers.discard(peer_address.lower())
         peer_id = self.address_to_peer_id.pop(peer_address, None)
         if peer_id:
             if self.peer_addresses.get(peer_id) == peer_address:
                 self.peer_addresses.pop(peer_id, None)
+
+            # If the peer is still present in active_transport.discovered_peers,
+            # restore its discovered address mapping so it remains addressable.
+            still_discovered = False
+            for disc_addr, disc_peer in self.active_transport.discovered_peers.items():
+                disc_pid = getattr(disc_peer, "peer_id", None)
+                if disc_pid and disc_pid.lower() == peer_id.lower():
+                    still_discovered = True
+                    self.peer_addresses.setdefault(peer_id, disc_addr)
+                    self.address_to_peer_id.setdefault(disc_addr, peer_id)
+                    break
 
             peer_still_connected = any(
                 address in self.active_transport.connected_peers
@@ -876,6 +1079,8 @@ class SessionCoordinator:
                 if mapped_peer_id == peer_id
             )
             if not peer_still_connected:
+                if not still_discovered:
+                    self._announced_peers.discard(peer_id)
                 self._cancel_handshake_timeout(peer_id)
                 session = self._sessions.pop(peer_id, None)
                 if session is not None:

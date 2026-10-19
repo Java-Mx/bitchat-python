@@ -118,6 +118,12 @@ class BLEServer:
         """Stop advertising and clean up the GATT service."""
         async with self._lock:
             if not self._is_advertising:
+                if os.name == "nt" and (
+                    self._provider is not None
+                    or self._publisher is not None
+                    or self._characteristic is not None
+                ):
+                    self._cleanup_windows_resources()
                 return
 
             if self._custom_backend is not None:
@@ -127,16 +133,7 @@ class BLEServer:
                 return
 
             if os.name == "nt":
-                if self._publisher is not None:
-                    with contextlib.suppress(Exception):
-                        self._publisher.stop()
-                    self._publisher = None
-
-                if self._provider is not None:
-                    with contextlib.suppress(Exception):
-                        self._provider.stop_advertising()
-                    self._provider = None
-                    self._characteristic = None
+                self._cleanup_windows_resources()
 
             self._is_advertising = False
             logger.info("BLEServer stopped")
@@ -214,6 +211,7 @@ class BLEServer:
                     adv_err,
                 )
                 self._is_advertising = False
+                self._last_error = str(adv_err)
                 # Clean up any partially created WinRT resources.
                 self._cleanup_windows_resources()
                 return
@@ -254,6 +252,10 @@ class BLEServer:
             logger.info(
                 "WinRT BLEServer active for BitChat service %s", self.service_uuid
             )
+        except asyncio.CancelledError:
+            self._cleanup_windows_resources()
+            self._is_advertising = False
+            raise
         except Exception as e:
             self._cleanup_windows_resources()
             self._is_advertising = False

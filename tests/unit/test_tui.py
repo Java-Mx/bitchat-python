@@ -2369,3 +2369,376 @@ def test_modal_aliases_and_ble_regression() -> None:
         bluetooth_available=False,
     )
     assert ble_modal.transport == "bluetooth"
+
+
+@pytest.mark.asyncio
+async def test_sidebar_deduplicates_canonical_peer_id_and_omits_unavailable_ssid(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """PeerSidebar renders one row per peer_id and hides Network: unavailable."""
+    from textual.widgets import ListItem, ListView
+
+    from bitchat.network.models import LANDiscoveredPeer
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        sidebar = app.query_one(PeerSidebar)
+        sidebar.active_transport = "lan"
+
+        # Same peer_id on two ports + distinct peer_id with same nickname "Alice"
+        peers = {
+            "192.168.56.1:52616": LANDiscoveredPeer(
+                address="192.168.56.1:52616",
+                ip="192.168.56.1",
+                port=52616,
+                peer_id="fedcba9876543210",
+                nickname="Alice",
+                ssid="unavailable",
+                last_seen=100.0,
+            ),
+            "192.168.56.1:55250": LANDiscoveredPeer(
+                address="192.168.56.1:55250",
+                ip="192.168.56.1",
+                port=55250,
+                peer_id="fedcba9876543210",
+                nickname="Alice",
+                ssid="unavailable",
+                last_seen=200.0,
+            ),
+            "192.168.56.1:56000": LANDiscoveredPeer(
+                address="192.168.56.1:56000",
+                ip="192.168.56.1",
+                port=56000,
+                peer_id="1234567890abcdef",
+                nickname="Alice",
+                ssid="OfficeWiFi",
+                last_seen=210.0,
+            ),
+        }
+        sidebar.set_discovered_peers(
+            peers, is_scanning=True, is_offline=False, transport="lan"
+        )
+        await pilot.pause()
+
+        disc_view = sidebar.query_one("#discovered-peers-list", ListView)
+        items = list(disc_view.query(ListItem))
+        assert len(items) == 2
+        rendered_items = "\n".join(str(lbl.render()) for lbl in disc_view.query(Label))
+        assert "192.168.56.1:52616" not in rendered_items
+        assert "192.168.56.1:55250" in rendered_items
+        assert "192.168.56.1:56000" in rendered_items
+        assert "Network: unavailable" not in rendered_items
+        assert "Network: OfficeWiFi" in rendered_items
+
+        # Connected peers deduplication by canonical peer_id in _refresh_peer_lists
+        class _ReadyConn:
+            is_ready = True
+
+        test_coordinator.active_transport_name = "lan"
+        test_coordinator.active_transport = test_coordinator._transports["lan"]
+        test_coordinator.active_transport._connections = {  # type: ignore[attr-defined]
+            "192.168.56.1:52616": _ReadyConn(),
+            "192.168.56.1:55250": _ReadyConn(),
+        }
+        test_coordinator.address_to_peer_id["192.168.56.1:52616"] = "fedcba9876543210"
+        test_coordinator.address_to_peer_id["192.168.56.1:55250"] = "fedcba9876543210"
+        test_coordinator.peer_addresses["fedcba9876543210"] = "192.168.56.1:55250"
+        test_coordinator.peer_nicknames["fedcba9876543210"] = "Alice"
+
+        app._refresh_peer_lists()
+        await pilot.pause()
+        conn_view = sidebar.query_one("#connected-peers-list", ListView)
+        conn_items = list(conn_view.query(ListItem))
+        assert len(conn_items) == 1
+        assert app.query_one(HeaderWidget).peer_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ble_gatt_unavailable_modal_buttons_mouse_keyboard_and_dismiss(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """BLE GATT modal shows required title/message and buttons work via mouse/keys."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+
+        results: list[str | None] = []
+        modal = BLEErrorModal(
+            error_message="WinRT GATT service initialization failed (status 3)",
+            bluetooth_available=True,
+            central_active=False,
+            peripheral_failure=True,
+            peripheral_supported=True,
+            lan_available=True,
+        )
+        await app.push_screen(modal, results.append)
+        await pilot.pause()
+
+        title = str(app.screen.query_one("#ble-error-title", Label).render())
+        body = str(app.screen.query_one(".ble-error-text", Static).render())
+        assert "Bluetooth Unavailable" in title
+        assert (
+            "Bluetooth hardware was detected, but BitChat could not initialize or use "
+            "the BLE GATT service. Choose how you want to continue." in body
+        )
+        assert app.screen.query_one("#btn-ble-retry", Button) is not None
+        assert app.screen.query_one("#btn-ble-lan", Button) is not None
+        assert app.screen.query_one("#btn-ble-close", Button) is not None
+
+        # Dismiss via 'q'
+        await pilot.press("q")
+        await pilot.pause()
+        assert not isinstance(app.screen, BLEErrorModal)
+        assert results[-1] is None
+
+        # Keyboard activation of Retry Adapter, Continue Wi-Fi/LAN, Continue Offline
+        for btn_id, expected in (
+            ("#btn-ble-retry", "retry"),
+            ("#btn-ble-lan", "lan"),
+            ("#btn-ble-close", None),
+        ):
+            m = BLEErrorModal(
+                error_message="GATT error",
+                bluetooth_available=True,
+                central_active=False,
+                lan_available=True,
+            )
+            await app.push_screen(m, results.append)
+            await pilot.pause()
+            btn = app.screen.query_one(btn_id, Button)
+            btn.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, BLEErrorModal)
+            assert results[-1] == expected
+
+
+@pytest.mark.asyncio
+async def test_ble_modal_continue_wifi_lan_when_lan_unavailable_reports_unavailable(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Continue Wi-Fi/LAN when LAN is disconnected reports LAN unavailable."""
+    disconnected_info = NetworkInfo(
+        status="Disconnected",
+        interface="Unavailable",
+        ssid="unavailable",
+        local_ip="",
+    )
+    with patch(
+        "bitchat.network.adapter.detect_network_info",
+        return_value=disconnected_info,
+    ):
+        app = BitChatApp(coordinator=test_coordinator)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            modal = BLEErrorModal(
+                error_message="GATT unavailable",
+                bluetooth_available=True,
+                central_active=False,
+                lan_available=True,
+            )
+            await app.push_screen(modal, app._on_ble_modal_dismissed)
+            await pilot.pause()
+
+            await pilot.click("#btn-ble-lan")
+            await pilot.pause(1)
+
+            chat_lines = "\n".join(
+                line.text for line in app.query_one("#chat-log", RichLog).lines
+            )
+            assert "Transport switch failed" in chat_lines
+            assert "Switched transport to LAN." not in chat_lines
+            assert test_coordinator.ble_status == "unavailable"
+            assert isinstance(app.screen, BLEErrorModal)
+            assert app.screen.transport == "lan"
+
+
+@pytest.mark.asyncio
+async def test_ble_modal_retry_adapter_failure_logs_error_and_reopens_modal(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Retry Adapter when BLE still fails logs error and re-presents BLEErrorModal."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        modal = BLEErrorModal(
+            error_message="Initial GATT failure",
+            bluetooth_available=True,
+            central_active=False,
+            lan_available=True,
+        )
+        await app.push_screen(modal, app._on_ble_modal_dismissed)
+        await pilot.pause()
+
+        async def fail_retry() -> bool:
+            test_coordinator.ble_error_message = "Adapter still busy"
+            test_coordinator.ble_status = "error"
+            return False
+
+        with patch.object(test_coordinator, "retry_ble", side_effect=fail_retry):
+            await pilot.click("#btn-ble-retry")
+            await pilot.pause(1)
+
+        chat_lines = "\n".join(
+            line.text for line in app.query_one("#chat-log", RichLog).lines
+        )
+        assert "Bluetooth retry failed: Adapter still busy" in chat_lines
+        assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.error_message == "Adapter still busy"
+
+
+@pytest.mark.asyncio
+async def test_transport_slash_command_variants_and_invalid_args(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Verify /transport command forms and invalid argument handling."""
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="OfficeWiFi",
+        local_ip="192.168.1.50",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        app = BitChatApp(coordinator=test_coordinator)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            chat = app.query_one(ChatView)
+            inp = app.query_one(MessageInput)
+
+            def submit(cmd_str: str) -> None:
+                inp.value = cmd_str
+                app.on_input_submitted(Input.Submitted(inp, cmd_str))
+
+            # 1. /transport with no args shows current transport
+            submit("/transport")
+            await pilot.pause()
+            lines = "\n".join(line.text for line in chat.rich_log.lines)
+            assert "Active transport medium: BLUETOOTH" in lines
+
+            # 2. /transport wifi -> switches to lan
+            submit("/transport wifi")
+            await pilot.pause(1)
+            assert test_coordinator.active_transport_name == "lan"
+
+            # 3. /transport ble -> switches to bluetooth
+            submit("/transport ble")
+            await pilot.pause(1)
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            # 4. /transport lan -> switches to lan
+            submit("/transport lan")
+            await pilot.pause(1)
+            assert test_coordinator.active_transport_name == "lan"
+
+            # 5. /transport bluetooth -> switches to bluetooth
+            submit("/transport bluetooth")
+            await pilot.pause(1)
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            # 6. Invalid argument
+            submit("/transport pigeon")
+            await pilot.pause()
+            lines = "\n".join(line.text for line in chat.rich_log.lines)
+            assert "Unknown transport 'pigeon'" in lines
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+
+@pytest.mark.asyncio
+async def test_lan_fallback_modal_retry_and_switch_to_ble_callbacks_wired_correctly(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """When switching to LAN fails and opens BLEErrorModal(transport='lan'),
+    Retry LAN calls _handle_lan_retry and Switch to BLE calls _handle_ble_fallback.
+    """
+    disconnected_info = NetworkInfo(
+        status="Disconnected",
+        interface="Unavailable",
+        ssid="unavailable",
+        local_ip="",
+    )
+    with patch(
+        "bitchat.network.adapter.detect_network_info",
+        return_value=disconnected_info,
+    ):
+        app = BitChatApp(coordinator=test_coordinator)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+
+            lan_retry_called = False
+            ble_fallback_called = False
+
+            async def fake_lan_retry() -> None:
+                nonlocal lan_retry_called
+                lan_retry_called = True
+
+            def fake_ble_fallback() -> None:
+                nonlocal ble_fallback_called
+                ble_fallback_called = True
+
+            with (
+                patch.object(app, "_handle_lan_retry", side_effect=fake_lan_retry),
+                patch.object(
+                    app, "_handle_ble_fallback", side_effect=fake_ble_fallback
+                ),
+                patch.object(test_coordinator, "is_ble_available", return_value=True),
+            ):
+                app._handle_transport_switch("lan")
+                await pilot.pause(1)
+                assert isinstance(app.screen, BLEErrorModal)
+                assert app.screen.transport == "lan"
+
+                await pilot.click("#btn-lan-retry")
+                await pilot.pause(1)
+                assert lan_retry_called is True
+
+                # Re-trigger LAN failure modal and click Switch to BLE (#btn-lan-ble)
+                app._handle_transport_switch("lan")
+                await pilot.pause(1)
+                assert isinstance(app.screen, BLEErrorModal)
+                assert app.screen.transport == "lan"
+
+                await pilot.click("#btn-lan-ble")
+                await pilot.pause(1)
+                assert ble_fallback_called is True
+
+
+@pytest.mark.asyncio
+async def test_continue_offline_with_ble_adapter_on_shows_offline_status_in_tui(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Continue Offline with BLE radio On shows BLE Offline in StatusBar."""
+    from bitchat.ble.adapter import AdapterInfo
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+
+        # Simulate Bluetooth adapter present and radio ON while GATT failed
+        if test_coordinator.ble_manager is not None:
+            test_coordinator.ble_manager.adapter_manager._current_info = AdapterInfo(
+                is_available=True,
+                radio_state="on",
+                is_central_supported=True,
+                is_peripheral_supported=True,
+            )
+
+        modal = BLEErrorModal(
+            error_message="WinRT GATT service initialization failed (status 3)",
+            bluetooth_available=True,
+            central_active=False,
+            peripheral_failure=True,
+            peripheral_supported=True,
+            lan_available=True,
+        )
+        await app.push_screen(modal, app._on_ble_modal_dismissed)
+        await pilot.pause()
+
+        await pilot.click("#btn-ble-close")
+        await pilot.pause(1)
+
+        assert test_coordinator.offline_mode is True
+        status_msg = str(app.query_one(StatusBar).status_message)
+        assert "BLE Offline • Offline Mode" in status_msg
+        assert "Bluetooth Available" not in status_msg

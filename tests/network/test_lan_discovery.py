@@ -155,3 +155,130 @@ def test_discovery_datagram_self_ignore() -> None:
     peer = discovery.discovered_peers["192.168.1.60:41236"]
     assert peer.nickname == "Bob"
     assert peer.ssid == "MeshNet"
+
+
+def test_repeated_beacons_and_ephemeral_source_ports_update_single_record() -> None:
+    callbacks: list[LANDiscoveredPeer] = []
+    discovery = LANDiscovery(
+        local_peer_id="1111222233334444",
+        local_nickname="LocalNode",
+        listening_port=41235,
+        on_peer_discovered=callbacks.append,
+    )
+
+    pkt = DiscoveryPacket(
+        peer_id="fedcba9876543210",
+        nickname="Alice",
+        port=52616,
+        ssid="unavailable",
+    )
+    first = discovery._process_incoming_packet(pkt.to_bytes(), "192.168.56.1:60123")
+    second = discovery._process_incoming_packet(pkt.to_bytes(), "192.168.56.1:60124")
+    third = discovery._process_incoming_packet(pkt.to_bytes(), "192.168.56.1")
+
+    assert first is not None
+    assert first is second
+    assert second is third
+    assert len(discovery.discovered_peers) == 1
+    assert list(discovery.discovered_peers.keys()) == ["192.168.56.1:52616"]
+    assert first.ip == "192.168.56.1"
+    assert first.port == 52616
+    assert first.ssid == ""
+    assert len(callbacks) == 1
+
+
+def test_peer_restarting_on_new_listening_port_replaces_old_entry_in_place() -> None:
+    callbacks: list[LANDiscoveredPeer] = []
+    discovery = LANDiscovery(
+        local_peer_id="1111222233334444",
+        local_nickname="LocalNode",
+        listening_port=41235,
+        on_peer_discovered=callbacks.append,
+    )
+
+    pkt_old = DiscoveryPacket(
+        peer_id="fedcba9876543210",
+        nickname="Alice",
+        port=52616,
+    )
+    pkt_new = DiscoveryPacket(
+        peer_id="fedcba9876543210",
+        nickname="Alice",
+        port=55250,
+    )
+    first = discovery._process_incoming_packet(pkt_old.to_bytes(), "192.168.56.1")
+    second = discovery._process_incoming_packet(pkt_new.to_bytes(), "192.168.56.1")
+
+    assert first is second
+    assert len(discovery.discovered_peers) == 1
+    assert "192.168.56.1:52616" not in discovery.discovered_peers
+    assert "192.168.56.1:55250" in discovery.discovered_peers
+    assert second is not None
+    assert second.port == 55250
+    assert second.address == "192.168.56.1:55250"
+    assert len(callbacks) == 2
+
+
+def test_distinct_peers_same_ip_or_same_nickname_are_never_merged() -> None:
+    discovery = LANDiscovery(
+        local_peer_id="1111222233334444",
+        local_nickname="LocalNode",
+        listening_port=41235,
+    )
+
+    alice_a = DiscoveryPacket(
+        peer_id="aaaa1111bbbb2222",
+        nickname="Alice",
+        port=52616,
+    )
+    alice_b = DiscoveryPacket(
+        peer_id="cccc3333dddd4444",
+        nickname="Alice",
+        port=55250,
+    )
+    discovery._process_incoming_packet(alice_a.to_bytes(), "192.168.56.1")
+    discovery._process_incoming_packet(alice_b.to_bytes(), "192.168.56.1")
+
+    assert len(discovery.discovered_peers) == 2
+    assert discovery.discovered_peers["192.168.56.1:52616"].peer_id == (
+        "aaaa1111bbbb2222"
+    )
+    assert discovery.discovered_peers["192.168.56.1:55250"].peer_id == (
+        "cccc3333dddd4444"
+    )
+
+
+def test_self_broadcast_ignored_across_multiple_interfaces_and_casing() -> None:
+    discovery = LANDiscovery(
+        local_peer_id="ABCDEF0123456789",
+        local_nickname="Alice",
+        listening_port=41235,
+    )
+    own_pkt = DiscoveryPacket(
+        peer_id="abcdef0123456789",
+        nickname="Alice",
+        port=41235,
+    )
+    for sender_ip in ("192.168.1.50", "192.168.56.1", "10.0.0.15:54321"):
+        assert discovery._process_incoming_packet(own_pkt.to_bytes(), sender_ip) is None
+    assert discovery.discovered_peers == {}
+
+
+def test_delayed_self_broadcast_from_retired_identity_ignored() -> None:
+    discovery = LANDiscovery(
+        local_peer_id="1111222233334444",
+        local_nickname="Alice",
+        listening_port=41235,
+    )
+    old_self_pkt = DiscoveryPacket(
+        peer_id="1111222233334444",
+        nickname="Alice",
+        port=41235,
+    )
+    discovery.update_identity("aaaabbbbccccdddd", "Alice", ssid="unavailable")
+    assert discovery.ssid == ""
+    assert (
+        discovery._process_incoming_packet(old_self_pkt.to_bytes(), "192.168.56.1")
+        is None
+    )
+    assert discovery.discovered_peers == {}
