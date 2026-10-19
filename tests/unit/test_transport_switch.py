@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from bitchat.app.session_coordinator import SessionCoordinator
+from bitchat.ble.manager import BLEManager
+from bitchat.ble.server import BLEServer
 from bitchat.crypto.identity import LocalIdentity
 from bitchat.mesh.router import MeshRouter
 from bitchat.network.models import LANDiscoveredPeer
@@ -46,6 +48,8 @@ async def test_transport_switching_lifecycle(
     mesh_router = MeshRouter(test_identity.peer_id)
     coordinator = SessionCoordinator(
         local_identity=test_identity,
+        ble_manager=BLEManager(sender_id=test_identity.peer_id),
+        ble_server=BLEServer(),
         mesh_router=mesh_router,
         nickname="AliceNode",
         storage=mock_storage,
@@ -124,6 +128,11 @@ async def test_transport_switching_lifecycle(
         assert lan_transport.local_peer_id == new_lan_peer_id
         assert lan_transport.discovered_peers == {}
 
+        # The BLE manager must not keep using the persistent identity's ID
+        bt_transport: Any = coordinator._transports["bluetooth"]
+        assert bt_transport.ble_manager.sender_id == coordinator.local_identity.peer_id
+        assert bt_transport.ble_manager.sender_id.hex() != original_peer_id
+
         # Verify peer tables and sessions were cleared
         assert len(coordinator.peer_addresses) == 0
         assert len(coordinator.address_to_peer_id) == 0
@@ -154,6 +163,7 @@ async def test_transport_switching_lifecycle(
         assert new_bt_peer_id != original_peer_id
         assert lan_transport.local_peer_id == new_bt_peer_id
         assert lan_transport.discovered_peers == {}
+        assert bt_transport.ble_manager.sender_id == coordinator.local_identity.peer_id
 
         # 4. Attempt switching to an invalid transport
         bad_success, bad_msg = await coordinator.switch_transport("carrier_pigeon")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from bitchat.crypto.identity import LocalIdentity
-from bitchat.exceptions import ConfigurationError
+from bitchat.exceptions import ConfigurationError, InvalidKeyError
 
 VALID_DENSITIES: frozenset[str] = frozenset({"comfortable", "compact"})
 VALID_ACCENTS: frozenset[str] = frozenset({"blue", "cyan", "emerald", "purple"})
@@ -480,7 +480,7 @@ class FileConfigStorage(StorageInterface):
             x25519_priv = bytes.fromhex(x25519_hex)
             ed25519_priv = bytes.fromhex(ed25519_hex)
             return LocalIdentity.from_x25519_private(x25519_priv, ed25519_priv)
-        except (json.JSONDecodeError, ValueError, OSError) as e:
+        except (json.JSONDecodeError, ValueError, InvalidKeyError, OSError) as e:
             raise ConfigurationError(
                 f"Failed to read identity from {self.identity_path}: {e}"
             ) from e

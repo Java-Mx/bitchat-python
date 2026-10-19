@@ -414,6 +414,8 @@ class BluetoothTransport(BaseTransport):
     def update_identity(self, peer_id_hex: str, nickname: str) -> None:
         if self.ble_server:
             self.ble_server.update_identity(peer_id_hex, nickname)
+        if self.ble_manager:
+            self.ble_manager.update_sender_id(bytes.fromhex(peer_id_hex))
 
     def resolve_peer_id_to_address(self, target: str) -> str | None:
         if self.ble_manager:

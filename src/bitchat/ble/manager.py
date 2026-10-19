@@ -63,6 +63,16 @@ class BLEManager:
         self._lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
+    def update_sender_id(self, sender_id: bytes) -> None:
+        """Adopt a new local sender ID (e.g. after a transport identity change)."""
+        if len(sender_id) != SENDER_ID_SIZE:
+            raise ValueError(
+                f"sender_id must be {SENDER_ID_SIZE} bytes, got {len(sender_id)}"
+            )
+        self.sender_id = bytes(sender_id)
+        for transport in self._transports.values():
+            transport.sender_id = self.sender_id
+
     @property
     def state(self) -> BLEState:
         """Return the current high-level BLE subsystem state."""
