@@ -124,6 +124,7 @@ class BLEServer:
                     "WinRT. Running in central-only mode on this platform."
                 )
                 self._is_advertising = False
+                await self._start_linux_server()
 
     async def stop(self) -> None:
         """Stop advertising and clean up the GATT service."""
@@ -145,6 +146,11 @@ class BLEServer:
 
             if is_windows():
                 self._cleanup_windows_resources()
+            elif self._provider is not None:
+                with contextlib.suppress(Exception):
+                    await self._provider.stop()
+                self._provider = None
+                self._characteristic = None
 
             self._is_advertising = False
             logger.info("BLEServer stopped")
@@ -172,6 +178,61 @@ class BLEServer:
                 await self._characteristic.notify_value_async(buf)
             except Exception as e:
                 raise BLEError(f"Failed to notify BLE characteristic: {e}") from e
+        elif os.name != "nt" and self._provider is not None:
+            try:
+                self._provider.update_value(self.service_uuid, self.characteristic_uuid)
+            except Exception as e:
+                raise BLEError(f"Failed to notify Linux BLE characteristic: {e}") from e
+
+    async def _start_linux_server(self) -> None:
+        """Start a Linux BLE GATT peripheral using Bless and BlueZ."""
+        try:
+            from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicProperties
+
+            def on_write(characteristic: Any, value: Any, **kwargs: Any) -> None:
+                try:
+                    if self.on_data_received is not None:
+                        self.on_data_received(bytes(value), "bluez_client")
+                except Exception:
+                    logger.exception("Failed to handle incoming Linux BLE write")
+
+            server = BlessServer(
+                name=self.nickname or "BitChat",
+                loop=self._loop,
+            )
+
+            await server.add_gatt({
+                self.service_uuid: {
+                    self.characteristic_uuid: {
+                        "Properties": (
+                            GATTCharacteristicProperties.write
+                            | GATTCharacteristicProperties.write_without_response
+                            | GATTCharacteristicProperties.notify
+                        ),
+                        "Permissions": GATTAttributePermissions.writeable,
+                        "Value": bytearray(),
+                    }
+                }
+            })
+            server.write_request_func = on_write
+
+            started = await server.start()
+
+            if started is False:
+                raise BLEError("Bless reported that Linux BLE advertising failed")
+            self._provider = server
+            self._characteristic = self.characteristic_uuid
+            self._is_advertising = True
+            self._last_error = None
+            logger.info("Linux Bless GATT server started for %s", self.service_uuid)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._provider = None
+            self._characteristic = None
+            self._is_advertising = False
+            self._last_error = str(e)
+            raise BLEError(f"Failed to start Linux BLE GATT server: {e}") from e
 
     async def _start_windows_server(self) -> None:
         """Initialize Windows WinRT GATT provider and characteristic."""
