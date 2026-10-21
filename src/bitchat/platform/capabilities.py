@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from bitchat.network.adapter import get_local_ip, get_wifi_ssid_and_state
+from bitchat.platform.detection import (
+    PlatformKind,
+    detect_platform,
+    probe_ble_backend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +104,11 @@ class SystemReport:
 
 
 def detect_system_info() -> SystemCapabilities:
-    """Detect operating system, distribution name, architecture, and runtime."""
+    """Detect operating system, distribution name, architecture, and runtime.
+
+    These values are descriptive diagnostics only. Behavioural platform selection
+    goes through :func:`bitchat.platform.detection.detect_platform`.
+    """
     os_name = platform.system()
     arch = platform.machine() or "unknown"
     distro = "Unknown"
@@ -156,11 +165,28 @@ def detect_system_info() -> SystemCapabilities:
 
 async def detect_bluetooth_info() -> BluetoothCapabilities:
     """Detect Bluetooth adapter, BlueZ, BLE roles, and permissions."""
-    os_name = platform.system()
+    kind = detect_platform()
 
-    if os_name == "Linux":
+    backend = probe_ble_backend(kind)
+    if not backend.available:
+        # The Python backend is missing; hardware cannot be probed, so never
+        # report Bluetooth as available.
+        reason = backend.reason or "BLE backend unavailable"
+        logger.debug("%s", reason)
+        return BluetoothCapabilities(
+            adapter="Not detected",
+            ble_central="Not detected (BLE backend missing)",
+            ble_peripheral="Not detected (BLE backend missing)",
+            gatt_capability="Not detected (BLE backend missing)",
+            bluez="Not applicable (WinRT)"
+            if kind is PlatformKind.WINDOWS
+            else ("Not detected" if kind is PlatformKind.LINUX else "Not applicable"),
+            permissions="Unknown",
+        )
+
+    if kind is PlatformKind.LINUX:
         return await _detect_linux_bluetooth()
-    elif os_name == "Windows":
+    elif kind is PlatformKind.WINDOWS:
         return await _detect_windows_bluetooth()
     else:
         return _detect_generic_bluetooth()
@@ -308,8 +334,12 @@ async def _detect_linux_bluetooth() -> BluetoothCapabilities:
 async def _detect_windows_bluetooth() -> BluetoothCapabilities:
     """Query Windows WinRT adapter information."""
     try:
-        from winrt.windows.devices.bluetooth import BluetoothAdapter
-        from winrt.windows.devices.radios import RadioState
+        from winrt.windows.devices.bluetooth import (  # pyright: ignore[reportMissingImports]
+            BluetoothAdapter,
+        )
+        from winrt.windows.devices.radios import (  # pyright: ignore[reportMissingImports]
+            RadioState,
+        )
 
         adapter = await BluetoothAdapter.get_default_async()
         if adapter is None:
@@ -376,16 +406,16 @@ def _detect_generic_bluetooth() -> BluetoothCapabilities:
 
 def detect_network_info() -> NetworkCapabilities:
     """Detect Wi-Fi, Ethernet, IPv4, and IPv6 networking capabilities."""
-    os_name = platform.system()
+    kind = detect_platform()
     ipv4 = get_local_ip() or "Not detected"
     ipv6 = _detect_ipv6_address()
 
     wifi_status = "Not detected"
     eth_status = "Not detected"
 
-    if os_name == "Linux":
+    if kind is PlatformKind.LINUX:
         wifi_status, eth_status = _detect_linux_interfaces()
-    elif os_name == "Windows":
+    elif kind is PlatformKind.WINDOWS:
         ssid, wifi_state = get_wifi_ssid_and_state()
         if wifi_state == "connected" and ssid:
             wifi_status = f"Connected ({ssid})"

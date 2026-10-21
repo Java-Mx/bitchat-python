@@ -8,6 +8,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static
 
+from bitchat.platform.recovery import bluetooth_recovery_hints, gatt_failure_hint
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
     from textual.binding import BindingType
@@ -111,8 +113,7 @@ class BLEErrorModal(ModalScreen[str | None]):
         if gatt_startup_failure:
             intro = f"[bold #e6edf3]{GATT_FAILURE_MESSAGE}[/bold #e6edf3]\n\n"
             guidance = (
-                "[dim #8b949e]Windows can abort GATT advertising even when the "
-                "Bluetooth radio is on.\n"
+                f"[dim #8b949e]{gatt_failure_hint()}\n"
                 "Click 'Retry Adapter' to reset BLE and try again, or continue "
                 "without Bluetooth.[/dim #8b949e]"
             )
@@ -132,8 +133,7 @@ class BLEErrorModal(ModalScreen[str | None]):
                 )
             )
             guidance = (
-                "[dim #8b949e]Windows may abort GATT advertising even when "
-                "the Bluetooth radio and peripheral role are available.\n"
+                f"[dim #8b949e]{gatt_failure_hint()}\n"
                 "Click 'Retry Adapter' to re-check capabilities and retry "
                 "BLE startup.[/dim #8b949e]\n\n"
                 "[bold #58a6ff]Central-mode BLE remains available."
@@ -148,14 +148,12 @@ class BLEErrorModal(ModalScreen[str | None]):
                 "[bold #e6edf3]Could not initialize Bluetooth Low Energy "
                 "transport.[/bold #e6edf3]\n\n"
             )
+            steps = "\n".join(
+                f"  {i}. {hint}"
+                for i, hint in enumerate(bluetooth_recovery_hints(), start=1)
+            )
             guidance = (
-                "[dim #8b949e]Possible solutions:\n"
-                "  1. Ensure your PC's Bluetooth adapter is enabled in settings.\n"
-                "  2. On Linux, ensure BlueZ is active\n"
-                "     (`systemctl status bluetooth`).\n"
-                "  3. On Windows, ensure Bluetooth is toggled ON in Settings.\n"
-                "  4. Click 'Retry Adapter' after turning Bluetooth on."
-                "[/dim #8b949e]\n\n"
+                f"[dim #8b949e]Possible solutions:\n{steps}[/dim #8b949e]\n\n"
                 "[bold #58a6ff]BitChat is operating safely in Offline / Local Mode."
                 "[/bold #58a6ff]"
             )

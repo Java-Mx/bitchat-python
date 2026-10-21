@@ -5,6 +5,7 @@ and Windows Wi-Fi SSID parsing.
 from __future__ import annotations
 
 import asyncio
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -88,7 +89,7 @@ There is 1 interface on the system:
     Connection mode        : Auto Connect
 """
     with (
-        patch("platform.system", return_value="Windows"),
+        patch.object(sys, "platform", "win32"),
         patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_output)
@@ -105,7 +106,7 @@ There is 1 interface on the system:
     State                  : disconnected
 """
     with (
-        patch("platform.system", return_value="Windows"),
+        patch.object(sys, "platform", "win32"),
         patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(returncode=0, stdout=mock_output)
@@ -115,7 +116,7 @@ There is 1 interface on the system:
 
 
 def test_get_wifi_ssid_parsing_non_windows() -> None:
-    with patch("platform.system", return_value="Linux"):
+    with patch.object(sys, "platform", "linux"):
         ssid, state = get_wifi_ssid_and_state()
         assert ssid is None
         assert state is None

@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
-import platform
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from bitchat.platform.detection import (
+    PlatformKind,
+    detect_platform,
+    is_windows,
+    probe_ble_backend,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -65,9 +70,19 @@ class BLEAdapterManager:
             self._current_info = info
             return info
 
-        if os.name == "nt":
+        kind = detect_platform()
+        backend = probe_ble_backend(kind)
+        if not backend.available:
+            # A missing Python backend is not a Bluetooth adapter problem and must
+            # never be reported as available hardware.
+            info = AdapterInfo(
+                is_available=False,
+                radio_state="unavailable",
+                name=backend.reason or "BLE backend unavailable",
+            )
+        elif kind is PlatformKind.WINDOWS:
             info = await self._check_windows_adapter()
-        elif platform.system() == "Linux":
+        elif kind is PlatformKind.LINUX:
             info = await self._check_linux_adapter()
         else:
             info = await self._check_generic_adapter()
@@ -93,7 +108,7 @@ class BLEAdapterManager:
             await self.check_adapter()
 
             # Start event listener on Windows
-            if os.name == "nt" and self._custom_backend is None:
+            if is_windows() and self._custom_backend is None:
                 await self._setup_windows_listener()
 
             # Gentle background verification loop (checks every 4 seconds)
@@ -121,8 +136,12 @@ class BLEAdapterManager:
     async def _check_windows_adapter(self) -> AdapterInfo:
         """Query Windows WinRT for default BluetoothAdapter and radio state."""
         try:
-            from winrt.windows.devices.bluetooth import BluetoothAdapter
-            from winrt.windows.devices.radios import RadioState
+            from winrt.windows.devices.bluetooth import (  # pyright: ignore[reportMissingImports]
+                BluetoothAdapter,
+            )
+            from winrt.windows.devices.radios import (  # pyright: ignore[reportMissingImports]
+                RadioState,
+            )
 
             adapter = await BluetoothAdapter.get_default_async()
             if adapter is None:
@@ -217,11 +236,17 @@ class BLEAdapterManager:
                 name=bt_cap.adapter,
             )
         except Exception as e:
-            logger.debug("Linux Bluetooth capability check failed: %s", e)
-            return await self._check_generic_adapter()
+            # Do not fall back to the generic bleak probe: instantiating a scanner
+            # proves nothing about adapters, BlueZ, or permissions.
+            logger.warning("Linux Bluetooth capability check failed: %s", e)
+            return AdapterInfo(
+                is_available=False,
+                radio_state="unavailable",
+                name=f"Linux Bluetooth check failed: {e}",
+            )
 
     async def _check_generic_adapter(self) -> AdapterInfo:
-        """Generic fallback adapter check for non-Windows platforms."""
+        """Generic fallback adapter check for platforms without a dedicated backend."""
         try:
             from bleak import BleakScanner
 
@@ -245,7 +270,9 @@ class BLEAdapterManager:
     async def _setup_windows_listener(self) -> None:
         """Register native WinRT Radio.state_changed callback."""
         try:
-            from winrt.windows.devices.bluetooth import BluetoothAdapter
+            from winrt.windows.devices.bluetooth import (  # pyright: ignore[reportMissingImports]
+                BluetoothAdapter,
+            )
 
             adapter = await BluetoothAdapter.get_default_async()
             if adapter is None:

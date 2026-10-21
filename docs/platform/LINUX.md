@@ -29,6 +29,14 @@ BitChat strictly avoids the assumption that an existing Bluetooth adapter suppor
 - **BLE Peripheral (Hosting Announcements):** Requires `LEAdvertisingManager1` on the adapter. On older kernels or adapters lacking LE advertisement offload, peripheral hosting is disabled while central scanning remains active.
 - **GATT Hosting:** Requires `GattManager1` on the adapter.
 
+### BitChat's Linux BLE Role Support
+Linux is selected centrally by `bitchat.platform.detection.detect_platform()` (`sys.platform.startswith("linux")`); no WinRT module is imported.
+- **Central (scanning, outbound connections):** supported through Bleak's BlueZ backend when BlueZ is running and the adapter is powered.
+- **Peripheral (GATT server/advertising):** *not implemented* for BlueZ. BitChat runs central-only on Linux even when the adapter advertises `LEAdvertisingManager1`; telemetry reports the peripheral role as unsupported rather than failed, and no recovery warning is raised for it.
+- Hardware, BlueZ, permission, or missing-`dbus-fast` problems mark the adapter unavailable; they are never treated as working Bluetooth. Retry rechecks the adapter and releases scanner/monitor tasks first.
+- Prerequisites are system services, not Python packages: a running `bluetoothd` (BlueZ), a present, unblocked adapter, and D-Bus access for your user. Python packages (`bleak`, with `dbus-fast` on Linux) install via `uv sync`; BlueZ is installed with your distribution's package manager.
+- The CLI keeps one asyncio event loop for the whole session so D-Bus connections are not orphaned between commands.
+
 ### User Permissions & D-Bus Policy
 Access to the system Bluetooth D-Bus endpoints is controlled by `/etc/dbus-1/system.d/bluetooth.conf`.
 - Standard non-root users must belong to the `bluetooth` or `netdev` group, or possess an active seat granted by `systemd-logind` / polkit.

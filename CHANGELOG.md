@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Cross-platform BLE selection (`bitchat.platform.detection`, `bitchat.platform.recovery`): a single place decides Windows vs Linux from `sys.platform`; BLE backend availability, adapter hardware, GATT/advertising, and the active transport are reported separately. Linux is reported as BLE central-only (no GATT server), Windows keeps the WinRT GATT server.
+- OS-specific Bluetooth recovery guidance now comes from the platform layer instead of text hard-coded in the TUI dialog.
+- WinRT GATT event handlers are unregistered on cleanup, and `SessionCoordinator` ignores `start()` while the user is in offline mode.
+- Persistent per-application event loop for the CLI (`Application._run_async`) so BlueZ/WinRT resources survive between commands.
 - Phase 11: Transport Abstraction Layer & Local Area Network (LAN / Wi-Fi) Chat (`bitchat.transport`, `bitchat.network`):
   - Abstract base class `BaseTransport` (`bitchat.transport.base`) defining standard transport lifecycle (`start`, `stop`, `start_discovery`, `stop_discovery`), messaging (`send_to_peer`, `broadcast_packet`), peer connections (`connect_peer`, `disconnect_peer`), identity propagation (`update_identity`, `resolve_peer_id_to_address`), and live telemetry (`get_telemetry`).
   - Concrete `BluetoothTransport` bridging existing `BLEManager` and `BLEServer` to `BaseTransport` with complete null-safety for mock and headless environments.

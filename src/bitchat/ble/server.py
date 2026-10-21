@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import uuid
 from typing import TYPE_CHECKING, Any
 
 from bitchat.exceptions import BLEError
+from bitchat.platform.detection import is_windows, peripheral_backend_implemented
 from bitchat.protocol.constants import (
     BITCHAT_CHARACTERISTIC_UUID,
     BITCHAT_SERVICE_UUID,
@@ -58,6 +58,8 @@ class BLEServer:
         self._provider: Any | None = None
         self._characteristic: Any | None = None
         self._publisher: Any | None = None
+        self._write_token: Any | None = None
+        self._subscribers_token: Any | None = None
         self._lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -65,6 +67,15 @@ class BLEServer:
     def is_advertising(self) -> bool:
         """Return True if the server is currently advertising."""
         return self._is_advertising
+
+    @property
+    def supports_peripheral(self) -> bool:
+        """Return True if this process can host a GATT server on this platform.
+
+        An injected backend is always honoured; otherwise only platforms with a
+        native implementation (currently Windows WinRT) can advertise.
+        """
+        return self._custom_backend is not None or peripheral_backend_implemented()
 
     def update_identity(self, peer_id: str, nickname: str) -> None:
         """Update identity advertised in BLE packets."""
@@ -105,12 +116,12 @@ class BLEServer:
                 logger.info("BLEServer started using injected test backend")
                 return
 
-            if os.name == "nt":
+            if is_windows():
                 await self._start_windows_server()
             else:
-                logger.warning(
-                    "Native BLE peripheral mode currently only implemented on "
-                    "Windows WinRT. Running in central-only mode on this platform."
+                logger.info(
+                    "Native BLE peripheral mode is only implemented on Windows "
+                    "WinRT. Running in central-only mode on this platform."
                 )
                 self._is_advertising = False
 
@@ -118,7 +129,7 @@ class BLEServer:
         """Stop advertising and clean up the GATT service."""
         async with self._lock:
             if not self._is_advertising:
-                if os.name == "nt" and (
+                if is_windows() and (
                     self._provider is not None
                     or self._publisher is not None
                     or self._characteristic is not None
@@ -132,7 +143,7 @@ class BLEServer:
                 logger.info("BLEServer stopped using injected test backend")
                 return
 
-            if os.name == "nt":
+            if is_windows():
                 self._cleanup_windows_resources()
 
             self._is_advertising = False
@@ -149,9 +160,11 @@ class BLEServer:
             await self._custom_backend.send_notification(data, client_id)
             return
 
-        if os.name == "nt" and self._characteristic is not None:
+        if is_windows() and self._characteristic is not None:
             try:
-                from winrt.windows.storage.streams import DataWriter
+                from winrt.windows.storage.streams import (  # pyright: ignore[reportMissingImports]
+                    DataWriter,
+                )
 
                 writer = DataWriter()
                 writer.write_bytes(data)
@@ -163,9 +176,11 @@ class BLEServer:
     async def _start_windows_server(self) -> None:
         """Initialize Windows WinRT GATT provider and characteristic."""
         try:
-            import winrt.windows.devices.bluetooth.advertisement as adv
-            import winrt.windows.devices.bluetooth.genericattributeprofile as gatt
-            from winrt.windows.storage.streams import DataWriter
+            import winrt.windows.devices.bluetooth.advertisement as adv  # pyright: ignore[reportMissingImports]
+            import winrt.windows.devices.bluetooth.genericattributeprofile as gatt  # pyright: ignore[reportMissingImports]
+            from winrt.windows.storage.streams import (  # pyright: ignore[reportMissingImports]
+                DataWriter,
+            )
 
             srv_uuid = uuid.UUID(self.service_uuid)
             res = await gatt.GattServiceProvider.create_async(srv_uuid)
@@ -174,7 +189,8 @@ class BLEServer:
                     f"Failed to create GattServiceProvider: error {res.error}"
                 )
 
-            self._provider = res.service_provider
+            provider = res.service_provider
+            self._provider = provider
             char_uuid = uuid.UUID(self.characteristic_uuid)
             char_params = gatt.GattLocalCharacteristicParameters()
             char_params.characteristic_properties = (
@@ -183,7 +199,7 @@ class BLEServer:
                 | gatt.GattCharacteristicProperties.NOTIFY
             )
 
-            c_res = await self._provider.service.create_characteristic_async(
+            c_res = await provider.service.create_characteristic_async(
                 char_uuid, char_params
             )
             if c_res.error != 0 or c_res.characteristic is None:
@@ -192,16 +208,18 @@ class BLEServer:
                 )
 
             char = c_res.characteristic
-            char.add_write_requested(self._on_winrt_write_requested)
-            char.add_subscribed_clients_changed(self._on_winrt_subscribers_changed)
             self._characteristic = char
+            self._write_token = char.add_write_requested(self._on_winrt_write_requested)
+            self._subscribers_token = char.add_subscribed_clients_changed(
+                self._on_winrt_subscribers_changed
+            )
 
             advertising_params = gatt.GattServiceProviderAdvertisingParameters()
             advertising_params.is_connectable = True
             advertising_params.is_discoverable = True
-            self._provider.start_advertising_with_parameters(advertising_params)
+            provider.start_advertising_with_parameters(advertising_params)
             try:
-                await self._wait_for_gatt_advertisement_status(self._provider)
+                await self._wait_for_gatt_advertisement_status(provider)
             except BLEError as adv_err:
                 # GATT advertising failed (e.g., hardware without peripheral support).
                 # Log a warning and fall back to central-only mode instead of aborting.
@@ -327,7 +345,18 @@ class BLEServer:
             await asyncio.sleep(_ADVERTISEMENT_POLL_INTERVAL_SECONDS)
 
     def _cleanup_windows_resources(self) -> None:
-        """Safely release Windows WinRT provider and publisher."""
+        """Safely release Windows WinRT provider, publisher, and event handlers."""
+        char = self._characteristic
+        if char is not None:
+            if self._write_token is not None:
+                with contextlib.suppress(Exception):
+                    char.remove_write_requested(self._write_token)
+            if self._subscribers_token is not None:
+                with contextlib.suppress(Exception):
+                    char.remove_subscribed_clients_changed(self._subscribers_token)
+        self._write_token = None
+        self._subscribers_token = None
+
         if self._publisher is not None:
             with contextlib.suppress(Exception):
                 self._publisher.stop()
@@ -350,8 +379,10 @@ class BLEServer:
 
         async def _process_write() -> None:
             try:
-                import winrt.windows.devices.bluetooth.genericattributeprofile as gatt
-                from winrt.windows.storage.streams import DataReader
+                import winrt.windows.devices.bluetooth.genericattributeprofile as gatt  # pyright: ignore[reportMissingImports]
+                from winrt.windows.storage.streams import (  # pyright: ignore[reportMissingImports]
+                    DataReader,
+                )
 
                 req = await args.get_request_async()
                 if req is None or req.value is None:

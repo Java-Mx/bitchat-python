@@ -81,6 +81,9 @@ class SessionCoordinator:
         self.ble_status: str = "offline"
         self.ble_error_message: str | None = None
         self.offline_mode: bool = False
+        # Last error already delivered through the transport's on_error hook, so
+        # start() does not report the same failure to the UI a second time.
+        self._notified_error: str | None = None
 
         self._sessions: dict[str, NoiseSession] = {}
         self._pending_messages: dict[str, list[str]] = {}
@@ -156,6 +159,7 @@ class SessionCoordinator:
 
     def _handle_transport_error(self, err_msg: str) -> None:
         self.ble_error_message = err_msg
+        self._notified_error = err_msg
         if self.active_transport_name == "lan":
             if self.on_lan_error:
                 self.on_lan_error(err_msg)
@@ -291,10 +295,16 @@ class SessionCoordinator:
         async with self._retry_lock:
             if self._is_running:
                 return
+            if self.offline_mode:
+                # The user chose to continue offline: only an explicit retry or
+                # transport switch may start networking again.
+                logger.info("Ignoring start(): offline mode is active")
+                return
 
             self._is_running = True
             self.ble_status = "checking"
             self.ble_error_message = None
+            self._notified_error = None
 
             if self.ble_server:
                 self.ble_server.on_data_received = self._handle_server_data_received
@@ -315,11 +325,18 @@ class SessionCoordinator:
                     self.active_transport_name,
                     e,
                 )
-                self.ble_status = self.active_transport.state.value
+                failed_state = self.active_transport.state
+                await self._stop_transport_safely(
+                    self.active_transport_name, self.active_transport
+                )
+                effective_state = self._preserve_failed_transport_state(
+                    self.active_transport, failed_state, str(e)
+                )
+                self.ble_status = effective_state.value
                 self.ble_error_message = str(e)
                 error_to_notify = self.ble_error_message
 
-        if error_to_notify is not None:
+        if error_to_notify is not None and error_to_notify != self._notified_error:
             if self.active_transport_name == "lan":
                 if self.on_lan_error:
                     self.on_lan_error(error_to_notify)

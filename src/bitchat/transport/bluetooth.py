@@ -242,9 +242,6 @@ class BluetoothTransport(BaseTransport):
                         self._error_message = "Bluetooth disabled"
                         if self.on_error:
                             self.on_error(self._error_message)
-                        await self.ble_manager.adapter_manager.start_monitoring(
-                            self._handle_adapter_state_changed
-                        )
                         raise RuntimeError(self._error_message)
 
                     await self.ble_manager.adapter_manager.start_monitoring(
@@ -261,6 +258,22 @@ class BluetoothTransport(BaseTransport):
                     if adapter_info is not None
                     else True
                 )
+                backend_hosts_peripheral = bool(
+                    getattr(self.ble_server, "supports_peripheral", True)
+                )
+                platform_limits_peripheral = (
+                    self._peripheral_supported and not backend_hosts_peripheral
+                )
+                if platform_limits_peripheral:
+                    # The adapter hardware can advertise but BitChat has no GATT
+                    # server for this platform's backend. This is an expected
+                    # limitation, not a startup failure: report central-only
+                    # truthfully without raising a recovery warning.
+                    self._peripheral_supported = False
+                    logger.info(
+                        "BLE peripheral role is not implemented for this "
+                        "platform backend; running central-only"
+                    )
                 self._advertisement_offload_supported = (
                     adapter_info.is_advertisement_offload_supported
                     if adapter_info is not None
@@ -299,7 +312,7 @@ class BluetoothTransport(BaseTransport):
                                 )
                                 self._error_message = self._peripheral_error_message
                                 logger.warning("%s", self._peripheral_error_message)
-                else:
+                elif not platform_limits_peripheral:
                     self._peripheral_error_message = (
                         "BLE peripheral role is not supported by the adapter"
                     )
@@ -337,8 +350,16 @@ class BluetoothTransport(BaseTransport):
 
                 if not self._central_supported:
                     self._set_state(TransportState.READY)
-            except Exception:
+            except BaseException:
                 self._is_running = False
+                if self.ble_manager is not None:
+                    with contextlib.suppress(Exception):
+                        await self.ble_manager.adapter_manager.stop_monitoring()
+                    with contextlib.suppress(Exception):
+                        await self.ble_manager.scanner.stop()
+                if self.ble_server is not None:
+                    with contextlib.suppress(Exception):
+                        await self.ble_server.stop()
                 raise
 
     async def stop(self) -> None:

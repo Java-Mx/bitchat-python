@@ -45,15 +45,43 @@ class Application:
         self.ble_manager: BLEManager | None = ble_manager
         self.ble_server: BLEServer | None = ble_server
         self.coordinator: SessionCoordinator | None = coordinator
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _run_async(self, coro: Any) -> Any:
-        """Execute coroutine in existing or fresh event loop."""
+        """Execute coroutine in the running loop or this app's persistent loop.
+
+        Outside a running loop every call shares one loop for the lifetime of the
+        application. BLE backends bind OS resources (BlueZ D-Bus connections,
+        WinRT callbacks, asyncio locks) to the loop that created them, so a fresh
+        ``asyncio.run`` per command would orphan them between commands.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(coro)
+            if self._loop is None or self._loop.is_closed():
+                self._loop = asyncio.new_event_loop()
+            return self._loop.run_until_complete(coro)
         else:
             return loop.create_task(coro)
+
+    def _close_loop(self) -> None:
+        """Cancel leftover tasks and close the persistent loop (idempotent)."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            self._loop = None
+            return
+        try:
+            pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()
+            self._loop = None
 
     def startup(self) -> None:
         """Initialize configuration and start the application lifecycle."""
@@ -79,8 +107,12 @@ class Application:
             return
         self.is_running = False
 
-        if self.coordinator is not None and self.coordinator.is_running:
+        if self.coordinator is not None:
+            # Stop even when start() failed part-way: it is idempotent and releases
+            # adapter monitors, scanners, and sockets a failed start left behind.
             self._run_async(self.coordinator.stop())
+
+        self._close_loop()
 
         self.storage.close()
         self.stdout.write("Goodbye!\n")

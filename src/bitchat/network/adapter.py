@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import platform
 import re
 import socket
 import subprocess
@@ -47,7 +46,10 @@ def get_local_ip() -> str:
 
 def get_wifi_ssid_and_state() -> tuple[str | None, str | None]:
     """Retrieve connected Wi-Fi SSID and state on Windows or return (None, None)."""
-    if platform.system() != "Windows":
+    # Imported lazily: bitchat.platform.capabilities imports this module.
+    from bitchat.platform.detection import is_windows
+
+    if not is_windows():
         return None, None
 
     try:

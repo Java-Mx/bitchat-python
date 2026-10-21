@@ -34,6 +34,12 @@ Transport Abstraction Layer (BaseTransport)
   - `screens/settings.py`: `SettingsModal` for live configuration of nickname, max mesh relay hops (TTL), and inter-fragment transmission delay.
   - `screens/edit_theme.py`: `EditThemeModal` for toggling display density (comfortable vs compact) and timestamp visibility.
   - `screens/ble_error.py`: `BLEErrorModal` for hardware diagnostic guidance and automated `[Retry Adapter]` recovery.
+- **`platform/`**: Operating-system detection, capability diagnostics, and OS-specific recovery guidance. This is the only place that decides *which OS* BitChat is running on; BLE, network, and TUI code ask it instead of branching on the OS themselves.
+  - `detection.py`: `detect_platform()` (from `sys.platform`, read at call time so tests can mock it), `is_windows()`/`is_linux()`, `probe_ble_backend()` (are the platform's Python BLE modules importable?) and `peripheral_backend_implemented()`. Imports nothing else from `bitchat`, and never imports another platform's packages.
+  - `capabilities.py`: Hardware/network diagnostics behind `/configure`.
+  - `recovery.py`: OS-specific Bluetooth remediation text shown by `BLEErrorModal`; widgets contain no OS branching.
+  - Operating system, BLE backend, adapter hardware, GATT/advertising success, LAN availability, and the *active* transport are separate facts: knowing the OS never implies Bluetooth works. Adapter state is determined at runtime by `BLEAdapterManager`; role state by `BluetoothTransport.get_telemetry()`.
+  - Platform behaviour: Windows uses WinRT for adapter discovery, radio monitoring, the GATT server, and advertising; Linux uses BlueZ over D-Bus (via Bleak/`dbus-fast`) for adapter discovery and central scanning and is central-only (no GATT server). Both share `BLEManager`, `BLEServer`, `BluetoothTransport`, and `SessionCoordinator`.
 - **`mesh/`**: Multi-hop mesh routing, deduplication, and store-and-forward (depends on `protocol`).
   - `dedup.py`: `PacketDeduplicator` utilizing TTL-invariant SHA-256 hashing `[:16]` over `(sender_id + timestamp + message_type + recipient_id + payload)`, bounded LRU cache (capped at 1,000 entries), and 300s TTL cache.
   - `store_forward.py`: `StoreAndForwardQueue` with per-peer limits (20 packets), global cap (100 packets), aggregate byte budget (256 KB), and automatic flushing upon peer announce/connect.

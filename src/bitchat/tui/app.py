@@ -1028,7 +1028,7 @@ class BitChatApp(App[None]):
                 elif not telemetry.get("peripheral_supported"):
                     chat.add_system_message(
                         "Bluetooth central mode is active; peripheral advertising "
-                        "is not supported by this adapter."
+                        "is not supported by this adapter or platform backend."
                     )
                 else:
                     chat.add_system_message(
