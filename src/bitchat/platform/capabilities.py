@@ -19,6 +19,7 @@ from bitchat.network.adapter import get_local_ip, get_wifi_ssid_and_state
 from bitchat.platform.detection import (
     PlatformKind,
     detect_platform,
+    peripheral_backend_implemented,
     probe_ble_backend,
 )
 
@@ -56,6 +57,15 @@ class BluetoothCapabilities:
     @property
     def is_peripheral_available(self) -> bool:
         return "Available" in self.ble_peripheral
+
+    @property
+    def is_peripheral_supported(self) -> bool:
+        """Return True if peripheral mode is supported by both adapter and backend."""
+        return self.is_peripheral_available and peripheral_backend_implemented()
+
+    def is_peripheral_supported_for(self, kind: PlatformKind | None = None) -> bool:
+        """Return True if peripheral mode is supported on the given platform."""
+        return self.is_peripheral_available and peripheral_backend_implemented(kind)
 
 
 @dataclass(frozen=True)
@@ -582,17 +592,48 @@ def detect_lan_capabilities(
     )
 
 
+def _platform_kind_from_system(system: SystemCapabilities | None) -> PlatformKind:
+    """Resolve PlatformKind from SystemCapabilities.os_name or fallback to OS."""
+    if system is not None and system.os_name:
+        name = system.os_name.strip().lower()
+        if name == "windows" or name.startswith("win"):
+            return PlatformKind.WINDOWS
+        if (
+            name == "linux"
+            or "linux" in name
+            or name
+            in (
+                "ubuntu",
+                "debian",
+                "fedora",
+                "arch",
+                "centos",
+                "redhat",
+                "rhel",
+                "alpine",
+            )
+        ):
+            return PlatformKind.LINUX
+        return PlatformKind.OTHER
+    return detect_platform()
+
+
 def configure_viable_transports(
     system: SystemCapabilities,
     bluetooth: BluetoothCapabilities,
     network: NetworkCapabilities,
     lan: LanCapabilities,
+    peripheral_supported: bool | None = None,
 ) -> ConfiguredTransports:
     """Evaluate detected capabilities and select viable transports (Section 10)."""
     # Evaluate BLE viability
     ble_adapter_ok = bluetooth.adapter != "Not detected"
     ble_central_ok = bluetooth.is_central_available
-    ble_periph_ok = bluetooth.is_peripheral_available
+    target_kind = _platform_kind_from_system(system)
+    if peripheral_supported is not None:
+        ble_periph_ok = bluetooth.is_peripheral_available and peripheral_supported
+    else:
+        ble_periph_ok = bluetooth.is_peripheral_supported_for(target_kind)
     ble_perm_ok = bluetooth.permissions != "Permission denied"
 
     ble_viable = ble_adapter_ok and ble_central_ok and ble_perm_ok

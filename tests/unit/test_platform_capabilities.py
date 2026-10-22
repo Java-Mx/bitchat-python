@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    import pytest
 
 from bitchat.app.application import Application
 from bitchat.commands.parser import CommandParser, CommandType
@@ -15,10 +19,12 @@ from bitchat.platform.capabilities import (
     NetworkCapabilities,
     SystemCapabilities,
     SystemReport,
+    _platform_kind_from_system,
     configure_viable_transports,
     detect_system_info,
     format_configure_report,
 )
+from bitchat.platform.detection import PlatformKind
 
 
 def test_command_parser_configure() -> None:
@@ -53,7 +59,42 @@ def test_detect_system_info() -> None:
 
 
 def test_configure_viable_transports_both_available() -> None:
-    """Both BLE (Central + Peripheral) and LAN available enables both and fallback."""
+    """On Windows where peripheral backend is implemented, BLE (Central + Peripheral)
+    and LAN available enables both and fallback.
+    """
+    system = SystemCapabilities("Windows", "Windows 11", "x86_64", "CPython 3.12")
+    bt = BluetoothCapabilities(
+        adapter="hci0 (Intel)",
+        ble_central="Available",
+        ble_peripheral="Available",
+        gatt_capability="Available",
+        bluez="Not applicable (WinRT)",
+        permissions="Granted",
+    )
+    net = NetworkCapabilities(
+        wifi="Connected (HomeWifi)",
+        ethernet="Available (eth0)",
+        ipv4="192.168.1.100",
+        ipv6="2001:db8::1",
+    )
+    lan = LanCapabilities(
+        udp_discovery="Available (Port 24024)",
+        tcp_transport="Available (Port 24025)",
+    )
+
+    cfg = configure_viable_transports(system, bt, net, lan)
+    assert cfg.ble == "Enabled (Central + Peripheral)"
+    assert cfg.lan == "Enabled"
+    assert cfg.fallback == "Enabled"
+    assert cfg.recommended_transport == "bluetooth"
+    assert "System ready." in cfg.status
+
+
+def test_configure_viable_transports_linux_central_only() -> None:
+    """On Linux where peripheral backend is not implemented in BitChat,
+    configure_viable_transports accurately reports Central Mode only
+    even if the adapter and BlueZ daemon report peripheral Available.
+    """
     system = SystemCapabilities("Linux", "Ubuntu 24.04", "x86_64", "CPython 3.12")
     bt = BluetoothCapabilities(
         adapter="hci0 (Intel)",
@@ -75,7 +116,7 @@ def test_configure_viable_transports_both_available() -> None:
     )
 
     cfg = configure_viable_transports(system, bt, net, lan)
-    assert cfg.ble == "Enabled (Central + Peripheral)"
+    assert cfg.ble == "Enabled (Central Mode only)"
     assert cfg.lan == "Enabled"
     assert cfg.fallback == "Enabled"
     assert cfg.recommended_transport == "bluetooth"
@@ -140,7 +181,37 @@ def test_configure_viable_transports_no_bluetooth() -> None:
 
 
 def test_configure_viable_transports_no_lan() -> None:
-    """Unavailable LAN configures BLE-only mode."""
+    """Unavailable LAN configures BLE-only mode (on Windows with peripheral)."""
+    system = SystemCapabilities("Windows", "Windows 11", "x86_64", "CPython 3.12")
+    bt = BluetoothCapabilities(
+        adapter="hci0",
+        ble_central="Available",
+        ble_peripheral="Available",
+        gatt_capability="Available",
+        bluez="Not applicable (WinRT)",
+        permissions="Granted",
+    )
+    net = NetworkCapabilities(
+        wifi="Not detected",
+        ethernet="Not detected",
+        ipv4="Not detected",
+        ipv6="Not detected",
+    )
+    lan = LanCapabilities(
+        udp_discovery="Failed (No network)",
+        tcp_transport="Failed (No network)",
+    )
+
+    cfg = configure_viable_transports(system, bt, net, lan)
+    assert cfg.ble == "Enabled (Central + Peripheral)"
+    assert cfg.lan == "Unavailable"
+    assert cfg.fallback == "Disabled (BLE only)"
+    assert cfg.recommended_transport == "bluetooth"
+    assert "System ready (BLE only)." in cfg.status
+
+
+def test_configure_viable_transports_linux_no_lan() -> None:
+    """On Linux without LAN, Central-only BLE is selected with BLE-only fallback."""
     system = SystemCapabilities("Linux", "Ubuntu 24.04", "x86_64", "CPython 3.12")
     bt = BluetoothCapabilities(
         adapter="hci0",
@@ -162,10 +233,184 @@ def test_configure_viable_transports_no_lan() -> None:
     )
 
     cfg = configure_viable_transports(system, bt, net, lan)
-    assert cfg.ble == "Enabled (Central + Peripheral)"
+    assert cfg.ble == "Enabled (Central Mode only)"
     assert cfg.lan == "Unavailable"
     assert cfg.fallback == "Disabled (BLE only)"
     assert cfg.recommended_transport == "bluetooth"
+    assert "System ready (BLE only)." in cfg.status
+
+
+def test_configure_viable_transports_explicit_peripheral_override() -> None:
+    """Explicit peripheral_supported parameter overrides platform backend defaults."""
+    system = SystemCapabilities("Linux", "Ubuntu 24.04", "x86_64", "CPython 3.12")
+    bt = BluetoothCapabilities(
+        adapter="hci0",
+        ble_central="Available",
+        ble_peripheral="Available",
+        gatt_capability="Available",
+        bluez="Available",
+        permissions="Granted",
+    )
+    net = NetworkCapabilities(
+        wifi="Connected",
+        ethernet="Not detected",
+        ipv4="192.168.1.5",
+        ipv6="Not detected",
+    )
+    lan = LanCapabilities("Available (Port 24024)", "Available (Port 24025)")
+
+    # When custom peripheral backend is injected on Linux
+    cfg_with_custom = configure_viable_transports(
+        system, bt, net, lan, peripheral_supported=True
+    )
+    assert cfg_with_custom.ble == "Enabled (Central + Peripheral)"
+
+    # When peripheral is disabled on Windows
+    win_sys = SystemCapabilities("Windows", "Windows 11", "x86_64", "CPython 3.12")
+    cfg_win_disabled = configure_viable_transports(
+        win_sys, bt, net, lan, peripheral_supported=False
+    )
+    assert cfg_win_disabled.ble == "Enabled (Central Mode only)"
+
+
+def test_bluetooth_capabilities_is_peripheral_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BluetoothCapabilities.is_peripheral_supported checks backend implementation."""
+    import sys
+
+    bt_avail = BluetoothCapabilities(
+        adapter="hci0",
+        ble_central="Available",
+        ble_peripheral="Available",
+        gatt_capability="Available",
+        bluez="Available",
+        permissions="Granted",
+    )
+    assert bt_avail.is_peripheral_available is True
+
+    # On Linux: peripheral backend not implemented
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert bt_avail.is_peripheral_supported is False
+
+    # On Windows: peripheral backend implemented
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert bt_avail.is_peripheral_supported is True
+
+    # When peripheral is Unsupported on adapter: False on all platforms
+    bt_unsupported = BluetoothCapabilities(
+        adapter="hci0",
+        ble_central="Available",
+        ble_peripheral="Unsupported",
+        gatt_capability="Unsupported",
+        bluez="Available",
+        permissions="Granted",
+    )
+    assert bt_unsupported.is_peripheral_supported is False
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert bt_unsupported.is_peripheral_supported is False
+
+
+def test_bluetooth_capabilities_is_peripheral_supported_for() -> None:
+    """BluetoothCapabilities.is_peripheral_supported_for checks platform explicitly."""
+    bt_avail = BluetoothCapabilities(
+        adapter="hci0",
+        ble_central="Available",
+        ble_peripheral="Available",
+        gatt_capability="Available",
+        bluez="Available",
+        permissions="Granted",
+    )
+    assert bt_avail.is_peripheral_supported_for(PlatformKind.WINDOWS) is True
+    assert bt_avail.is_peripheral_supported_for(PlatformKind.LINUX) is False
+    assert bt_avail.is_peripheral_supported_for(PlatformKind.OTHER) is False
+
+    bt_unsupported = BluetoothCapabilities(
+        adapter="hci0",
+        ble_central="Available",
+        ble_peripheral="Unsupported",
+        gatt_capability="Unsupported",
+        bluez="Available",
+        permissions="Granted",
+    )
+    assert bt_unsupported.is_peripheral_supported_for(PlatformKind.WINDOWS) is False
+    assert bt_unsupported.is_peripheral_supported_for(PlatformKind.LINUX) is False
+
+
+def test_platform_kind_from_system_resolution() -> None:
+    """_platform_kind_from_system correctly resolves OS families from distro names."""
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Linux", "Ubuntu 24.04", "x86_64", "Python")
+        )
+        is PlatformKind.LINUX
+    )
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Ubuntu", "Ubuntu 24.04", "x86_64", "Python")
+        )
+        is PlatformKind.LINUX
+    )
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Debian GNU/Linux", "Debian 12", "x86_64", "Python")
+        )
+        is PlatformKind.LINUX
+    )
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Arch Linux", "Rolling", "x86_64", "Python")
+        )
+        is PlatformKind.LINUX
+    )
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Windows", "Windows 11", "x86_64", "Python")
+        )
+        is PlatformKind.WINDOWS
+    )
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Win32", "Windows 10", "x86_64", "Python")
+        )
+        is PlatformKind.WINDOWS
+    )
+    assert (
+        _platform_kind_from_system(
+            SystemCapabilities("Darwin", "macOS 14", "arm64", "Python")
+        )
+        is PlatformKind.OTHER
+    )
+    assert _platform_kind_from_system(None) in (
+        PlatformKind.LINUX,
+        PlatformKind.WINDOWS,
+        PlatformKind.OTHER,
+    )
+
+
+def test_configure_viable_transports_linux_distros() -> None:
+    """Linux distributions with peripheral-capable hardware evaluate to Central only."""
+    bt = BluetoothCapabilities(
+        adapter="hci0 (Intel)",
+        ble_central="Available",
+        ble_peripheral="Available",
+        gatt_capability="Available",
+        bluez="Available",
+        permissions="Granted",
+    )
+    net = NetworkCapabilities(
+        wifi="Connected",
+        ethernet="Not detected",
+        ipv4="192.168.1.10",
+        ipv6="Not detected",
+    )
+    lan = LanCapabilities("Available (Port 24024)", "Available (Port 24025)")
+
+    for distro in ("Ubuntu", "Debian", "Arch Linux", "Fedora"):
+        sys_cap = SystemCapabilities(distro, f"{distro} LTS", "x86_64", "CPython 3.12")
+        cfg = configure_viable_transports(sys_cap, bt, net, lan)
+        assert cfg.ble == "Enabled (Central Mode only)"
+        assert cfg.lan == "Enabled"
 
 
 def test_configure_viable_transports_permission_denied() -> None:
