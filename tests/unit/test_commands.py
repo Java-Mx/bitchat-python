@@ -2,7 +2,12 @@
 
 import pytest
 
-from bitchat.commands.parser import Command, CommandParser, CommandType
+from bitchat.commands.parser import (
+    Command,
+    CommandParser,
+    CommandType,
+    is_slash_command,
+)
 
 
 @pytest.fixture
@@ -259,3 +264,61 @@ class TestCommandParser:
         c4 = parser.parse("/medium lan")
         assert c4.command_type == CommandType.TRANSPORT
         assert c4.args == ["lan"]
+
+    def test_is_slash_command_helper(self) -> None:
+        """is_slash_command recognizes slash prefix with arbitrary whitespace."""
+        assert is_slash_command("/transport") is True
+        assert is_slash_command("  /transport lan  ") is True
+        assert is_slash_command("/help") is True
+        assert is_slash_command("/") is True
+        assert is_slash_command("transport") is False
+        assert is_slash_command("Can you explain the transport?") is False
+        assert is_slash_command("switch transport to LAN") is False
+        assert is_slash_command("hello /transport") is False
+        assert is_slash_command("") is False
+        assert is_slash_command("   ") is False
+        assert CommandParser.is_slash_command("/scan") is True
+        assert CommandParser.is_slash_command("scan") is False
+
+    def test_command_parser_slash_only_mode(self) -> None:
+        """CommandParser in slash_only mode only recognizes slash commands."""
+        strict_parser = CommandParser(slash_only=True)
+
+        # Valid slash commands parse normally
+        c_trans = strict_parser.parse("/transport lan")
+        assert c_trans.command_type == CommandType.TRANSPORT
+        assert c_trans.args == ["lan"]
+
+        c_help = strict_parser.parse("/help")
+        assert c_help.command_type == CommandType.HELP
+
+        c_exit = strict_parser.parse("/exit")
+        assert c_exit.command_type == CommandType.EXIT
+
+        # Direct message shorthand with '@' is still supported
+        c_dm = strict_parser.parse("@alice hello")
+        assert c_dm.command_type == CommandType.DM
+        assert c_dm.args == ["alice", "hello"]
+
+        # Ordinary words and unslashed commands become UNKNOWN
+        c_bare_trans = strict_parser.parse("transport")
+        assert c_bare_trans.command_type == CommandType.UNKNOWN
+        assert "Slash commands must begin with '/'" in (
+            c_bare_trans.error_message or ""
+        )
+
+        c_bare_help = strict_parser.parse("help")
+        assert c_bare_help.command_type == CommandType.UNKNOWN
+
+        c_bare_exit = strict_parser.parse("exit")
+        assert c_bare_exit.command_type == CommandType.UNKNOWN
+
+        c_sentence = strict_parser.parse("Can you explain the transport?")
+        assert c_sentence.command_type == CommandType.UNKNOWN
+
+        c_middle = strict_parser.parse("hello /transport")
+        assert c_middle.command_type == CommandType.UNKNOWN
+
+        # Token boundaries respected
+        c_boundary = strict_parser.parse("/transportation")
+        assert c_boundary.command_type == CommandType.UNKNOWN

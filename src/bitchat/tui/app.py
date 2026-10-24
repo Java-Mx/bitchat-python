@@ -16,6 +16,7 @@ from textual.widgets import Input
 
 from bitchat.commands.parser import (
     COMMAND_REGISTRY,
+    Command,
     CommandParser,
     CommandType,
     get_command_suggestions,
@@ -98,7 +99,7 @@ class BitChatApp(App[None]):
     ) -> None:
         super().__init__(**kwargs)
         self.coordinator = coordinator
-        self.parser = CommandParser()
+        self.parser = CommandParser(slash_only=True)
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
         if storage is not None:
@@ -1187,6 +1188,68 @@ class BitChatApp(App[None]):
         msg_input.cursor_position = len(msg_input.value)
         msg_input.focus()
 
+    def _send_chat_message(self, chat: ChatView, text: str) -> None:
+        """Send normal chat message honoring active conversation context."""
+        if self.active_context.startswith("@"):
+            target_peer = self.active_context[1:]
+            chat.add_chat_message(
+                self.coordinator.nickname if self.coordinator else "You",
+                f"(to @{target_peer}): {text}",
+                is_encrypted=True,
+                is_self=True,
+            )
+            if self.coordinator:
+                resolved_pid = target_peer
+                for pid, nick in self.coordinator.peer_nicknames.items():
+                    if nick.lower() == target_peer.lower():
+                        resolved_pid = pid
+                        break
+                self._spawn_task(
+                    self.coordinator.send_direct_message(resolved_pid, text)
+                )
+        else:
+            chat.add_chat_message(
+                self.coordinator.nickname if self.coordinator else "You",
+                text,
+                is_encrypted=False,
+                is_self=True,
+            )
+            if self.coordinator:
+                self._spawn_task(self.coordinator.send_broadcast_message(text))
+
+    def _send_direct_message(
+        self, chat: ChatView, target_peer: str, dm_text: str
+    ) -> None:
+        """Send an encrypted direct message to a specified peer."""
+        chat.add_chat_message(
+            self.coordinator.nickname if self.coordinator else "You",
+            f"(to {target_peer}): {dm_text}",
+            is_encrypted=True,
+            is_self=True,
+        )
+        if self.coordinator:
+            resolved_pid = None
+            clean_target = target_peer.lstrip("@").lower()
+            for pid, nick in self.coordinator.peer_nicknames.items():
+                if nick.lower() == clean_target or pid.lower().startswith(clean_target):
+                    resolved_pid = pid
+                    break
+            if resolved_pid is None:
+                try:
+                    bytes.fromhex(clean_target)
+                    resolved_pid = clean_target
+                except ValueError:
+                    pass
+
+            if resolved_pid:
+                self._spawn_task(
+                    self.coordinator.send_direct_message(resolved_pid, dm_text)
+                )
+            else:
+                chat.add_error_message(
+                    f"Cannot send DM: peer '{target_peer}' not found."
+                )
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Process submitted chat line or slash command."""
         text = event.value.strip()
@@ -1195,6 +1258,7 @@ class BitChatApp(App[None]):
         palette.hide()
 
         if not text:
+            msg_input.value = ""
             return
 
         msg_input.record_history(text)
@@ -1209,8 +1273,29 @@ class BitChatApp(App[None]):
             chat.add_system_message(f"Switched conversation context to @{target_peer}")
             return
 
-        cmd = self.parser.parse(text)
+        # Direct message shortcut: @peer <message>
+        if text.startswith("@"):
+            cmd = self.parser.parse(text)
+            if cmd.error_message:
+                chat.add_error_message(cmd.error_message)
+                return
+            target_peer = cmd.args[0]
+            dm_text = cmd.args[1]
+            self._send_direct_message(chat, target_peer, dm_text)
+            return
 
+        # Single clear command-dispatch boundary: only execute a slash command
+        # when trimmed input explicitly starts with '/'.
+        if not text.startswith("/"):
+            self._send_chat_message(chat, text)
+            return
+
+        # Process slash command
+        cmd = self.parser.parse(text)
+        self._dispatch_slash_command(chat, cmd, text)
+
+    def _dispatch_slash_command(self, chat: ChatView, cmd: Command, text: str) -> None:
+        """Dispatch a validated slash command whose trimmed input begins with '/'."""
         match cmd.command_type:
             case CommandType.HELP:
                 self.action_show_help()
@@ -1436,36 +1521,7 @@ class BitChatApp(App[None]):
                     return
                 target_peer = cmd.args[0]
                 dm_text = cmd.args[1]
-                chat.add_chat_message(
-                    self.coordinator.nickname if self.coordinator else "You",
-                    f"(to {target_peer}): {dm_text}",
-                    is_encrypted=True,
-                    is_self=True,
-                )
-                if self.coordinator:
-                    resolved_pid = None
-                    clean_target = target_peer.lstrip("@").lower()
-                    for pid, nick in self.coordinator.peer_nicknames.items():
-                        if nick.lower() == clean_target or pid.lower().startswith(
-                            clean_target
-                        ):
-                            resolved_pid = pid
-                            break
-                    if resolved_pid is None:
-                        try:
-                            bytes.fromhex(clean_target)
-                            resolved_pid = clean_target
-                        except ValueError:
-                            pass
-
-                    if resolved_pid:
-                        self._spawn_task(
-                            self.coordinator.send_direct_message(resolved_pid, dm_text)
-                        )
-                    else:
-                        chat.add_error_message(
-                            f"Cannot send DM: peer '{target_peer}' not found."
-                        )
+                self._send_direct_message(chat, target_peer, dm_text)
 
             case CommandType.LARGE:
                 if cmd.error_message:
@@ -1488,39 +1544,10 @@ class BitChatApp(App[None]):
                         )
                     )
 
-            case CommandType.UNKNOWN:
-                if text.startswith("/"):
-                    chat.add_error_message(cmd.error_message or "Unknown command")
-                else:
-                    # Check active conversation context
-                    if self.active_context.startswith("@"):
-                        target_peer = self.active_context[1:]
-                        chat.add_chat_message(
-                            self.coordinator.nickname if self.coordinator else "You",
-                            f"(to @{target_peer}): {text}",
-                            is_encrypted=True,
-                            is_self=True,
-                        )
-                        if self.coordinator:
-                            resolved_pid = target_peer
-                            for pid, nick in self.coordinator.peer_nicknames.items():
-                                if nick.lower() == target_peer.lower():
-                                    resolved_pid = pid
-                                    break
-                            self._spawn_task(
-                                self.coordinator.send_direct_message(resolved_pid, text)
-                            )
-                    else:
-                        chat.add_chat_message(
-                            self.coordinator.nickname if self.coordinator else "You",
-                            text,
-                            is_encrypted=False,
-                            is_self=True,
-                        )
-                        if self.coordinator:
-                            self._spawn_task(
-                                self.coordinator.send_broadcast_message(text)
-                            )
+            case _:
+                chat.add_error_message(
+                    cmd.error_message or f"Unknown command: '{text}'."
+                )
 
     def _display_configure_diagnostics(self, chat: ChatView) -> None:
         """Run system, Bluetooth, and LAN capability diagnostics and display in chat."""

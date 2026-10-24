@@ -2742,3 +2742,222 @@ async def test_continue_offline_with_ble_adapter_on_shows_offline_status_in_tui(
         status_msg = str(app.query_one(StatusBar).status_message)
         assert "BLE Offline • Offline Mode" in status_msg
         assert "Bluetooth Available" not in status_msg
+
+
+@pytest.mark.asyncio
+async def test_tui_ordinary_text_containing_commands_sent_as_chat(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Regression test: ordinary text containing command words is sent as chat.
+
+    1. A bare command name without '/' is sent as a chat message.
+    2. A sentence containing a command name is sent as a chat message.
+    3. Command names in the middle or end do not trigger execution.
+    """
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="TestWiFi",
+        local_ip="192.168.1.100",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        app = BitChatApp(coordinator=test_coordinator)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            chat = app.query_one(ChatView)
+            inp = app.query_one(MessageInput)
+
+            def submit(msg: str) -> None:
+                inp.value = msg
+                app.on_input_submitted(Input.Submitted(inp, msg))
+
+            # 1. Bare command name 'transport' -> normal chat message
+            submit("transport")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "transport" in rendered
+            assert "Active transport medium:" not in rendered
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            # Bare 'help' -> normal chat message, HelpScreen NOT opened
+            submit("help")
+            await pilot.pause()
+            assert not isinstance(app.screen, HelpScreen)
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "help" in rendered
+
+            # Bare 'clear' -> normal chat message, chat log not cleared
+            submit("clear")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "transport" in rendered
+            assert "clear" in rendered
+
+            # Bare 'quit' and 'exit' -> normal chat message, app remains running
+            submit("quit")
+            await pilot.pause()
+            submit("exit")
+            await pilot.pause()
+            assert app.is_running is True
+
+            # 2. Sentences containing command names
+            submit("Can you explain the transport?")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "Can you explain the transport?" in rendered
+
+            submit("switch transport to LAN")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "switch transport to LAN" in rendered
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            submit("please send help immediately")
+            await pilot.pause()
+            assert not isinstance(app.screen, HelpScreen)
+
+            # 3. Command name appearing in middle or end
+            submit("hello /transport")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "hello /transport" in rendered
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            submit("type /help if you are lost")
+            await pilot.pause()
+            assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_tui_slash_command_execution_and_token_boundaries(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Regression test: slash command execution and token boundaries.
+
+    4. A valid slash command still executes.
+    5. Command matching respects token boundaries.
+    6. Unknown slash commands follow the existing error behavior.
+    7. Empty input and whitespace-only input remain safe.
+    """
+    wifi_info = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="TestWiFi",
+        local_ip="192.168.1.100",
+    )
+    with patch("bitchat.network.adapter.detect_network_info", return_value=wifi_info):
+        app = BitChatApp(coordinator=test_coordinator)
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            chat = app.query_one(ChatView)
+            inp = app.query_one(MessageInput)
+
+            def submit(msg: str) -> None:
+                inp.value = msg
+                app.on_input_submitted(Input.Submitted(inp, msg))
+
+            # 7. Empty and whitespace-only inputs are safe no-ops
+            submit("")
+            await pilot.pause()
+            submit("    \t  ")
+            await pilot.pause()
+            assert inp.value == ""
+
+            # 5. Token boundary respect: /transportation does NOT match /transport
+            submit("/transportation")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "Unknown command: '/transportation'" in rendered
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            submit("/helper")
+            await pilot.pause()
+            assert not isinstance(app.screen, HelpScreen)
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "Unknown command: '/helper'" in rendered
+
+            # 6. Unknown slash commands follow error behavior
+            submit("/foobar")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "Unknown command: '/foobar'" in rendered
+
+            submit("/")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "Unknown command: '/'" in rendered
+
+            # 4. Valid slash commands still execute
+            submit("/transport")
+            await pilot.pause()
+            rendered = " ".join(line.text for line in chat.rich_log.lines)
+            assert "Active transport medium: BLUETOOTH" in rendered
+
+            submit("/transport lan")
+            await pilot.pause(1)
+            assert test_coordinator.active_transport_name == "lan"
+
+            submit("/transport bluetooth")
+            await pilot.pause(1)
+            assert test_coordinator.active_transport_name == "bluetooth"
+
+            # /clear clears the chat log
+            submit("/clear")
+            await pilot.pause()
+            assert len(chat.rich_log.lines) == 0
+
+
+@pytest.mark.asyncio
+async def test_tui_chat_sending_context_and_dm_unaffected(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Regression test: chat sending, encryption handling, and context."""
+    test_coordinator.peer_nicknames["deadbeef12345678"] = "Bob"
+    test_coordinator.send_broadcast_message = AsyncMock()
+    test_coordinator.send_direct_message = AsyncMock()
+
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        chat = app.query_one(ChatView)
+        inp = app.query_one(MessageInput)
+
+        def submit(msg: str) -> None:
+            inp.value = msg
+            app.on_input_submitted(Input.Submitted(inp, msg))
+
+        # Public broadcast
+        submit("Hello everyone on public")
+        await pilot.pause()
+        test_coordinator.send_broadcast_message.assert_called_once_with(
+            "Hello everyone on public"
+        )
+        rendered = " ".join(line.text for line in chat.rich_log.lines)
+        assert "Hello everyone on public" in rendered
+
+        # Switch context to @Bob
+        submit("@Bob")
+        await pilot.pause()
+        assert app.active_context == "@Bob"
+        rendered = " ".join(line.text for line in chat.rich_log.lines)
+        assert "Switched conversation context to @Bob" in rendered
+
+        # Ordinary message inside @Bob context sends encrypted DM
+        submit("transport is important")
+        await pilot.pause()
+        test_coordinator.send_direct_message.assert_called_with(
+            "deadbeef12345678", "transport is important"
+        )
+        rendered = " ".join(line.text for line in chat.rich_log.lines)
+        assert "(to @Bob): transport is important" in rendered
+
+        # @peer <message> syntax sends DM regardless of context
+        submit("/public")
+        await pilot.pause()
+        assert app.active_context == "#public"
+
+        submit("@Bob Message via at syntax")
+        await pilot.pause()
+        test_coordinator.send_direct_message.assert_called_with(
+            "deadbeef12345678", "Message via at syntax"
+        )

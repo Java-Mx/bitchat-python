@@ -9,7 +9,11 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from bitchat.exceptions import BLEError
-from bitchat.platform.detection import is_windows, peripheral_backend_implemented
+from bitchat.platform.detection import (
+    is_linux,
+    is_windows,
+    peripheral_backend_implemented,
+)
 from bitchat.protocol.constants import (
     BITCHAT_CHARACTERISTIC_UUID,
     BITCHAT_SERVICE_UUID,
@@ -43,6 +47,7 @@ class BLEServer:
         backend: Any | None = None,
         peer_id: str = "",
         nickname: str = "",
+        linux_bus: Any | None = None,
     ) -> None:
         self.service_uuid = service_uuid.lower()
         self.characteristic_uuid = characteristic_uuid.lower()
@@ -52,6 +57,8 @@ class BLEServer:
         self._custom_backend = backend
         self.peer_id = peer_id
         self.nickname = nickname
+        self._linux_bus = linux_bus
+        self._linux_backend: Any | None = None
 
         self._is_advertising: bool = False
         self._last_error: str | None = None
@@ -73,7 +80,7 @@ class BLEServer:
         """Return True if this process can host a GATT server on this platform.
 
         An injected backend is always honoured; otherwise only platforms with a
-        native implementation (currently Windows WinRT) can advertise.
+        native implementation (Windows WinRT and Linux BlueZ) can advertise.
         """
         return self._custom_backend is not None or peripheral_backend_implemented()
 
@@ -81,16 +88,24 @@ class BLEServer:
         """Update identity advertised in BLE packets."""
         self.peer_id = peer_id
         self.nickname = nickname
+        if self._linux_backend is not None:
+            self._linux_backend.update_identity(peer_id, nickname)
 
     def get_telemetry(self) -> dict[str, Any]:
         """Return truthful telemetry about GATT server state."""
+        has_provider = self._provider is not None or (
+            self._linux_backend is not None and self._linux_backend.has_provider
+        )
+        has_publisher = self._publisher is not None or (
+            self._linux_backend is not None and self._linux_backend.has_publisher
+        )
         return {
             "server_active": self._is_advertising,
             "is_advertising": self._is_advertising,
             "service_uuid": self.service_uuid,
             "characteristic_uuid": self.characteristic_uuid,
-            "has_provider": self._provider is not None,
-            "has_publisher": self._publisher is not None,
+            "has_provider": has_provider,
+            "has_publisher": has_publisher,
             "last_error": self._last_error,
         }
 
@@ -118,13 +133,15 @@ class BLEServer:
 
             if is_windows():
                 await self._start_windows_server()
+            elif is_linux():
+                await self._start_linux_server()
             else:
                 logger.info(
                     "Native BLE peripheral mode is only implemented on Windows "
-                    "WinRT. Running in central-only mode on this platform."
+                    "WinRT and Linux BlueZ. Running in central-only mode on this "
+                    "platform."
                 )
                 self._is_advertising = False
-                await self._start_linux_server()
 
     async def stop(self) -> None:
         """Stop advertising and clean up the GATT service."""
@@ -136,6 +153,8 @@ class BLEServer:
                     or self._characteristic is not None
                 ):
                     self._cleanup_windows_resources()
+                if is_linux() and self._linux_backend is not None:
+                    await self._cleanup_linux_resources()
                 return
 
             if self._custom_backend is not None:
@@ -146,11 +165,9 @@ class BLEServer:
 
             if is_windows():
                 self._cleanup_windows_resources()
-            elif self._provider is not None:
-                with contextlib.suppress(Exception):
-                    await self._provider.stop()
-                self._provider = None
-                self._characteristic = None
+
+            if is_linux():
+                await self._cleanup_linux_resources()
 
             self._is_advertising = False
             logger.info("BLEServer stopped")
@@ -178,61 +195,8 @@ class BLEServer:
                 await self._characteristic.notify_value_async(buf)
             except Exception as e:
                 raise BLEError(f"Failed to notify BLE characteristic: {e}") from e
-        elif os.name != "nt" and self._provider is not None:
-            try:
-                self._provider.update_value(self.service_uuid, self.characteristic_uuid)
-            except Exception as e:
-                raise BLEError(f"Failed to notify Linux BLE characteristic: {e}") from e
-
-    async def _start_linux_server(self) -> None:
-        """Start a Linux BLE GATT peripheral using Bless and BlueZ."""
-        try:
-            from bless import BlessServer, GATTAttributePermissions, GATTCharacteristicProperties
-
-            def on_write(characteristic: Any, value: Any, **kwargs: Any) -> None:
-                try:
-                    if self.on_data_received is not None:
-                        self.on_data_received(bytes(value), "bluez_client")
-                except Exception:
-                    logger.exception("Failed to handle incoming Linux BLE write")
-
-            server = BlessServer(
-                name=self.nickname or "BitChat",
-                loop=self._loop,
-            )
-
-            await server.add_gatt({
-                self.service_uuid: {
-                    self.characteristic_uuid: {
-                        "Properties": (
-                            GATTCharacteristicProperties.write
-                            | GATTCharacteristicProperties.write_without_response
-                            | GATTCharacteristicProperties.notify
-                        ),
-                        "Permissions": GATTAttributePermissions.writeable,
-                        "Value": bytearray(),
-                    }
-                }
-            })
-            server.write_request_func = on_write
-
-            started = await server.start()
-
-            if started is False:
-                raise BLEError("Bless reported that Linux BLE advertising failed")
-            self._provider = server
-            self._characteristic = self.characteristic_uuid
-            self._is_advertising = True
-            self._last_error = None
-            logger.info("Linux Bless GATT server started for %s", self.service_uuid)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            self._provider = None
-            self._characteristic = None
-            self._is_advertising = False
-            self._last_error = str(e)
-            raise BLEError(f"Failed to start Linux BLE GATT server: {e}") from e
+        elif is_linux() and self._linux_backend is not None:
+            await self._linux_backend.send_notification(data, client_id)
 
     async def _start_windows_server(self) -> None:
         """Initialize Windows WinRT GATT provider and characteristic."""
@@ -483,3 +447,63 @@ class BLEServer:
                 self.on_client_unsubscribed("client")
         except Exception as e:
             logger.debug("Error in subscribers_changed callback: %s", e)
+
+    def _dispatch_data_received(self, data: bytes, client_id: str) -> None:
+        if self.on_data_received is not None:
+            self.on_data_received(data, client_id)
+
+    def _dispatch_client_subscribed(self, client_id: str) -> None:
+        if self.on_client_subscribed is not None:
+            self.on_client_subscribed(client_id)
+
+    def _dispatch_client_unsubscribed(self, client_id: str) -> None:
+        if self.on_client_unsubscribed is not None:
+            self.on_client_unsubscribed(client_id)
+
+    def _on_advertising_state_changed(self, is_advertising: bool) -> None:
+        self._is_advertising = is_advertising
+
+    async def _start_linux_server(self) -> None:
+        """Initialize Linux BlueZ GATT provider and LE advertisement."""
+        try:
+            from bitchat.ble.bluez import BlueZServerBackend
+
+            backend = BlueZServerBackend(
+                service_uuid=self.service_uuid,
+                characteristic_uuid=self.characteristic_uuid,
+                on_data_received=self._dispatch_data_received,
+                on_client_subscribed=self._dispatch_client_subscribed,
+                on_client_unsubscribed=self._dispatch_client_unsubscribed,
+                on_advertising_state_changed=self._on_advertising_state_changed,
+                bus=self._linux_bus,
+                peer_id=self.peer_id,
+                nickname=self.nickname,
+            )
+            self._linux_backend = backend
+            await backend.start()
+            self._is_advertising = True
+            self._last_error = None
+            logger.info(
+                "Linux BlueZ BLEServer active for BitChat service %s", self.service_uuid
+            )
+        except asyncio.CancelledError:
+            await self._cleanup_linux_resources()
+            self._is_advertising = False
+            raise
+        except Exception as e:
+            await self._cleanup_linux_resources()
+            self._is_advertising = False
+            self._last_error = str(e)
+            logger.warning(
+                "Linux BlueZ GATT service advertising failed (%s); "
+                "continuing without peripheral role",
+                e,
+            )
+
+    async def _cleanup_linux_resources(self) -> None:
+        """Safely release Linux BlueZ backend and D-Bus resources."""
+        backend = self._linux_backend
+        self._linux_backend = None
+        if backend is not None:
+            with contextlib.suppress(Exception):
+                await backend.stop()

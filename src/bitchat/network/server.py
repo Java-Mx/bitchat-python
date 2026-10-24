@@ -84,12 +84,8 @@ class LANServer:
             return
 
         self._is_listening = False
-        if self._server:
-            self._server.close()
-            with contextlib.suppress(Exception):
-                await self._server.wait_closed()
-            self._server = None
 
+        # Close active client connections first so server sockets can release
         async with self._lock:
             conns = list(self._connections.values())
             self._connections.clear()
@@ -97,6 +93,12 @@ class LANServer:
         for conn in conns:
             with contextlib.suppress(Exception):
                 await conn.close()
+
+        if self._server:
+            self._server.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._server.wait_closed(), timeout=1.0)
+            self._server = None
 
     async def _handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter

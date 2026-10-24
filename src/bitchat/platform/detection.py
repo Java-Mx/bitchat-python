@@ -59,11 +59,9 @@ def is_supported_platform(kind: PlatformKind | None = None) -> bool:
 def peripheral_backend_implemented(kind: PlatformKind | None = None) -> bool:
     """Return True if BitChat implements the BLE peripheral (GATT server) role.
 
-    Only the Windows WinRT backend currently hosts a GATT server. On Linux the
-    BlueZ GATT server is not implemented, so BitChat runs central-only there
-    regardless of what the adapter hardware supports.
+    Windows WinRT and Linux BlueZ backends implement GATT server and advertising.
     """
-    return (kind or detect_platform()) is PlatformKind.WINDOWS
+    return (kind or detect_platform()) in (PlatformKind.WINDOWS, PlatformKind.LINUX)
 
 
 # Python modules each platform's BLE backend needs at runtime. These are declared

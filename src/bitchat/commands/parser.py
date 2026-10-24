@@ -173,6 +173,11 @@ def get_command_suggestions(prefix: str) -> list[CommandSpec]:
     return results
 
 
+def is_slash_command(text: str) -> bool:
+    """Return True if trimmed input begins with a slash command prefix ('/')."""
+    return text.strip().startswith("/")
+
+
 @dataclass(frozen=True)
 class Command:
     """Structured representation of a parsed command."""
@@ -186,7 +191,15 @@ class Command:
 class CommandParser:
     """Parses text input into structured Command objects."""
 
-    def parse(self, text: str) -> Command:
+    def __init__(self, *, slash_only: bool = False) -> None:
+        self.slash_only = slash_only
+
+    @staticmethod
+    def is_slash_command(text: str) -> bool:
+        """Return True if trimmed input begins with a slash command prefix ('/')."""
+        return is_slash_command(text)
+
+    def parse(self, text: str, *, slash_only: bool | None = None) -> Command:
         """Parse a line of text into a Command."""
         stripped = text.strip()
         if not stripped:
@@ -213,6 +226,18 @@ class CommandParser:
                 command_type=CommandType.DM,
                 raw_input=text,
                 args=[target, parts[1].strip()],
+            )
+
+        effective_slash_only = self.slash_only if slash_only is None else slash_only
+        if effective_slash_only and not stripped.startswith("/"):
+            err_msg = (
+                f"Unknown command: '{stripped}'. Slash commands must begin with '/'."
+            )
+            return Command(
+                command_type=CommandType.UNKNOWN,
+                raw_input=text,
+                args=stripped.split(),
+                error_message=err_msg,
             )
 
         tokens = stripped.split()

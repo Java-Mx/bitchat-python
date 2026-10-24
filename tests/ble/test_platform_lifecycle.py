@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
+from tests.ble.fake_bluez import FakeBlueZ
 from tests.ble.fake_winrt import (
     STATUS_ABORTED,
     STATUS_CREATED,
@@ -123,6 +124,12 @@ def forbid_dbus(monkeypatch: pytest.MonkeyPatch) -> _ForbiddenImports:
 def windows(monkeypatch: pytest.MonkeyPatch) -> FakeWinRT:
     monkeypatch.setattr(sys, "platform", "win32")
     return FakeWinRT().install(monkeypatch)
+
+
+@pytest.fixture
+def bluez(monkeypatch: pytest.MonkeyPatch) -> FakeBlueZ:
+    monkeypatch.setattr(sys, "platform", "linux")
+    return FakeBlueZ().install(monkeypatch)
 
 
 # ---------------------------------------------------------------------------
@@ -262,14 +269,67 @@ async def test_windows_notify_uses_characteristic(windows: FakeWinRT) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Linux: central-only, never touches WinRT
+# Linux: BlueZ GATT server and LE advertising, never touches WinRT
 # ---------------------------------------------------------------------------
 
 
-async def test_linux_server_is_central_only_and_never_imports_winrt(
+async def test_linux_server_starts_advertising_and_never_imports_winrt(
+    bluez: FakeBlueZ, forbid_winrt: _ForbiddenImports
+) -> None:
+    server = BLEServer()
+    assert server.supports_peripheral is True
+
+    await server.start()
+
+    assert server.is_advertising is True
+    assert len(bluez.registered_applications) == 1
+    assert len(bluez.registered_advertisements) == 1
+    assert server.get_telemetry()["last_error"] is None
+    assert forbid_winrt.attempted == []
+
+    await server.stop()
+    await server.stop()
+    assert server.is_advertising is False
+    assert len(bluez.registered_applications) == 0
+    assert len(bluez.registered_advertisements) == 0
+    assert forbid_winrt.attempted == []
+
+
+async def test_linux_server_repeated_cycles_do_not_leak_registrations(
+    bluez: FakeBlueZ,
+) -> None:
+    server = BLEServer()
+    for _ in range(3):
+        await server.start()
+        assert server.is_advertising is True
+        assert len(bluez.registered_applications) == 1
+        assert len(bluez.registered_advertisements) == 1
+        await server.stop()
+        assert server.is_advertising is False
+        assert len(bluez.registered_applications) == 0
+        assert len(bluez.registered_advertisements) == 0
+
+
+async def test_linux_notify_uses_characteristic(bluez: FakeBlueZ) -> None:
+    server = BLEServer()
+    await server.start()
+
+    await server.send_notification(b"payload")
+
+    assert len(bluez.emitted_notifications) == 1
+    assert bluez.emitted_notifications[0]["Value"] == b"payload"
+    await server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Unsupported platform (e.g. Darwin): central-only, never touches WinRT
+# ---------------------------------------------------------------------------
+
+
+async def test_darwin_server_is_central_only_and_never_imports_winrt(
     monkeypatch: pytest.MonkeyPatch, forbid_winrt: _ForbiddenImports
 ) -> None:
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "darwin")
     server = BLEServer()
     assert server.supports_peripheral is False
 
@@ -345,11 +405,57 @@ async def test_windows_advertising_failure_keeps_central_and_recovers_on_retry(
     await transport.stop()
 
 
-async def test_linux_transport_runs_central_only_without_warning(
+async def test_linux_transport_advertises_and_scans(bluez: FakeBlueZ) -> None:
+    transport = make_transport(MutableAdapterBackend(hardware()), BLEServer())
+
+    await transport.start()
+
+    telemetry = transport.get_telemetry()
+    assert telemetry["scanner_status"] == "Active"
+    assert telemetry["advertising_active"] is True
+    assert telemetry["gatt_server_status"] == "Advertising"
+    assert telemetry["peripheral_error"] is None
+
+    await transport.stop()
+    assert len(bluez.registered_applications) == 0
+    assert len(bluez.registered_advertisements) == 0
+
+
+async def test_linux_advertising_failure_keeps_central_and_recovers_on_retry(
+    bluez: FakeBlueZ,
+) -> None:
+    bluez.register_adv_error = "org.bluez.Error.Failed"
+    transport = make_transport(MutableAdapterBackend(hardware()), BLEServer())
+    warnings: list[str] = []
+    transport.on_warning = warnings.append
+
+    await transport.start()
+
+    telemetry = transport.get_telemetry()
+    assert telemetry["scanner_status"] == "Active"
+    assert telemetry["advertising_active"] is False
+    assert telemetry["gatt_server_status"] == "Failed"
+    assert "Failed" in (telemetry["peripheral_error"] or "")
+    assert len(warnings) == 1
+    assert len(bluez.registered_advertisements) == 0
+
+    bluez.register_adv_error = None
+    await transport.stop()
+    assert len(bluez.registered_advertisements) == 0
+    await transport.start()
+
+    telemetry = transport.get_telemetry()
+    assert telemetry["advertising_active"] is True
+    assert telemetry["peripheral_error"] is None
+    assert len(warnings) == 1
+    await transport.stop()
+
+
+async def test_darwin_transport_runs_central_only_without_warning(
     monkeypatch: pytest.MonkeyPatch, forbid_winrt: _ForbiddenImports
 ) -> None:
-    monkeypatch.setattr(sys, "platform", "linux")
-    # The adapter hardware claims peripheral support, but BitChat has no BlueZ
+    monkeypatch.setattr(sys, "platform", "darwin")
+    # The adapter hardware claims peripheral support, but BitChat has no Darwin
     # GATT server, so the transport must report central-only truthfully.
     transport = make_transport(MutableAdapterBackend(hardware()), BLEServer())
     warnings: list[str] = []
@@ -367,6 +473,28 @@ async def test_linux_transport_runs_central_only_without_warning(
     assert warnings == []
     assert forbid_winrt.attempted == []
 
+    await transport.stop()
+
+
+async def test_linux_transport_hardware_unsupported_peripheral(
+    bluez: FakeBlueZ,
+) -> None:
+    transport = make_transport(
+        MutableAdapterBackend(hardware(peripheral=False)), BLEServer()
+    )
+    warnings: list[str] = []
+    transport.on_warning = warnings.append
+
+    await transport.start()
+
+    telemetry = transport.get_telemetry()
+    assert transport.state == TransportState.SCANNING
+    assert telemetry["scanner_status"] == "Active"
+    assert telemetry["peripheral_supported"] is False
+    assert telemetry["advertising_active"] is False
+    assert telemetry["gatt_server_status"] == "Unsupported"
+    assert telemetry["peripheral_error"] is not None
+    assert len(warnings) == 1
     await transport.stop()
 
 
@@ -391,7 +519,8 @@ async def test_linux_adapter_unavailable_does_not_start_any_role(
 async def test_repeated_transport_cycles_do_not_leak_tasks_or_handlers(
     monkeypatch: pytest.MonkeyPatch, platform_id: str
 ) -> None:
-    fake = FakeWinRT().install(monkeypatch)
+    fake_win = FakeWinRT().install(monkeypatch)
+    fake_bluez = FakeBlueZ().install(monkeypatch)
     monkeypatch.setattr(sys, "platform", platform_id)
     adapter = MutableAdapterBackend(hardware())
     transport = make_transport(adapter, BLEServer())
@@ -403,9 +532,11 @@ async def test_repeated_transport_cycles_do_not_leak_tasks_or_handlers(
         await transport.stop()
         assert manager.adapter_manager._monitor_task is None
         assert len(asyncio.all_tasks()) == baseline
-        assert fake.active_handlers == 0
-        assert fake.advertising_providers == 0
-        assert fake.running_publishers == 0
+        assert fake_win.active_handlers == 0
+        assert fake_win.advertising_providers == 0
+        assert fake_win.running_publishers == 0
+        assert len(fake_bluez.registered_applications) == 0
+        assert len(fake_bluez.registered_advertisements) == 0
         assert not manager.scanner.is_scanning
 
 

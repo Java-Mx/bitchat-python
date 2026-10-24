@@ -31,10 +31,11 @@ BitChat strictly avoids the assumption that an existing Bluetooth adapter suppor
 
 ### BitChat's Linux BLE Role Support
 Linux is selected centrally by `bitchat.platform.detection.detect_platform()` (`sys.platform.startswith("linux")`); no WinRT module is imported.
-- **Central (scanning, outbound connections):** supported through Bleak's BlueZ backend when BlueZ is running and the adapter is powered.
-- **Peripheral (GATT server/advertising):** *not implemented* for BlueZ. BitChat runs central-only on Linux even when the adapter advertises `LEAdvertisingManager1`; telemetry reports the peripheral role as unsupported rather than failed, and no recovery warning is raised for it.
+- **Central (scanning, outbound connections):** Supported through Bleak's BlueZ backend when BlueZ is running and the adapter is powered.
+- **Peripheral (GATT server & LE advertising):** Fully implemented natively via BlueZ D-Bus APIs using `dbus-fast`. BitChat exports a GATT application (`org.freedesktop.DBus.ObjectManager`), registers the BitChat primary service and characteristic with `org.bluez.GattManager1`, and broadcasts connectable peripheral advertisements with manufacturer data via `org.bluez.LEAdvertisingManager1`.
+- **Capability Inspection & Graceful Fallback:** BitChat inspects the adapter's actual D-Bus interfaces rather than assuming peripheral support. If the adapter or BlueZ daemon lacks `GattManager1` or `LEAdvertisingManager1`, peripheral mode is cleanly disabled with specific diagnostics while retaining active central scanning and LAN fallback.
 - Hardware, BlueZ, permission, or missing-`dbus-fast` problems mark the adapter unavailable; they are never treated as working Bluetooth. Retry rechecks the adapter and releases scanner/monitor tasks first.
-- Prerequisites are system services, not Python packages: a running `bluetoothd` (BlueZ), a present, unblocked adapter, and D-Bus access for your user. Python packages (`bleak`, with `dbus-fast` on Linux) install via `uv sync`; BlueZ is installed with your distribution's package manager.
+- Prerequisites are system services, not Python packages: a running `bluetoothd` (BlueZ), a present, unblocked adapter, and D-Bus access for your user. Python packages (`bleak`, with `dbus-fast` on Linux) install via `uv sync` or package dependencies; BlueZ is installed with your distribution's package manager.
 - The CLI keeps one asyncio event loop for the whole session so D-Bus connections are not orphaned between commands.
 
 ### User Permissions & D-Bus Policy

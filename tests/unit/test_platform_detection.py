@@ -48,9 +48,9 @@ def test_detect_platform_from_sys_platform(
     assert is_supported_platform() is (expected is not PlatformKind.OTHER)
 
 
-def test_peripheral_backend_is_only_implemented_on_windows() -> None:
+def test_peripheral_backend_is_implemented_on_windows_and_linux() -> None:
     assert peripheral_backend_implemented(PlatformKind.WINDOWS) is True
-    assert peripheral_backend_implemented(PlatformKind.LINUX) is False
+    assert peripheral_backend_implemented(PlatformKind.LINUX) is True
     assert peripheral_backend_implemented(PlatformKind.OTHER) is False
 
 

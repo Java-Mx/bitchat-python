@@ -14,6 +14,7 @@ async def test_server_start_handles_gatt_abort(monkeypatch):
     """Run BLEServer._start_windows_server with dummy WinRT modules and force an abort.
     The test verifies that BLEServer.start() does not raise and leaves advertising off.
     """
+    monkeypatch.setattr(sys, "platform", "win32")
 
     # ---------------------------------------------------------------------
     # Create minimal dummy winrt modules that satisfy the imports in

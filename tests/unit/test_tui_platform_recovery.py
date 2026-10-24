@@ -177,21 +177,21 @@ async def test_status_bar_supported_peripheral_capability_idle() -> None:
     await coord.stop()
 
 
-async def test_status_bar_unsupported_peripheral_capability_on_linux(
+async def test_status_bar_unsupported_peripheral_when_backend_not_implemented(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On Linux/Ubuntu where peripheral role is unsupported by BitChat's backend,
+    """When peripheral role is unsupported by BitChat's backend (e.g. Darwin),
     Central mode is preserved and the status bar accurately reports:
     '● Bluetooth Available • BLE Central Mode • Peripheral Unsupported'.
     """
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "darwin")
     info = AdapterInfo(
         is_available=True,
         radio_state="on",
         is_central_supported=True,
         is_peripheral_supported=True,
     )
-    # Native BLEServer without custom backend: supports_peripheral is False on Linux
+    # Native BLEServer without custom backend: supports_peripheral is False on Darwin
     real_server = BLEServer()
     assert real_server.supports_peripheral is False
 
