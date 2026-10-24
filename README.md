@@ -1,6 +1,6 @@
 <div align="center">
 
-# BitChat Python
+# CLI BitChat Python
 
 **Encrypted peer-to-peer mesh chat over Bluetooth Low Energy and LAN**
 
