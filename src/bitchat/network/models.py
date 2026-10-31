@@ -43,6 +43,7 @@ class DiscoveryPacket:
     protocol: str = "bitchat"
     version: int = 1
     transport: str = "lan"
+    instance_id: str = ""
 
     def to_bytes(self) -> bytes:
         """Serialize discovery packet to compact UTF-8 JSON bytes."""
@@ -54,6 +55,7 @@ class DiscoveryPacket:
             "nickname": self.nickname[:32],
             "port": self.port,
             "ssid": self.ssid[:64] if self.ssid else "",
+            "instance_id": self.instance_id[:32] if self.instance_id else "",
         }
         raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         if len(raw) > MAX_DISCOVERY_PACKET_SIZE:
@@ -92,12 +94,14 @@ class DiscoveryPacket:
 
             nickname = str(data.get("nickname", "Anonymous")).strip()[:32]
             ssid = str(data.get("ssid", "")).strip()[:64]
+            instance_id = str(data.get("instance_id", "")).strip()[:32]
 
             return cls(
                 peer_id=peer_id,
                 nickname=nickname,
                 port=port,
                 ssid=ssid,
+                instance_id=instance_id,
             )
         except Exception:
             return None
@@ -113,6 +117,7 @@ class LANDiscoveredPeer:
     peer_id: str
     nickname: str
     ssid: str = ""
+    instance_id: str = ""
     transport: str = "lan"
     last_seen: float = field(default_factory=time.time)
 

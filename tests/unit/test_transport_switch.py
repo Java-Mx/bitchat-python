@@ -122,16 +122,15 @@ async def test_transport_switching_lifecycle(
         assert coordinator.active_transport_name == "lan"
         assert coordinator.active_transport.is_running
 
-        # Verify fresh transport-scoped identity was generated
-        new_lan_peer_id = coordinator.local_identity.peer_id_hex
-        assert new_lan_peer_id != original_peer_id
-        assert lan_transport.local_peer_id == new_lan_peer_id
+        # Verify persistent device identity was preserved across interface switch
+        assert coordinator.local_identity.peer_id_hex == original_peer_id
+        assert lan_transport.local_peer_id == original_peer_id
         assert lan_transport.discovered_peers == {}
 
-        # The BLE manager must not keep using the persistent identity's ID
+        # The BLE manager preserves the persistent identity's ID
         bt_transport: Any = coordinator._transports["bluetooth"]
         assert bt_transport.ble_manager.sender_id == coordinator.local_identity.peer_id
-        assert bt_transport.ble_manager.sender_id.hex() != original_peer_id
+        assert bt_transport.ble_manager.sender_id.hex() == original_peer_id
 
         # Verify peer tables and sessions were cleared
         assert len(coordinator.peer_addresses) == 0
@@ -149,7 +148,7 @@ async def test_transport_switching_lifecycle(
         success_dup, msg_dup = await coordinator.switch_transport("lan")
         assert success_dup is True
         assert "Already active" in msg_dup
-        assert coordinator.local_identity.peer_id_hex == new_lan_peer_id
+        assert coordinator.local_identity.peer_id_hex == original_peer_id
 
         # 3. Switch back to Bluetooth
         success_bt, msg_bt = await coordinator.switch_transport("bluetooth")
@@ -157,11 +156,9 @@ async def test_transport_switching_lifecycle(
         assert "Switched transport" in msg_bt
         assert coordinator.active_transport_name == "bluetooth"
 
-        # Verify another fresh transport-scoped identity was generated
-        new_bt_peer_id = coordinator.local_identity.peer_id_hex
-        assert new_bt_peer_id != new_lan_peer_id
-        assert new_bt_peer_id != original_peer_id
-        assert lan_transport.local_peer_id == new_bt_peer_id
+        # Verify device identity remains stable across the switch
+        assert coordinator.local_identity.peer_id_hex == original_peer_id
+        assert lan_transport.local_peer_id == original_peer_id
         assert lan_transport.discovered_peers == {}
         assert bt_transport.ble_manager.sender_id == coordinator.local_identity.peer_id
 

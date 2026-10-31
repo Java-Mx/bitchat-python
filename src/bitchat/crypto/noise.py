@@ -359,9 +359,7 @@ class NoiseCipherState:
 
         In transport mode (``use_extracted_nonce=True``):
           - Extract 4-byte LE nonce from the start.
-          - Validate replay window (nonce=0 is NOT checked; matching Rust
-            comment: "FIXED: Only validate nonce for non-zero nonces in
-            transport mode").
+          - Validate replay window (counter >= 0, including nonce 0).
           - After successful decryption, mark nonce as seen.
 
         Args:
@@ -384,8 +382,8 @@ class NoiseCipherState:
 
         if self._use_extracted_nonce:
             counter, payload = self._extract_wire_nonce(bytes(ciphertext))
-            # Rust: skip replay check for nonce=0
-            if counter > 0 and not self._is_valid_nonce(counter):
+            # Validate replay window (including nonce=0)
+            if counter >= 0 and not self._is_valid_nonce(counter):
                 raise ReplayError(
                     f"Replay detected: nonce {counter} has already been seen "
                     f"or is outside the replay window"
@@ -405,7 +403,7 @@ class NoiseCipherState:
             ) from exc
 
         if self._use_extracted_nonce:
-            if counter > 0:
+            if counter >= 0:
                 self._mark_nonce_seen(counter)
         else:
             self._nonce += 1

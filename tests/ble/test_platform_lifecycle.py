@@ -692,7 +692,7 @@ async def test_lan_fallback_is_verified_and_preserves_persisted_identity(
         stored = storage.load_identity()
         assert stored is not None
         assert stored.peer_id_hex == identity.peer_id_hex
-        assert coordinator.local_identity.peer_id_hex != identity.peer_id_hex
+        assert coordinator.local_identity.peer_id_hex == identity.peer_id_hex
 
         await coordinator.stop()
         assert lan.server.is_listening is False

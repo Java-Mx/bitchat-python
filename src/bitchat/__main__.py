@@ -103,16 +103,12 @@ def main() -> None:
             from bitchat.app.session_coordinator import SessionCoordinator
             from bitchat.ble.manager import BLEManager
             from bitchat.ble.server import BLEServer
-            from bitchat.crypto.identity import LocalIdentity
             from bitchat.storage.config import FileConfigStorage
             from bitchat.tui.app import BitChatApp
 
             storage = FileConfigStorage()
             config = storage.load_config()
-            identity = storage.load_identity()
-            if identity is None:
-                identity = LocalIdentity.generate()
-                storage.save_identity(identity)
+            identity = storage.load_or_create_identity()
 
             server = BLEServer()
             manager = BLEManager(sender_id=identity.peer_id)

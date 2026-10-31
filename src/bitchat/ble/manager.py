@@ -57,6 +57,7 @@ class BLEManager:
         self.scanner = BLEScanner(
             on_peer_discovered=self._handle_peer_discovered,
             scanner_factory=scanner_factory,
+            local_peer_id=self.sender_id.hex(),
         )
         self._transports: dict[str, BLETransport] = {}
         self._state: BLEState = BLEState.OFFLINE
@@ -73,6 +74,7 @@ class BLEManager:
         if new_id != self.sender_id:
             self.scanner.clear()
         self.sender_id = new_id
+        self.scanner.local_peer_id = new_id.hex().lower()
         for transport in self._transports.values():
             transport.sender_id = self.sender_id
 

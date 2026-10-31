@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any, TextIO
 
 from bitchat.app.session_coordinator import SessionCoordinator
 from bitchat.commands.parser import Command, CommandParser, CommandType
-from bitchat.crypto.identity import LocalIdentity
 from bitchat.exceptions import ApplicationError, ConfigurationError
 from bitchat.storage.config import AppConfig, FileConfigStorage, StorageInterface
 
 if TYPE_CHECKING:
     from bitchat.ble.manager import BLEManager
     from bitchat.ble.server import BLEServer
+    from bitchat.crypto.identity import LocalIdentity
 
 
 class Application:
@@ -169,12 +169,7 @@ class Application:
             return self.coordinator
 
         if self.local_identity is None:
-            loaded_identity = self.storage.load_identity()
-            if loaded_identity is not None:
-                self.local_identity = loaded_identity
-            else:
-                self.local_identity = LocalIdentity.generate()
-                self.storage.save_identity(self.local_identity)
+            self.local_identity = self.storage.load_or_create_identity()
 
         if self.ble_server is None:
             from bitchat.ble.server import BLEServer

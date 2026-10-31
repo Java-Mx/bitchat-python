@@ -44,6 +44,40 @@ def get_local_ip() -> str:
     return ""
 
 
+def get_all_local_ips() -> set[str]:
+    """Return all IPv4/IPv6 addresses bound to the local machine including loopback."""
+    ips = {"127.0.0.1", "::1", "localhost", "0.0.0.0"}
+    primary = get_local_ip()
+    if primary:
+        ips.add(primary)
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            candidate = info[4][0]
+            if isinstance(candidate, str):
+                ips.add(candidate.lower())
+    except Exception:
+        pass
+    try:
+        _, _, host_ips = socket.gethostbyname_ex(socket.gethostname())
+        for hip in host_ips:
+            if isinstance(hip, str):
+                ips.add(hip.lower())
+    except Exception:
+        pass
+    return ips
+
+
+def is_local_ip(ip: str) -> bool:
+    """Return True if the given IP/hostname belongs to the local machine."""
+    clean = ip.strip().lower()
+    if not clean:
+        return True
+    if clean.startswith("127.") or clean in ("localhost", "::1", "0.0.0.0"):
+        return True
+    return clean in get_all_local_ips()
+
+
 def get_wifi_ssid_and_state() -> tuple[str | None, str | None]:
     """Retrieve connected Wi-Fi SSID and state on Windows or return (None, None)."""
     # Imported lazily: bitchat.platform.capabilities imports this module.

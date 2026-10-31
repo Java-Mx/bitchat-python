@@ -3,6 +3,8 @@ import ctypes
 import json
 import os
 import tempfile
+import threading
+import time
 from abc import ABC, abstractmethod
 from ctypes import wintypes
 from dataclasses import asdict, dataclass, field
@@ -84,6 +86,7 @@ class AppConfig:
     keybindings: dict[str, str] = field(
         default_factory=lambda: DEFAULT_KEYBINDINGS.copy()
     )
+    contacts: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.density not in VALID_DENSITIES:
@@ -109,6 +112,50 @@ class AppConfig:
         self.show_timestamps = _parse_bool(self.show_timestamps, True)
         self.debug = _parse_bool(self.debug, False)
         self.keybindings = _validate_and_normalize_keybindings(self.keybindings)
+        if not isinstance(self.contacts, dict):
+            self.contacts = {}
+        else:
+            self.contacts = {
+                str(k).strip().lower(): str(v).strip().lower()
+                for k, v in self.contacts.items()
+                if isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip()
+            }
+
+    def verify_contact(self, peer_id: str, fingerprint: str) -> bool:
+        """Verify peer fingerprint using Trust-On-First-Use (TOFU).
+
+        If peer_id is not yet in contacts, trust on first use and record fingerprint.
+        If peer_id is already in contacts, verify that the fingerprint matches.
+
+        Args:
+            peer_id: Hex string of the remote peer ID.
+            fingerprint: Hex string of the peer's public key fingerprint.
+
+        Returns:
+            True if verification succeeds (first use or matching fingerprint),
+            False if there is a fingerprint mismatch (spoofing/MITM).
+        """
+        if not peer_id or not fingerprint:
+            return False
+        clean_pid = str(peer_id).strip().lower()
+        clean_fp = str(fingerprint).strip().lower()
+        stored = self.contacts.get(clean_pid)
+        if stored is None:
+            self.contacts[clean_pid] = clean_fp
+            return True
+        return stored.lower() == clean_fp
+
+    def get_contact_fingerprint(self, peer_id: str) -> str | None:
+        """Return the stored fingerprint for a contact, or None."""
+        return self.contacts.get(str(peer_id).strip().lower())
+
+    def add_contact(self, peer_id: str, fingerprint: str) -> None:
+        """Add or update a trusted contact's fingerprint."""
+        self.contacts[str(peer_id).strip().lower()] = str(fingerprint).strip().lower()
+
+    def remove_contact(self, peer_id: str) -> bool:
+        """Remove a contact from the trusted contacts store."""
+        return self.contacts.pop(str(peer_id).strip().lower(), None) is not None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to a dictionary."""
@@ -165,6 +212,17 @@ class AppConfig:
 
         keybindings = _validate_and_normalize_keybindings(data.get("keybindings"))
 
+        contacts: dict[str, str] = {}
+        raw_contacts = data.get("contacts")
+        if isinstance(raw_contacts, dict):
+            for k, v in raw_contacts.items():
+                if isinstance(v, str) and k and v:
+                    contacts[str(k).strip().lower()] = str(v).strip().lower()
+                elif isinstance(v, dict) and "fingerprint" in v:
+                    fp = v["fingerprint"]
+                    if isinstance(fp, str) and k and fp:
+                        contacts[str(k).strip().lower()] = str(fp).strip().lower()
+
         return cls(
             nickname=nickname,
             debug=debug,
@@ -175,6 +233,7 @@ class AppConfig:
             max_hops=max_hops,
             inter_fragment_delay_ms=inter_fragment_delay_ms,
             keybindings=keybindings,
+            contacts=contacts,
         )
 
 
@@ -200,6 +259,10 @@ class StorageInterface(ABC):
     @abstractmethod
     def save_identity(self, identity: LocalIdentity) -> None:
         """Persist local cryptographic identity securely."""
+
+    @abstractmethod
+    def load_or_create_identity(self) -> LocalIdentity:
+        """Load stored identity or atomically generate, persist, and return new one."""
 
     @abstractmethod
     def close(self) -> None:
@@ -237,6 +300,13 @@ class InMemoryStorage(StorageInterface):
         if self._is_closed:
             raise ConfigurationError("Cannot save identity to closed storage.")
         self._identity = identity
+
+    def load_or_create_identity(self) -> LocalIdentity:
+        if self._is_closed:
+            raise ConfigurationError("Cannot load identity from closed storage.")
+        if self._identity is None:
+            self._identity = LocalIdentity.generate()
+        return self._identity
 
     def close(self) -> None:
         self._is_closed = True
@@ -412,6 +482,63 @@ def _restrict_existing_identity_file(path: Path) -> None:
         _restrict_windows_file_acl(path)
 
 
+@contextlib.contextmanager
+def _interprocess_lock(lock_path: Path, timeout: float = 10.0):
+    """Cross-platform advisory file lock using msvcrt on Windows and fcntl on POSIX."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        start_time = time.time()
+        locked = False
+        if os.name == "nt":
+            import msvcrt
+
+            while not locked:
+                try:
+                    if os.fstat(lock_fd).st_size == 0:
+                        os.write(lock_fd, b"\0")
+                    os.lseek(lock_fd, 0, os.SEEK_SET)
+                    msvcrt.locking(lock_fd, msvcrt.LK_NBLCK, 1)
+                    locked = True
+                except (OSError, PermissionError) as err:
+                    if time.time() - start_time >= timeout:
+                        raise TimeoutError(
+                            f"Timed out acquiring interprocess lock on {lock_path}"
+                        ) from err
+                    time.sleep(0.02)
+        else:
+            import fcntl
+
+            while not locked:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                except (OSError, BlockingIOError) as err:
+                    if time.time() - start_time >= timeout:
+                        raise TimeoutError(
+                            f"Timed out acquiring interprocess lock on {lock_path}"
+                        ) from err
+                    time.sleep(0.02)
+        try:
+            yield
+        finally:
+            if locked:
+                if os.name == "nt":
+                    import msvcrt
+
+                    with contextlib.suppress(Exception):
+                        os.lseek(lock_fd, 0, os.SEEK_SET)
+                        msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    with contextlib.suppress(Exception):
+                        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        with contextlib.suppress(Exception):
+            os.close(lock_fd)
+
+
 class FileConfigStorage(StorageInterface):
     """File-based JSON configuration and identity storage."""
 
@@ -430,7 +557,48 @@ class FileConfigStorage(StorageInterface):
         else:
             self.identity_path = Path(identity_path)
 
+        self.identity_lock_path = self.identity_path.with_name(
+            f"{self.identity_path.name}.lock"
+        )
         self._is_closed = False
+        self._write_lock = threading.Lock()
+
+    def _create_corrupt_identity_backup(self) -> Path | None:
+        """Create a backup of corrupted identity.json with timestamp suffix."""
+        if not self.identity_path.exists():
+            return None
+        try:
+            timestamp = int(time.time())
+            backup_name = f"{self.identity_path.name}.corrupt.{timestamp}"
+            backup_path = self.identity_path.parent / backup_name
+            if backup_path.exists():
+                timestamp = int(time.time() * 1000)
+                backup_name = f"{self.identity_path.name}.corrupt.{timestamp}"
+                backup_path = self.identity_path.parent / backup_name
+            backup_path.write_bytes(self.identity_path.read_bytes())
+            return backup_path
+        except OSError:
+            return None
+
+    def _is_identity_corrupted(self) -> bool:
+        """Check if existing identity.json is present and corrupted."""
+        if not self.identity_path.exists():
+            return False
+        try:
+            with open(self.identity_path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return True
+            x25519_hex = data.get("x25519_private")
+            ed25519_hex = data.get("ed25519_private")
+            if not isinstance(x25519_hex, str) or not isinstance(ed25519_hex, str):
+                return True
+            x25519_priv = bytes.fromhex(x25519_hex)
+            ed25519_priv = bytes.fromhex(ed25519_hex)
+            LocalIdentity.from_x25519_private(x25519_priv, ed25519_priv)
+            return False
+        except Exception:
+            return True
 
     def load_config(self) -> AppConfig:
         if self._is_closed:
@@ -460,9 +628,7 @@ class FileConfigStorage(StorageInterface):
                 f"Failed to write configuration to {self.config_path}: {e}"
             ) from e
 
-    def load_identity(self) -> LocalIdentity | None:
-        if self._is_closed:
-            raise ConfigurationError("Cannot load identity from closed storage.")
+    def _load_identity_unlocked(self) -> LocalIdentity | None:
         if not self.identity_path.exists():
             return None
         try:
@@ -480,14 +646,22 @@ class FileConfigStorage(StorageInterface):
             x25519_priv = bytes.fromhex(x25519_hex)
             ed25519_priv = bytes.fromhex(ed25519_hex)
             return LocalIdentity.from_x25519_private(x25519_priv, ed25519_priv)
-        except (json.JSONDecodeError, ValueError, InvalidKeyError, OSError) as e:
+        except (json.JSONDecodeError, ValueError, InvalidKeyError) as e:
+            self._create_corrupt_identity_backup()
+            raise ConfigurationError(
+                f"Failed to read identity from {self.identity_path}: {e}"
+            ) from e
+        except ConfigurationError:
+            self._create_corrupt_identity_backup()
+            raise
+        except OSError as e:
             raise ConfigurationError(
                 f"Failed to read identity from {self.identity_path}: {e}"
             ) from e
 
-    def save_identity(self, identity: LocalIdentity) -> None:
-        if self._is_closed:
-            raise ConfigurationError("Cannot save identity to closed storage.")
+    def _save_identity_unlocked(self, identity: LocalIdentity) -> None:
+        if self._is_identity_corrupted():
+            self._create_corrupt_identity_backup()
         try:
             payload = {
                 "x25519_private": identity.x25519_private.hex(),
@@ -505,6 +679,34 @@ class FileConfigStorage(StorageInterface):
             raise ConfigurationError(
                 f"Failed to write identity to {self.identity_path}: {e}"
             ) from e
+
+    def load_identity(self) -> LocalIdentity | None:
+        if self._is_closed:
+            raise ConfigurationError("Cannot load identity from closed storage.")
+        with self._write_lock, _interprocess_lock(self.identity_lock_path):
+            return self._load_identity_unlocked()
+
+    def save_identity(self, identity: LocalIdentity) -> None:
+        if self._is_closed:
+            raise ConfigurationError("Cannot save identity to closed storage.")
+        with self._write_lock, _interprocess_lock(self.identity_lock_path):
+            self._save_identity_unlocked(identity)
+
+    def load_or_create_identity(self) -> LocalIdentity:
+        """Load stored identity or atomically create, persist, and return new one.
+
+        Uses cross-process file locking to prevent split-brain identity generation
+        when multiple instances launch concurrently on a fresh installation.
+        """
+        if self._is_closed:
+            raise ConfigurationError("Cannot load identity from closed storage.")
+        with self._write_lock, _interprocess_lock(self.identity_lock_path):
+            existing = self._load_identity_unlocked()
+            if existing is not None:
+                return existing
+            new_identity = LocalIdentity.generate()
+            self._save_identity_unlocked(new_identity)
+            return new_identity
 
     def close(self) -> None:
         self._is_closed = True

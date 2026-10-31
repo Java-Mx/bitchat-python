@@ -34,6 +34,7 @@ from bitchat.crypto.noise import (
 )
 from bitchat.exceptions import (
     AuthenticationError,
+    CryptoError,
     NoiseError,
     NoiseStateError,
 )
@@ -61,11 +62,14 @@ class NoiseSession:
         self,
         local_identity: LocalIdentity,
         remote_peer_id: str,
+        role: NoiseRole | None = None,
     ) -> None:
         self._local_identity = local_identity
         self._remote_peer_id = remote_peer_id
-        self._role: NoiseRole = determine_handshake_role(
-            local_identity.peer_id_hex, remote_peer_id
+        self._role: NoiseRole = (
+            role
+            if role is not None
+            else determine_handshake_role(local_identity.peer_id_hex, remote_peer_id)
         )
         self._state: NoiseSessionState = NoiseSessionState.UNINITIALIZED
         self._handshake_state: NoiseHandshakeState | None = None
@@ -165,45 +169,41 @@ class NoiseSession:
             NoiseError: If the handshake message is malformed.
             AuthenticationError: If authentication fails during handshake.
         """
-        # Responder may auto-initialise (matching Rust lines 206-227)
-        if (
-            self._state == NoiseSessionState.UNINITIALIZED
-            and self._role == NoiseRole.RESPONDER
-        ):
-            self._handshake_state = NoiseHandshakeState(
-                role=self._role,
-                local_static_private=self._local_identity.x25519_private,
-            )
-            self._state = NoiseSessionState.HANDSHAKING
-
-        if self._state != NoiseSessionState.HANDSHAKING:
-            raise NoiseStateError(
-                f"process_handshake_message() called in invalid state: "
-                f"{self._state.value}"
-            )
-        if self._handshake_state is None:
-            raise NoiseStateError("Handshake state is not initialised")
-
         try:
+            # Responder may auto-initialise (matching Rust lines 206-227)
+            if (
+                self._state == NoiseSessionState.UNINITIALIZED
+                and self._role == NoiseRole.RESPONDER
+            ):
+                self._handshake_state = NoiseHandshakeState(
+                    role=self._role,
+                    local_static_private=self._local_identity.x25519_private,
+                )
+                self._state = NoiseSessionState.HANDSHAKING
+
+            if self._state != NoiseSessionState.HANDSHAKING:
+                raise NoiseStateError(
+                    f"process_handshake_message() called in invalid state: "
+                    f"{self._state.value}"
+                )
+            if self._handshake_state is None:
+                raise NoiseStateError("Handshake state is not initialised")
+
             _payload = self._handshake_state.read_message(bytes(message))
-        except (NoiseStateError, NoiseError):
+
+            # Check if we need to write a response
+            response: bytes | None = None
+            if not self._handshake_state.is_handshake_complete():
+                response = self._handshake_state.write_message(b"")
+
+            # Check completion after possible write
+            if self._handshake_state.is_handshake_complete():
+                self._finalise_handshake()
+
+            return response
+        except (NoiseError, CryptoError, Exception):
             self._state = NoiseSessionState.FAILED
             raise
-
-        # Check if we need to write a response
-        response: bytes | None = None
-        if not self._handshake_state.is_handshake_complete():
-            try:
-                response = self._handshake_state.write_message(b"")
-            except (NoiseStateError, NoiseError):
-                self._state = NoiseSessionState.FAILED
-                raise
-
-        # Check completion after possible write
-        if self._handshake_state.is_handshake_complete():
-            self._finalise_handshake()
-
-        return response
 
     def _finalise_handshake(self) -> None:
         """Extract transport ciphers and transition to ESTABLISHED."""
@@ -233,6 +233,15 @@ class NoiseSession:
             self._handshake_state = None
             raise AuthenticationError(
                 "Authenticated Noise static key does not match claimed peer ID"
+            )
+        if hmac.compare_digest(
+            remote_static_public, self._local_identity.x25519_public
+        ):
+            self._state = NoiseSessionState.FAILED
+            self._handshake_state = None
+            raise AuthenticationError(
+                "Self-connection rejected: remote peer authenticated "
+                "with local device identity"
             )
         send_cipher, recv_cipher = self._handshake_state.get_transport_ciphers()
         self._send_cipher = send_cipher

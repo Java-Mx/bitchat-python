@@ -7,7 +7,6 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from bitchat.crypto.identity import LocalIdentity
 from bitchat.crypto.noise import NoiseRole, NoiseSessionState
 from bitchat.crypto.sessions import NoiseSession
 from bitchat.exceptions import (
@@ -29,6 +28,7 @@ if TYPE_CHECKING:
 
     from bitchat.ble.manager import BLEManager
     from bitchat.ble.server import BLEServer
+    from bitchat.crypto.identity import LocalIdentity
     from bitchat.mesh.dedup import PacketDeduplicator
     from bitchat.mesh.store_forward import StoreAndForwardQueue
     from bitchat.storage.config import StorageInterface
@@ -39,6 +39,7 @@ NOISE_HANDSHAKE_TIMEOUT_SECONDS: float = 10.0
 TRANSPORT_RETRY_TIMEOUT_SECONDS: float = 30.0
 MAX_TTL: int = 7
 MAX_MESSAGE_SIZE: int = 32_768
+MAX_PENDING_HANDSHAKES: int = 64
 PERIODIC_PRUNE_INTERVAL_SECONDS: float = 30.0
 
 
@@ -249,9 +250,8 @@ class SessionCoordinator:
                     and session.state == NoiseSessionState.HANDSHAKING
                 ):
                     logger.warning("Noise handshake with %s timed out", peer_id)
-                    session.close()
-                    self._sessions.pop(peer_id, None)
-                    self._pending_messages.pop(peer_id, None)
+                    session._state = NoiseSessionState.FAILED
+                    self._discard_failed_session(peer_id, session)
             finally:
                 if self._handshake_timeout_tasks.get(peer_id) is asyncio.current_task():
                     self._handshake_timeout_tasks.pop(peer_id, None)
@@ -271,14 +271,62 @@ class SessionCoordinator:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _discard_failed_session(self, peer_id: str, session: NoiseSession) -> None:
-        if session.state != NoiseSessionState.FAILED:
+    def expire_handshake(self, peer_id: str) -> None:
+        """Expire a pending handshake for peer_id (marks FAILED and discards)."""
+        session = self._sessions.get(peer_id)
+        if session is not None:
+            session._state = NoiseSessionState.FAILED
+            self._discard_failed_session(peer_id, session, force=True)
+
+    def _discard_failed_session(
+        self, peer_id: str, session: NoiseSession, force: bool = False
+    ) -> None:
+        """Discard a failed or timed-out session cleanly from active sessions."""
+        if not force and session.state != NoiseSessionState.FAILED:
             return
         self._cancel_handshake_timeout(peer_id)
+        orig_state = session.state
         session.close()
+        if orig_state == NoiseSessionState.FAILED:
+            session._state = NoiseSessionState.FAILED
         if self._sessions.get(peer_id) is session:
             self._sessions.pop(peer_id, None)
         self._pending_messages.pop(peer_id, None)
+
+    MAX_PENDING_HANDSHAKES: int = MAX_PENDING_HANDSHAKES
+
+    @property
+    def pending_handshakes_count(self) -> int:
+        """Return the number of sessions currently in HANDSHAKING state."""
+        return sum(
+            1
+            for s in self._sessions.values()
+            if s.state == NoiseSessionState.HANDSHAKING
+        )
+
+    def _is_nickname_spoofed(self, peer_id_hex: str, nickname: str) -> bool:
+        """Check if an announced nickname is an unauthenticated spoof attempt.
+
+        A nickname is considered spoofed if:
+        1. It is empty or whitespace.
+        2. It matches the local user's nickname (case-insensitive).
+        3. It matches the nickname of another peer currently known in peer_nicknames.
+        """
+        if not nickname or not nickname.strip():
+            return True
+        clean_nick = nickname.strip().lower()
+        clean_pid = peer_id_hex.strip().lower()
+
+        # Cannot claim the local user's nickname
+        if self.nickname and clean_nick == self.nickname.strip().lower():
+            return True
+
+        # Cannot claim another known peer's nickname
+        for pid, nick in self.peer_nicknames.items():
+            if pid.lower() != clean_pid and nick.strip().lower() == clean_nick:
+                return True
+
+        return False
 
     @property
     def is_running(self) -> bool:
@@ -287,6 +335,13 @@ class SessionCoordinator:
 
     def get_or_create_session(self, remote_peer_id_hex: str) -> NoiseSession:
         """Get existing NoiseSession or initialize a new one for remote peer."""
+        clean_remote = remote_peer_id_hex.strip().lower()
+        if clean_remote == self.local_identity.peer_id_hex.lower():
+            err_msg = (
+                f"Cannot establish Noise session with self "
+                f"(peer_id={remote_peer_id_hex})"
+            )
+            raise ValueError(err_msg)
         session = self._sessions.get(remote_peer_id_hex)
         if session is None:
             session = NoiseSession(self.local_identity, remote_peer_id_hex)
@@ -587,16 +642,19 @@ class SessionCoordinator:
         self._announced_peers.clear()
 
         # Cancel and cleanly cleanup any remaining background tasks
-        pending_bg = [t for t in self._background_tasks if not t.done()]
+        current_t = asyncio.current_task()
+        pending_bg = [
+            t for t in self._background_tasks if not t.done() and t is not current_t
+        ]
         for t in pending_bg:
             t.cancel()
         if pending_bg:
             await asyncio.gather(*pending_bg, return_exceptions=True)
         self._background_tasks.clear()
 
-        for transport in self._transports.values():
-            with contextlib.suppress(Exception):
-                await transport.stop()
+        for name, transport in list(self._transports.items()):
+            self._detach_transport_callbacks(transport)
+            await self._stop_transport_safely(name, transport)
 
     def _detach_transport_callbacks(self, transport: BaseTransport) -> None:
         """Stop a retired transport from delivering events to the coordinator."""
@@ -625,6 +683,16 @@ class SessionCoordinator:
         self.address_to_peer_id.clear()
         self.peer_nicknames.clear()
         self._announced_peers.clear()
+        for transport in self._transports.values():
+            disc: Any = getattr(transport, "discovery", None)
+            if disc is not None and hasattr(disc, "clear"):
+                disc.clear()
+            scn: Any = getattr(transport, "scanner", None)
+            if scn is not None and hasattr(scn, "clear"):
+                scn.clear()
+            bm: Any = getattr(transport, "ble_manager", None)
+            if bm is not None and hasattr(bm, "scanner"):
+                bm.scanner.clear()
         self._pending_messages.clear()
 
     async def go_offline(self) -> None:
@@ -677,26 +745,22 @@ class SessionCoordinator:
             # 2-3. Close active Noise sessions, clear peer tables and pending messages
             await self._reset_session_state()
 
-            # 4. Generate fresh ephemeral transport identity (never persisted)
-            old_id = self.local_identity.peer_id_hex
-            self.local_identity = LocalIdentity.generate()
-            new_id = self.local_identity.peer_id_hex
-            self.mesh_router.local_peer_id = self.local_identity.peer_id
+            # 4. Preserve stable persistent identity across transport interfaces
+            current_id = self.local_identity.peer_id_hex
             for transport in self._transports.values():
-                transport.update_identity(new_id, self.nickname)
+                transport.update_identity(current_id, self.nickname)
             logger.info(
-                "Transport switch (%s -> %s): generated fresh identity %s (old: %s)",
+                "Transport switch (%s -> %s): preserved device identity %s",
                 self.active_transport_name,
                 target,
-                new_id,
-                old_id,
+                current_id,
             )
 
             # 5. Switch active transport
             if target == "lan":
                 if "lan" not in self._transports:
                     self._transports["lan"] = LANTransport(
-                        local_peer_id=new_id,
+                        local_peer_id=current_id,
                         local_nickname=self.nickname,
                     )
                 self.active_transport = self._transports["lan"]
@@ -735,7 +799,7 @@ class SessionCoordinator:
                 return True, (
                     f"Switched transport to {display_name}. "
                     f"New secure chat session created. "
-                    f"New peer identity: {new_id[:12]}"
+                    f"Peer identity: {current_id[:12]}"
                 )
             except Exception as e:
                 logger.error("Failed starting %s transport: %s", target, e)
@@ -986,6 +1050,11 @@ class SessionCoordinator:
     ) -> None:
         """Handle incoming packet state transitions, crypto, and callbacks."""
         sender_hex = packet.sender_id.hex()
+        if sender_hex.lower() == self.local_identity.peer_id_hex.lower():
+            logger.debug(
+                "Ignoring packet looped back from local device identity %s", sender_hex
+            )
+            return
         is_direct_neighbor = peer_address is not None and (
             packet.sender_id.hex() == peer_address or packet.ttl >= MAX_TTL
         )
@@ -1010,9 +1079,14 @@ class SessionCoordinator:
         match packet.message_type:
             case MessageType.Announce:
                 nickname = packet.payload.decode("utf-8", errors="replace").strip()
-                self.peer_nicknames[sender_hex] = nickname
-                if self.on_peer_status_changed:
-                    self.on_peer_status_changed(sender_hex, f"Online ({nickname})")
+                if self._is_nickname_spoofed(sender_hex, nickname):
+                    logger.warning(
+                        "Rejected spoofed nickname '%s' from %s", nickname, sender_hex
+                    )
+                else:
+                    self.peer_nicknames[sender_hex] = nickname
+                    if self.on_peer_status_changed:
+                        self.on_peer_status_changed(sender_hex, f"Online ({nickname})")
 
                 if self.mesh_router.store_forward_queue.has_pending(sender_hex):
                     pending_pkts = (
@@ -1029,6 +1103,23 @@ class SessionCoordinator:
                     self.on_message_received(sender_hex, text, False)
 
             case MessageType.HandshakeRequest:
+                existing_session = self._sessions.get(sender_hex)
+                is_pending = (
+                    existing_session is not None
+                    and existing_session.state == NoiseSessionState.HANDSHAKING
+                )
+                if (
+                    not is_pending
+                    and self.pending_handshakes_count >= MAX_PENDING_HANDSHAKES
+                ):
+                    logger.warning(
+                        "Rejecting HandshakeRequest from %s: "
+                        "pending handshake limit (%d) reached",
+                        sender_hex,
+                        MAX_PENDING_HANDSHAKES,
+                    )
+                    return
+
                 session = self.get_or_create_session(sender_hex)
                 if (
                     session.role == NoiseRole.INITIATOR
@@ -1046,6 +1137,23 @@ class SessionCoordinator:
                         await self._send_packet(sender_hex, resp_pkt)
 
             case MessageType.NoiseHandshakeInit:
+                existing_session = self._sessions.get(sender_hex)
+                is_pending = (
+                    existing_session is not None
+                    and existing_session.state == NoiseSessionState.HANDSHAKING
+                )
+                if (
+                    not is_pending
+                    and self.pending_handshakes_count >= MAX_PENDING_HANDSHAKES
+                ):
+                    logger.warning(
+                        "Rejecting NoiseHandshakeInit from %s: "
+                        "pending handshake limit (%d) reached",
+                        sender_hex,
+                        MAX_PENDING_HANDSHAKES,
+                    )
+                    return
+
                 session = self.get_or_create_session(sender_hex)
                 try:
                     resp_payload = session.process_handshake_message(packet.payload)
@@ -1135,6 +1243,26 @@ class SessionCoordinator:
         """Trigger completion callback and flush queued messages."""
         self._cancel_handshake_timeout(remote_peer_id_hex)
         fingerprint = session.remote_fingerprint or ""
+
+        # Peer authentication & TOFU verification
+        if self.storage is not None and fingerprint:
+            try:
+                config = self.storage.load_config()
+                if not config.verify_contact(remote_peer_id_hex, fingerprint):
+                    logger.error(
+                        "TOFU verification failed for peer %s: fingerprint mismatch "
+                        "(expected %s, got %s)",
+                        remote_peer_id_hex,
+                        config.get_contact_fingerprint(remote_peer_id_hex),
+                        fingerprint,
+                    )
+                    session._state = NoiseSessionState.FAILED
+                    self._discard_failed_session(remote_peer_id_hex, session)
+                    return
+                self.storage.save_config(config)
+            except Exception as e:
+                logger.warning("Error during TOFU contact verification: %s", e)
+
         if self.on_handshake_completed:
             self.on_handshake_completed(remote_peer_id_hex, fingerprint)
 
@@ -1145,6 +1273,11 @@ class SessionCoordinator:
     def _handle_peer_discovered(self, peer: Any) -> None:
         """Record a peer discovered by the active transport."""
         clean_pid = peer.peer_id.lower() if getattr(peer, "peer_id", None) else ""
+        if clean_pid and clean_pid == self.local_identity.peer_id_hex.lower():
+            logger.debug(
+                "Ignoring discovered peer matching local device identity %s", clean_pid
+            )
+            return
         name = getattr(peer, "name", None) or getattr(peer, "nickname", None)
         previous_nick = self.peer_nicknames.get(clean_pid) if clean_pid else None
         announce_key = clean_pid or peer.address.lower()
@@ -1168,7 +1301,14 @@ class SessionCoordinator:
             self.peer_addresses[clean_pid] = peer.address
             self.address_to_peer_id[peer.address] = clean_pid
             if name:
-                self.peer_nicknames[clean_pid] = name
+                if self._is_nickname_spoofed(clean_pid, name):
+                    logger.warning(
+                        "Rejected spoofed discovery nickname '%s' from %s",
+                        name,
+                        clean_pid,
+                    )
+                else:
+                    self.peer_nicknames[clean_pid] = name
 
         self._announced_peers.add(announce_key)
 

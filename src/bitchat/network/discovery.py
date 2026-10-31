@@ -10,7 +10,8 @@ import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
-from bitchat.network.adapter import get_local_ip
+from bitchat.crypto.identity import generate_instance_id
+from bitchat.network.adapter import get_local_ip, is_local_ip
 from bitchat.network.models import DiscoveryPacket, LANDiscoveredPeer
 
 if TYPE_CHECKING:
@@ -35,6 +36,7 @@ class LANDiscovery:
         discovery_port: int = DEFAULT_DISCOVERY_PORT,
         broadcast_interval: float = DEFAULT_BROADCAST_INTERVAL,
         on_peer_discovered: Callable[[LANDiscoveredPeer], None] | None = None,
+        instance_id: str | None = None,
     ) -> None:
         self.local_peer_id = local_peer_id
         self.local_nickname = local_nickname
@@ -43,6 +45,7 @@ class LANDiscovery:
         self.discovery_port = discovery_port
         self.broadcast_interval = broadcast_interval
         self.on_peer_discovered = on_peer_discovered
+        self.instance_id = instance_id or generate_instance_id()
 
         self._is_running: bool = False
         self._discovered_peers: dict[str, LANDiscoveredPeer] = {}
@@ -120,12 +123,18 @@ class LANDiscovery:
         # Immediate initial beacon
         await self.send_broadcast_now()
 
+    def clear(self) -> None:
+        """Clear discovered peer cache."""
+        self._discovered_peers.clear()
+
     async def stop(self) -> None:
         """Stop discovery loops and release sockets."""
         if not self._is_running:
+            self._discovered_peers.clear()
             return
 
         self._is_running = False
+        self._discovered_peers.clear()
 
         if self._broadcast_task:
             self._broadcast_task.cancel()
@@ -160,6 +169,7 @@ class LANDiscovery:
                 nickname=self.local_nickname,
                 port=self.listening_port,
                 ssid=self.ssid,
+                instance_id=self.instance_id,
             )
             raw = beacon.to_bytes()
             loop = asyncio.get_running_loop()
@@ -231,6 +241,12 @@ class LANDiscovery:
         if (
             packet.peer_id == self.local_peer_id.lower()
             or packet.peer_id in self._previous_peer_ids
+            or (
+                self.instance_id
+                and packet.instance_id
+                and packet.instance_id == self.instance_id
+            )
+            or (is_local_ip(sender_ip) and packet.port == self.listening_port)
         ):
             return None
 
@@ -307,6 +323,7 @@ class LANDiscovery:
             peer_id=packet.peer_id,
             nickname=packet.nickname,
             ssid=ssid,
+            instance_id=packet.instance_id,
             last_seen=now,
         )
         self._discovered_peers[endpoint] = peer

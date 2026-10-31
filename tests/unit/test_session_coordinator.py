@@ -159,7 +159,7 @@ class TestSessionCoordinator:
         await asyncio.sleep(0.05)
 
         assert coord_a.get_session(remote_peer_id) is None
-        assert session.state == NoiseSessionState.CLOSED
+        assert session.state in (NoiseSessionState.CLOSED, NoiseSessionState.FAILED)
         assert not coord_a._handshake_timeout_tasks
         await coord_a.stop()
         await coord_b.stop()

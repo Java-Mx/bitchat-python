@@ -32,10 +32,16 @@ class BLEScanner:
         on_peer_discovered: Callable[[DiscoveredPeer], None] | None = None,
         on_peer_expired: Callable[[str], None] | None = None,
         scanner_factory: Callable[..., Any] | None = None,
+        local_peer_id: str | None = None,
+        local_adapter_address: str | None = None,
     ) -> None:
         self.service_uuid = service_uuid.lower()
         self.on_peer_discovered = on_peer_discovered
         self.on_peer_expired = on_peer_expired
+        self.local_peer_id = local_peer_id.lower() if local_peer_id else None
+        self.local_adapter_address = (
+            local_adapter_address.lower() if local_adapter_address else None
+        )
         self._scanner_factory = scanner_factory or BleakScanner
         self._scanner: Any | None = None
         self._discovered_peers: dict[str, DiscoveredPeer] = {}
@@ -123,6 +129,28 @@ class BLEScanner:
             return
 
         addr = device.address
+
+        # Filter out self-advertisements from local peer ID or adapter
+        if (
+            extracted_peer_id
+            and self.local_peer_id
+            and extracted_peer_id.lower() == self.local_peer_id.lower()
+        ):
+            logger.debug(
+                "Ignoring loopback BLE advertisement from local peer ID %s",
+                extracted_peer_id,
+            )
+            return
+
+        if (
+            self.local_adapter_address
+            and addr.lower() == self.local_adapter_address.lower()
+        ):
+            logger.debug(
+                "Ignoring loopback BLE advertisement from local adapter address %s",
+                addr,
+            )
+            return
         name = (
             extracted_nick
             or advertisement_data.local_name

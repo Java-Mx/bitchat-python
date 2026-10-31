@@ -7,7 +7,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from bitchat.network.adapter import NetworkAdapterManager
+from bitchat.network.adapter import NetworkAdapterManager, is_local_ip
 from bitchat.network.connection import LANConnection
 from bitchat.network.discovery import LANDiscovery
 from bitchat.network.server import MAX_CONCURRENT_CONNECTIONS, LANServer
@@ -485,6 +485,28 @@ class LANTransport(BaseTransport):
 
     async def connect_peer(self, address: str, timeout: float = 10.0) -> LANConnection:
         """Connect to peer at 'ip:port' or return existing connection."""
+        # Reject self-connection to local listening endpoint
+        try:
+            parts = address.split(":", 1)
+            target_ip = parts[0].strip()
+            target_port = int(parts[1]) if len(parts) > 1 else self.server.bound_port
+            if (
+                self.server.bound_port
+                and target_port == self.server.bound_port
+                and is_local_ip(target_ip)
+            ):
+                logger.debug(
+                    "Self-connection rejected: target %s is local endpoint",
+                    address,
+                )
+                raise ValueError(
+                    f"Cannot connect to local listening endpoint: {address}"
+                )
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
         if self._state in (
             TransportState.UNAVAILABLE,
             TransportState.DISABLED,
@@ -492,6 +514,7 @@ class LANTransport(BaseTransport):
             TransportState.ERROR,
         ):
             raise RuntimeError("Connection failed: transport unavailable")
+
         self._set_state(TransportState.CONNECTING)
 
         # Reuse existing connection if one is already active to this peer

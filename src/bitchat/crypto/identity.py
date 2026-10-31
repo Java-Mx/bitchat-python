@@ -113,6 +113,16 @@ class LocalIdentity:
         """Hex-encoded peer ID string (16 lowercase hex characters)."""
         return self.peer_id.hex()
 
+    @property
+    def device_id(self) -> bytes:
+        """Alias for peer_id representing the stable Device Identity."""
+        return self.peer_id
+
+    @property
+    def device_id_hex(self) -> str:
+        """Hex string of the stable Device Identity (16 lowercase hex characters)."""
+        return self.peer_id.hex()
+
     # -----------------------------------------------------------------------
     # Factory methods
     # -----------------------------------------------------------------------
@@ -200,3 +210,14 @@ def calculate_fingerprint(x25519_public_key: bytes) -> str:
         64-character lowercase hex fingerprint string.
     """
     return hashlib.sha256(bytes(x25519_public_key)).hexdigest()
+
+
+def generate_instance_id() -> str:
+    """Generate a 16-hex-character ephemeral process instance ID.
+
+    Used by LAN discovery and multi-instance coordination to identify
+    individual running processes belonging to the same device installation.
+    """
+    import os
+
+    return os.urandom(8).hex()
