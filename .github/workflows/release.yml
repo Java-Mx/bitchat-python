@@ -215,6 +215,7 @@ jobs:
         run: |
           mkdir -p packaging/windows/winget/
           cp -r dist-win/BitChat* dist/ 2>/dev/null || true
+          cp -r dist-win/dist/BitChat* dist/ 2>/dev/null || true
           if [ -f dist-win/packaging/windows/winget/Java-Mx.BitChat.yaml ]; then
             cp dist-win/packaging/windows/winget/Java-Mx.BitChat.yaml packaging/windows/winget/
           elif [ -f dist-win/Java-Mx.BitChat.yaml ]; then
