@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import sys
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -15,21 +14,49 @@ from bitchat.protocol.constants import (
     BITCHAT_SERVICE_UUID,
 )
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-logger = logging.getLogger(__name__)
+    from dbus_fast import (  # pyright: ignore[reportMissingImports]
+        BusType,
+        Message,
+        MessageType,
+        Variant,
+    )
+    from dbus_fast.aio import MessageBus  # pyright: ignore[reportMissingImports]
+    from dbus_fast.annotations import (  # pyright: ignore[reportMissingImports]
+        DBusBool,
+        DBusBytes,
+        DBusDict,
+        DBusObjectPath,
+        DBusSignature,
+        DBusStr,
+    )
+    from dbus_fast.constants import (  # pyright: ignore[reportMissingImports]
+        MessageFlag,
+        PropertyAccess,
+    )
+    from dbus_fast.errors import DBusError  # pyright: ignore[reportMissingImports]
+    from dbus_fast.service import (  # pyright: ignore[reportMissingImports]
+        ServiceInterface,
+        dbus_property,
+        method,
+    )
 
-if sys.platform == "linux":
+    PropertyAccessFlag = PropertyAccess
+    HAS_DBUS_FAST = True
+else:
     try:
-        from dbus_fast import (  # pyright: ignore[reportMissingImports]
+        from dbus_fast import (
             BusType,
             Message,
             MessageType,
             Variant,
         )
-        from dbus_fast.aio import MessageBus  # pyright: ignore[reportMissingImports]
-        from dbus_fast.annotations import (  # pyright: ignore[reportMissingImports]
+        from dbus_fast.aio import MessageBus
+        from dbus_fast.annotations import (
             DBusBool,
             DBusBytes,
             DBusDict,
@@ -37,16 +64,16 @@ if sys.platform == "linux":
             DBusSignature,
             DBusStr,
         )
-        from dbus_fast.constants import PropertyAccess  # pyright: ignore[reportMissingImports]
-        from dbus_fast.errors import DBusError  # pyright: ignore[reportMissingImports]
-        from dbus_fast.service import (  # pyright: ignore[reportMissingImports]
+        from dbus_fast.constants import PropertyAccess
+        from dbus_fast.errors import DBusError
+        from dbus_fast.service import (
             ServiceInterface,
             dbus_property,
             method,
         )
 
         try:
-            from dbus_fast.constants import MessageFlag  # pyright: ignore[reportMissingImports]
+            from dbus_fast.constants import MessageFlag
         except ImportError:
             from enum import IntFlag
 
@@ -57,150 +84,148 @@ if sys.platform == "linux":
                 ALLOW_INTERACTIVE_AUTHORIZATION = 4
 
         try:
-            from dbus_fast.constants import PropertyAccessFlag  # pyright: ignore[reportMissingImports]
+            from dbus_fast.constants import PropertyAccessFlag
         except ImportError:
             PropertyAccessFlag = PropertyAccess
 
         HAS_DBUS_FAST = True
     except ImportError:
         HAS_DBUS_FAST = False
-else:
-    HAS_DBUS_FAST = False
+        from enum import Enum, IntFlag
 
-if sys.platform != "linux" or not HAS_DBUS_FAST:
-    from enum import Enum, IntFlag
+        type DBusBool = bool
+        type DBusBytes = bytes
+        type DBusDict = dict[Any, Any]
+        type DBusObjectPath = str
+        type DBusStr = str
 
-    type DBusBool = bool
-    type DBusBytes = bytes
-    type DBusDict = dict[Any, Any]
-    type DBusObjectPath = str
-    type DBusStr = str
+        class PropertyAccess(Enum):
+            READ = "read"
+            WRITE = "write"
+            READWRITE = "readwrite"
 
-    class PropertyAccess(Enum):
-        READ = "read"
-        WRITE = "write"
-        READWRITE = "readwrite"
+        PropertyAccessFlag = PropertyAccess
 
-    PropertyAccessFlag = PropertyAccess
+        class BusType(Enum):
+            SESSION = 1
+            SYSTEM = 2
 
-    class BusType(Enum):
-        SESSION = 1
-        SYSTEM = 2
+        class MessageType(Enum):
+            METHOD_CALL = 1
+            METHOD_RETURN = 2
+            ERROR = 3
+            SIGNAL = 4
 
-    class MessageType(Enum):
-        METHOD_CALL = 1
-        METHOD_RETURN = 2
-        ERROR = 3
-        SIGNAL = 4
+        class MessageFlag(IntFlag):
+            NONE = 0
+            NO_REPLY_EXPECTED = 1
+            NO_AUTO_START = 2
+            ALLOW_INTERACTIVE_AUTHORIZATION = 4
 
-    class MessageFlag(IntFlag):
-        NONE = 0
-        NO_REPLY_EXPECTED = 1
-        NO_AUTO_START = 2
-        ALLOW_INTERACTIVE_AUTHORIZATION = 4
+        class DBusError(Exception):
+            def __init__(self, name: str, msg: str) -> None:
+                super().__init__(msg)
+                self.type = name
+                self.name = name
+                self.text = msg
 
-    class DBusError(Exception):
-        def __init__(self, name: str, msg: str) -> None:
-            super().__init__(msg)
-            self.type = name
-            self.name = name
-            self.text = msg
+        class Message:
+            def __init__(
+                self,
+                destination: str | None = None,
+                path: str | None = None,
+                interface: str | None = None,
+                member: str | None = None,
+                message_type: MessageType = MessageType.METHOD_CALL,
+                flags: MessageFlag = MessageFlag.NONE,
+                signature: str = "",
+                body: list[Any] | None = None,
+                serial: int = 0,
+                error_name: str | None = None,
+                reply_serial: int = 0,
+            ) -> None:
+                self.destination = destination
+                self.path = path
+                self.interface = interface
+                self.member = member
+                self.message_type = message_type
+                self.flags = flags
+                self.signature = signature
+                self.body: list[Any] = list(body) if body is not None else []
+                self.serial = serial
+                self.error_name = error_name
+                self.reply_serial = reply_serial
 
-    class Message:
-        def __init__(
-            self,
-            destination: str | None = None,
-            path: str | None = None,
-            interface: str | None = None,
-            member: str | None = None,
-            message_type: MessageType = MessageType.METHOD_CALL,
-            flags: MessageFlag = MessageFlag.NONE,
-            signature: str = "",
-            body: list[Any] | None = None,
-            serial: int = 0,
-            error_name: str | None = None,
-            reply_serial: int = 0,
-        ) -> None:
-            self.destination = destination
-            self.path = path
-            self.interface = interface
-            self.member = member
-            self.message_type = message_type
-            self.flags = flags
-            self.signature = signature
-            self.body: list[Any] = list(body) if body is not None else []
-            self.serial = serial
-            self.error_name = error_name
-            self.reply_serial = reply_serial
+            @classmethod
+            def new_method_return(
+                cls,
+                msg: Message,
+                signature: str = "",
+                body: list[Any] | None = None,
+            ) -> Message:
+                return cls(
+                    message_type=MessageType.METHOD_RETURN,
+                    signature=signature,
+                    body=list(body) if body is not None else [],
+                    reply_serial=msg.serial,
+                )
 
-        @classmethod
-        def new_method_return(
-            cls,
-            msg: Message,
-            signature: str = "",
-            body: list[Any] | None = None,
-        ) -> Message:
-            return cls(
-                message_type=MessageType.METHOD_RETURN,
-                signature=signature,
-                body=list(body) if body is not None else [],
-                reply_serial=msg.serial,
-            )
+            @classmethod
+            def new_error(
+                cls, msg: Message, error_name: str, error_text: str
+            ) -> Message:
+                return cls(
+                    message_type=MessageType.ERROR,
+                    error_name=error_name,
+                    signature="s",
+                    body=[error_text],
+                    reply_serial=msg.serial,
+                )
 
-        @classmethod
-        def new_error(cls, msg: Message, error_name: str, error_text: str) -> Message:
-            return cls(
-                message_type=MessageType.ERROR,
-                error_name=error_name,
-                signature="s",
-                body=[error_text],
-                reply_serial=msg.serial,
-            )
+        class Variant:
+            def __init__(self, signature: str, value: Any) -> None:
+                self.signature = signature
+                self.value = value
 
-    class Variant:
-        def __init__(self, signature: str, value: Any) -> None:
-            self.signature = signature
-            self.value = value
+            def __eq__(self, other: object) -> bool:
+                if not isinstance(other, Variant):
+                    return NotImplemented
+                return self.signature == other.signature and self.value == other.value
 
-        def __eq__(self, other: object) -> bool:
-            if not isinstance(other, Variant):
-                return NotImplemented
-            return self.signature == other.signature and self.value == other.value
+        class DBusSignature:
+            def __init__(self, signature: str) -> None:
+                self.signature = signature
 
-    class DBusSignature:
-        def __init__(self, signature: str) -> None:
-            self.signature = signature
+        class ServiceInterface:
+            def __init__(self, name: str) -> None:
+                self.name = name
 
-    class ServiceInterface:
-        def __init__(self, name: str) -> None:
-            self.name = name
+            def emit_properties_changed(
+                self,
+                changed_properties: dict[str, Any],
+                invalidated_properties: list[str] | None = None,
+            ) -> None:
+                pass
 
-        def emit_properties_changed(
-            self,
-            changed_properties: dict[str, Any],
-            invalidated_properties: list[str] | None = None,
-        ) -> None:
-            pass
+        class MessageBus:
+            def __init__(self, bus_type: Any = None, **kwargs: Any) -> None:
+                self.bus_type = bus_type
 
-    class MessageBus:
-        def __init__(self, bus_type: Any = None, **kwargs: Any) -> None:
-            self.bus_type = bus_type
+            async def connect(self) -> Any:
+                raise BLEError("dbus-fast is required for Linux BlueZ peripheral mode")
 
-        async def connect(self) -> Any:
-            raise BLEError("dbus-fast is required for Linux BlueZ peripheral mode")
+        def dbus_property(*args: Any, **kwargs: Any) -> Any:
+            def decorator(fn: Any) -> Any:
+                return property(fn)
 
-    def dbus_property(*args: Any, **kwargs: Any) -> Any:
-        def decorator(fn: Any) -> Any:
-            return property(fn)
+            return decorator
 
-        return decorator
+        def method(*args: Any, **kwargs: Any) -> Any:
+            def decorator(fn: Any) -> Any:
+                fn.__wrapped__ = fn
+                return fn
 
-    def method(*args: Any, **kwargs: Any) -> Any:
-        def decorator(fn: Any) -> Any:
-            fn.__wrapped__ = fn
-            return fn
-
-        return decorator
+            return decorator
 
 
 ArrayOfString = Annotated[list[str], DBusSignature("as")]
