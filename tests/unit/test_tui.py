@@ -2303,11 +2303,33 @@ async def test_lan_network_recovery_resumes_services_and_updates_status() -> Non
             nickname="Alice",
             initial_transport="lan",
         )
+        lan_trans = coord.active_transport
+        assert isinstance(lan_trans, LANTransport)
+
+        # Isolate LAN sockets from host OS network to prevent live UDP/port conflicts
+        async def _mock_server_start() -> None:
+            lan_trans.server._is_listening = True
+            lan_trans.server._bound_port = 41235
+
+        async def _mock_server_stop() -> None:
+            lan_trans.server._is_listening = False
+            lan_trans.server._bound_port = 0
+
+        async def _mock_discovery_start() -> None:
+            lan_trans.discovery._is_running = True
+
+        async def _mock_discovery_stop() -> None:
+            lan_trans.discovery._is_running = False
+
+        lan_trans.server.start = _mock_server_start  # type: ignore[method-assign]
+        lan_trans.server.stop = _mock_server_stop  # type: ignore[method-assign]
+        lan_trans.discovery.start = _mock_discovery_start  # type: ignore[method-assign]
+        lan_trans.discovery.stop = _mock_discovery_stop  # type: ignore[method-assign]
+
         app = BitChatApp(coordinator=coord)
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
-            lan_trans = coord.active_transport
-            assert isinstance(lan_trans, LANTransport)
+            assert isinstance(coord.active_transport, LANTransport)
 
             # Disconnect all
             disc_info = NetworkInfo(

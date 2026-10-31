@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import TYPE_CHECKING, ClassVar
 
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static
 
 from bitchat.tui.theme import get_peer_color
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -138,11 +141,17 @@ class PeerInfoModal(ModalScreen[None]):
 
     def _copy_fingerprint(self) -> None:
         """Copy fingerprint to system clipboard if supported."""
-        with contextlib.suppress(Exception):
+        try:
             self.app.copy_to_clipboard(self.fingerprint)
-        with contextlib.suppress(Exception):
+        except Exception as e:
+            logger.debug("Failed copying fingerprint to clipboard: %s", e)
+        try:
             btn = self.query_one("#btn-peer-copy-fp", Button)
             btn.label = "Copied!"
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating copy fingerprint button: %s", e)
 
     def action_dismiss_modal(self) -> None:
         self.dismiss()

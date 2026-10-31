@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import TYPE_CHECKING, Any
 
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
 
 from bitchat import __version__
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -57,21 +60,41 @@ class HeaderWidget(Widget):
         return f"{self.nickname} [{short_id} • {short_fp}]"
 
     def watch_status_text(self, new_val: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#header-status", Label).update(self._format_status())
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating header status: %s", e)
 
     def watch_peer_count(self, new_count: int) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#header-status", Label).update(self._format_status())
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating header peer count: %s", e)
 
     def watch_nickname(self, new_nick: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#header-identity", Label).update(self._format_identity())
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating header nickname: %s", e)
 
     def watch_peer_id_hex(self, new_val: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#header-identity", Label).update(self._format_identity())
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating header peer ID: %s", e)
 
     def watch_fingerprint(self, new_val: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#header-identity", Label).update(self._format_identity())
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating header fingerprint: %s", e)

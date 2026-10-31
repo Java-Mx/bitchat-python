@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import TYPE_CHECKING, Any
 
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from bitchat.tui.theme import get_peer_color
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -46,14 +49,21 @@ class AutocompletePalette(Widget):
         try:
             ol = self.query_one("#autocomplete-option-list", OptionList)
             return ol.highlighted if ol.highlighted is not None else 0
-        except Exception:
+        except NoMatches:
+            return 0
+        except Exception as e:
+            logger.debug("Failed querying autocomplete option list: %s", e)
             return 0
 
     @selected_index.setter
     def selected_index(self, val: int) -> None:
-        with contextlib.suppress(Exception):
+        try:
             ol = self.query_one("#autocomplete-option-list", OptionList)
             ol.highlighted = val
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed setting autocomplete highlighted index: %s", e)
 
     def show_suggestions(
         self,
@@ -94,9 +104,13 @@ class AutocompletePalette(Widget):
         """Dismiss the autocomplete popup."""
         self.styles.display = "none"
         self._suggestions.clear()
-        with contextlib.suppress(Exception):
+        try:
             ol = self.query_one("#autocomplete-option-list", OptionList)
             ol.clear_options()
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed clearing autocomplete options: %s", e)
 
     def select_next(self) -> None:
         """Advance selection down."""

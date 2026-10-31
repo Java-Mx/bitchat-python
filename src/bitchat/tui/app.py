@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -21,6 +20,7 @@ from bitchat.commands.parser import (
     CommandType,
     get_command_suggestions,
 )
+from bitchat.logging import disable_console_logging
 from bitchat.storage.config import AppConfig, FileConfigStorage, StorageInterface
 from bitchat.tui.screens.ble_error import BLEErrorModal
 from bitchat.tui.screens.edit_theme import EditThemeModal
@@ -98,9 +98,11 @@ class BitChatApp(App[None]):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        disable_console_logging()
         self.coordinator = coordinator
         self.parser = CommandParser(slash_only=True)
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._is_shutting_down: bool = False
 
         if storage is not None:
             self.storage: StorageInterface = storage
@@ -117,7 +119,8 @@ class BitChatApp(App[None]):
         else:
             try:
                 self.config = self.storage.load_config()
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to load config, falling back to default: %s", e)
                 self.config = AppConfig()
 
         self._key_to_action: dict[str, str] = {}
@@ -187,8 +190,12 @@ class BitChatApp(App[None]):
         for action, key in keymap.items():
             method_name = self.ACTION_TO_APP_METHOD.get(action)
             if method_name:
-                with contextlib.suppress(Exception):
+                try:
                     self.bind(key, method_name)
+                except Exception as e:
+                    logger.warning(
+                        "Failed binding key %r to %r: %s", key, method_name, e
+                    )
 
     def get_action_for_key(self, key: str) -> str | None:
         """Return the logical action configured for a given key string."""
@@ -881,8 +888,10 @@ class BitChatApp(App[None]):
         self.config.inter_fragment_delay_ms = event.inter_fragment_delay_ms
         self.config.keybindings = event.keybindings
         self.apply_keybindings(self.config.keybindings)
-        with contextlib.suppress(Exception):
+        try:
             self.storage.save_config(self.config)
+        except Exception as e:
+            logger.warning("Failed to save config after settings update: %s", e)
 
         chat = self.query_one(ChatView)
         chat.add_system_message(
@@ -916,8 +925,10 @@ class BitChatApp(App[None]):
 
         if not self.coordinator:
             self.config.transport = target
-            with contextlib.suppress(Exception):
+            try:
                 self.storage.save_config(self.config)
+            except Exception as e:
+                logger.warning("Failed to save transport to config: %s", e)
             chat.add_system_message(f"Selected transport: {target.upper()}")
             return
 
@@ -939,8 +950,10 @@ class BitChatApp(App[None]):
                     chat.add_system_message(msg)
                     return
                 self.config.transport = target
-                with contextlib.suppress(Exception):
+                try:
                     self.storage.save_config(self.config)
+                except Exception as e:
+                    logger.warning("Failed to save switched transport config: %s", e)
 
                 chat.add_system_message(
                     f"Switched transport to {target.upper()}. "
@@ -1005,8 +1018,10 @@ class BitChatApp(App[None]):
         self.config.density = self.current_density
         self.config.show_timestamps = self.current_show_timestamps
         self.config.accent = self.current_accent
-        with contextlib.suppress(Exception):
+        try:
             self.storage.save_config(self.config)
+        except Exception as e:
+            logger.warning("Failed to save theme settings to storage: %s", e)
 
         chat.add_system_message(
             f"Theme applied and saved: density={event.density}, "
@@ -1436,8 +1451,12 @@ class BitChatApp(App[None]):
                     async def _perform_disconnect_all() -> None:
                         try:
                             for addr in list(coord.active_transport.connected_peers):
-                                with contextlib.suppress(Exception):
+                                try:
                                     await coord.disconnect_peer(addr)
+                                except Exception as err:
+                                    logger.warning(
+                                        "Error disconnecting peer %s: %s", addr, err
+                                    )
                             chat.add_system_message("All peers disconnected.")
                             self._refresh_peer_lists()
                         except Exception as e:
@@ -1511,8 +1530,10 @@ class BitChatApp(App[None]):
                     sidebar.update_identity(new_name)
                     header.nickname = new_name
                 self.config.nickname = new_name
-                with contextlib.suppress(Exception):
+                try:
                     self.storage.save_config(self.config)
+                except Exception as e:
+                    logger.warning("Failed to save nickname to storage: %s", e)
                 chat.add_system_message(f"Nickname changed to '{new_name}'")
 
             case CommandType.DM:
@@ -1742,8 +1763,42 @@ class BitChatApp(App[None]):
         """Alias action for scroll_down keybinding."""
         self.action_scroll_chat_down()
 
+    async def _shutdown_resources(self) -> None:
+        """Gracefully stop coordinator, cancel background tasks, and clean up."""
+        if getattr(self, "_is_shutting_down", False):
+            return
+        self._is_shutting_down = True
+
+        # 1. Cancel and gather any active background tasks
+        current_t = asyncio.current_task()
+        pending_bg = [
+            t for t in self._background_tasks if not t.done() and t is not current_t
+        ]
+        for t in pending_bg:
+            t.cancel()
+        if pending_bg:
+            await asyncio.gather(*pending_bg, return_exceptions=True)
+        self._background_tasks.clear()
+
+        # 2. Cancel running Textual workers if any
+        if hasattr(self, "workers"):
+            for worker in list(self.workers):
+                worker.cancel()
+
+        # 3. Gracefully stop session coordinator
+        if self.coordinator is not None:
+            try:
+                await self.coordinator.stop()
+            except Exception as e:
+                logger.warning("Error stopping coordinator during shutdown: %s", e)
+
+    async def on_unmount(self) -> None:
+        """Guarantee graceful coordinator, transport, and storage shutdown
+        on terminal exit.
+        """
+        await self._shutdown_resources()
+
     async def action_quit(self) -> None:
         """Clean shutdown handler."""
-        if self.coordinator:
-            await self.coordinator.stop()
+        await self._shutdown_resources()
         self.exit()

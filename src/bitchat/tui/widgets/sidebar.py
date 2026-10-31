@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import TYPE_CHECKING, Any
 
 from textual.containers import Vertical
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
 from bitchat.tui.theme import get_peer_color
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual import events
@@ -120,15 +123,19 @@ class PeerSidebar(Widget):
             self.peer_id_hex = peer_id_hex
         if fingerprint:
             self.fingerprint = fingerprint
-        with contextlib.suppress(Exception):
+        try:
             box = self.query_one("#identity-box", Static)
             box.update(self._render_identity_card())
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating identity box: %s", e)
 
     def set_connected_peers(self, peers: dict[str, str]) -> None:
         """Update connected peers list (mapping address -> display string)."""
         self._connected_peers = dict(peers)
         self._addr_to_name.clear()
-        with contextlib.suppress(Exception):
+        try:
             view = self.query_one("#connected-peers-list", ListView)
             view.clear()
             if not self._connected_peers:
@@ -159,6 +166,10 @@ class PeerSidebar(Widget):
                         peer_name=clean_name,
                     )
                     view.append(item)
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating connected peers list: %s", e)
 
     def set_discovered_peers(
         self,
@@ -199,7 +210,7 @@ class PeerSidebar(Widget):
                 rssi_str = getattr(p, "rssi", "")
                 self._discovered_peers[addr] = f"{p_name} ({rssi_str} dBm)"
 
-        with contextlib.suppress(Exception):
+        try:
             view = self.query_one("#discovered-peers-list", ListView)
             view.clear()
             if is_offline:
@@ -274,6 +285,10 @@ class PeerSidebar(Widget):
                             peer_name=name,
                         )
                     view.append(item)
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating discovered peers list: %s", e)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle selection in connected peer list."""
@@ -289,7 +304,7 @@ class PeerSidebar(Widget):
     def on_key(self, event: events.Key) -> None:
         """Handle keypresses in the sidebar, such as 'i' for info."""
         if event.key == "i":
-            with contextlib.suppress(Exception):
+            try:
                 for lv_id in ("#connected-peers-list", "#discovered-peers-list"):
                     view = self.query_one(lv_id, ListView)
                     if view.has_focus and view.highlighted_child:
@@ -303,10 +318,18 @@ class PeerSidebar(Widget):
                             event.prevent_default()
                             event.stop()
                             break
+            except NoMatches:
+                pass
+            except Exception as e:
+                logger.debug("Failed handling sidebar 'i' keypress: %s", e)
 
     def on_click(self, event: events.Click) -> None:
         """Handle clicks on identity card to switch back to public channel."""
-        with contextlib.suppress(Exception):
+        try:
             card = self.query_one("#identity-card")
             if card.region.contains(event.screen_x, event.screen_y):
                 self.post_message(self.PeerSelected("#public", ""))
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed handling sidebar click: %s", e)

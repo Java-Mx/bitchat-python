@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false
 """Unit tests for Linux BlueZ BLEServer backend and D-Bus integration."""
 
 from __future__ import annotations

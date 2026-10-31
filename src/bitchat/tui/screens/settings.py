@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import TYPE_CHECKING, ClassVar
 
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 
 from bitchat.storage.config import DEFAULT_KEYBINDINGS
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual import events
@@ -182,22 +185,32 @@ class SettingsModal(ModalScreen[None]):
 
     def _restore_defaults(self) -> None:
         """Reset all keybinding input fields to factory defaults."""
-        for action, default_key in DEFAULT_KEYBINDINGS.items():
-            inp = self.query_one(f"#settings-kb-{action}", Input)
-            inp.value = default_key
-        with contextlib.suppress(Exception):
+        try:
+            for action, default_key in DEFAULT_KEYBINDINGS.items():
+                inp = self.query_one(f"#settings-kb-{action}", Input)
+                inp.value = default_key
             radio_btn = self.query_one("#radio-transport-bluetooth", RadioButton)
             radio_btn.value = True
-        hint = self.query_one("#settings-hint", Static)
-        hint.update(
-            "[bold #58a6ff]Keybindings restored to defaults. "
-            "Click 'Save Changes' to apply.[/bold #58a6ff]"
-        )
+            hint = self.query_one("#settings-hint", Static)
+            hint.update(
+                "[bold #58a6ff]Keybindings restored to defaults. "
+                "Click 'Save Changes' to apply.[/bold #58a6ff]"
+            )
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed restoring settings defaults: %s", e)
 
     def _save_settings(self) -> None:
-        nick_input = self.query_one("#settings-input-nickname", Input).value.strip()
-        hops_input = self.query_one("#settings-input-hops", Input).value.strip()
-        delay_input = self.query_one("#settings-input-delay", Input).value.strip()
+        try:
+            nick_input = self.query_one("#settings-input-nickname", Input).value.strip()
+            hops_input = self.query_one("#settings-input-hops", Input).value.strip()
+            delay_input = self.query_one("#settings-input-delay", Input).value.strip()
+        except NoMatches:
+            return
+        except Exception as e:
+            logger.debug("Failed reading settings input widgets: %s", e)
+            return
 
         nick = nick_input or self.current_nickname
         try:
@@ -211,7 +224,7 @@ class SettingsModal(ModalScreen[None]):
             delay = self.current_delay_ms
 
         selected_transport = self.current_transport
-        with contextlib.suppress(Exception):
+        try:
             radio_set = self.query_one("#settings-radio-transport", RadioSet)
             if (
                 radio_set.pressed_button
@@ -220,6 +233,10 @@ class SettingsModal(ModalScreen[None]):
                 selected_transport = "lan"
             else:
                 selected_transport = "bluetooth"
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed reading transport radio selection: %s", e)
 
         # Validate keybindings
         keybindings: dict[str, str] = {}

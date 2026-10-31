@@ -537,8 +537,8 @@ def _detect_ipv6_address() -> str:
             addr = s.getsockname()[0]
             if addr and not addr.startswith("::1"):
                 return addr
-    except Exception:
-        pass
+    except OSError as e:
+        logger.debug("IPv6 route probe failed: %s", e)
 
     # Hostname probe
     try:
@@ -547,8 +547,8 @@ def _detect_ipv6_address() -> str:
             cand = info[4][0]
             if isinstance(cand, str) and not cand.startswith("::1"):
                 return cand
-    except Exception:
-        pass
+    except OSError as e:
+        logger.debug("IPv6 hostname probe failed: %s", e)
 
     return "Not detected"
 
@@ -713,7 +713,8 @@ def format_configure_report(report: SystemReport) -> str:
     try:
         encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
         "✓ ✕ ─".encode(encoding)
-    except Exception:
+    except (UnicodeEncodeError, LookupError) as e:
+        logger.debug("Terminal does not support unicode diagnostics glyphs: %s", e)
         can_unicode = False
 
     check_sym = "✓" if can_unicode else "[+]"

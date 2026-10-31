@@ -1,15 +1,16 @@
-"""Interactive bottom action bar and operational telemetry widget."""
-
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import TYPE_CHECKING, Any
 
 from textual.containers import Grid, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Button, Label
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -98,7 +99,7 @@ class StatusBar(Widget):
                 self.post_message(self.ActionTriggered("quit"))
 
     def watch_mesh_status(self, new_val: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             lbl = self.query_one("#status-line-mesh", Label)
             lbl.update(new_val)
             if any(
@@ -107,11 +108,23 @@ class StatusBar(Widget):
                 lbl.add_class("status-offline")
             else:
                 lbl.remove_class("status-offline")
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating mesh status line: %s", e)
 
     def watch_security_status(self, new_val: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#status-line-crypto", Label).update(new_val)
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating security status line: %s", e)
 
     def watch_target_status(self, new_val: str) -> None:
-        with contextlib.suppress(Exception):
+        try:
             self.query_one("#status-line-target", Label).update(new_val)
+        except NoMatches:
+            pass
+        except Exception as e:
+            logger.debug("Failed updating target status line: %s", e)

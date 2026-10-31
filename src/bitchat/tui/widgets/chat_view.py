@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from rich.text import Text
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import RichLog
@@ -15,6 +17,8 @@ from bitchat.tui.theme import (
     COLOR_SELF_IDENTITY,
     get_peer_color,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual import events
@@ -90,8 +94,10 @@ class ChatView(Widget):
                 if index:
                     log.write(Text(" "))
                 self._render_record(rec)
-        except Exception:
+        except NoMatches:
             pass
+        except Exception as e:
+            logger.warning("Error re-rendering chat view: %s", e)
 
     def _render_record(self, record: ChatMessageRecord) -> None:
         """Render a single message record to the RichLog."""

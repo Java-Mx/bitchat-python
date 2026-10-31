@@ -66,6 +66,7 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/bitchat/ble/bluez.py" = ["N802"]
+"tests/**" = ["E501"]
 
 [tool.pyright]
 include = ["src", "tests", "packaging"]

@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false
 """In-memory fake of the BlueZ D-Bus surface used by BitChat.
 
 Allows testing the real Linux BlueZ BLEServer and BluetoothTransport control flows
@@ -12,7 +13,7 @@ import sys
 import types
 from typing import TYPE_CHECKING, Any
 
-from bitchat.ble.bluez import (
+from bitchat.ble.bluez import (  # pyright: ignore[reportAttributeAccessIssue]
     BusType,
     DBusError,
     Message,
