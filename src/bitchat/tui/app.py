@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input
@@ -1060,7 +1061,12 @@ class BitChatApp(App[None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Dynamically evaluate input and manage autocomplete suggestions."""
         val = event.value
-        palette = self.query_one(AutocompletePalette)
+        try:
+            palette = self.query_one(AutocompletePalette)
+        except NoMatches:
+            # Input events can fire during startup/teardown before the
+            # palette is mounted; there is nothing to update yet.
+            return
 
         # Trigger on '@' for peer autocompletion
         if val.startswith("@"):

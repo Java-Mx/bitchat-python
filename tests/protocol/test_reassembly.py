@@ -282,8 +282,9 @@ class TestValidationAndMalformedInputs:
         assembler.add_fragment(b"\x01" * 8, payload)
         assert assembler.active_assembly_count == 1
 
-        # Prune with 0 timeout removes all
-        pruned = assembler.prune_stale(max_age_seconds=0.0)
+        # A negative max age removes every assembly regardless of the platform's
+        # monotonic clock resolution (Windows can return identical timestamps).
+        pruned = assembler.prune_stale(max_age_seconds=-1.0)
         assert pruned == 1
         assert assembler.active_assembly_count == 0
 

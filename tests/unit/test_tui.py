@@ -1731,6 +1731,11 @@ async def test_phase11_settings_transport_selection_and_switch(
         inp.value = "/transport bluetooth"
         await inp.action_submit()
         await pilot.pause()
+        for _ in range(100):
+            if test_coordinator.active_transport_name == "bluetooth":
+                break
+            await asyncio.sleep(0.05)
+            await pilot.pause()
 
         assert test_coordinator.active_transport_name == "bluetooth"
         assert "BLE Mesh" in sidebar.border_title
