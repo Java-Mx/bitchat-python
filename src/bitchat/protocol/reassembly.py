@@ -56,7 +56,7 @@ class FragmentReassembler:
         """Clear all in-flight assemblies."""
         self._assemblies.clear()
 
-    def prune_stale(self, max_age_seconds: float) -> int:
+    def prune_stale(self, max_age_seconds: float = 60.0) -> int:
         """Remove assemblies older than max_age_seconds, returning count removed."""
         now = time.monotonic()
         stale_keys = [
@@ -141,6 +141,12 @@ class FragmentReassembler:
         chunk_data: bytes,
     ) -> bytes | None:
         """Store chunk, validate metadata, and return reassembled bytes if finished."""
+        if total <= 0:
+            raise InvalidFragmentError(f"total must be > 0, got {total}")
+        if not (0 <= index < total):
+            raise InvalidFragmentError(
+                f"index out of bounds: index={index}, total={total}"
+            )
         if total > self._max_fragments_per_assembly:
             raise FragmentLimitExceededError(
                 f"Total {total} exceeds maximum {self._max_fragments_per_assembly}"

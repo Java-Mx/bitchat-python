@@ -22,6 +22,24 @@ DEFAULT_MAX_RELAY_TTL: int = 10
 DEFAULT_RELAY_JITTER_MIN: float = 0.010  # 10 ms
 DEFAULT_RELAY_JITTER_MAX: float = 0.050  # 50 ms
 DEFAULT_PEER_RATE_LIMIT: int = 50  # Max packets per second per peer
+DEFAULT_MAX_ROUTES: int = 1000  # Max cached routing table entries
+DEFAULT_ROUTE_TTL_SECONDS: float = 300.0  # 5 minutes
+
+
+def _normalize_route_key(key: str | bytes) -> str:
+    """Normalize binary or string peer ID/address into lowercase string."""
+    if isinstance(key, (bytes, bytearray)):
+        return bytes(key).hex().lower()
+    return str(key).strip().lower()
+
+
+@dataclass
+class RouteEntry:
+    """Mesh routing table entry mapping a destination to next hop and metric."""
+
+    next_hop: str
+    hop_count: int
+    updated_at: float
 
 
 @dataclass(frozen=True)
@@ -55,24 +73,126 @@ class MeshRouter:
         self.relay_jitter_min = relay_jitter_min
         self.relay_jitter_max = relay_jitter_max
         self.rate_limit_per_peer = rate_limit_per_peer
+        self.max_routes = DEFAULT_MAX_ROUTES
+        self.route_ttl_seconds = DEFAULT_ROUTE_TTL_SECONDS
+
+        # Mesh routing table: destination_id_hex -> RouteEntry
+        self._routes: dict[str, RouteEntry] = {}
 
         # Rate limiter state: peer_id_hex -> list of recent timestamps
         self._rate_limiter: dict[str, list[float]] = defaultdict(list)
 
+    def prune_rate_limiter(self, max_age: float = 1.0, now: float | None = None) -> int:
+        """Prune empty or expired peer entries from rate limiter dict."""
+        current_time = time.time() if now is None else now
+        to_delete = [
+            peer
+            for peer, timestamps in self._rate_limiter.items()
+            if not timestamps or (current_time - max(timestamps) > max_age)
+        ]
+        for peer in to_delete:
+            self._rate_limiter.pop(peer, None)
+        return len(to_delete)
+
     def is_rate_limited(self, sender_hex: str, now: float | None = None) -> bool:
         """Check if sender has exceeded allowed packet rate within the last second."""
         current_time = time.time() if now is None else now
-        timestamps = self._rate_limiter[sender_hex]
+        if len(self._rate_limiter) > 1000:
+            self.prune_rate_limiter(now=current_time)
+
+        timestamps = self._rate_limiter.get(sender_hex)
+        if timestamps is None:
+            self._rate_limiter[sender_hex] = [current_time]
+            return False
 
         # Filter out timestamps older than 1 second
         valid = [t for t in timestamps if current_time - t <= 1.0]
-        self._rate_limiter[sender_hex] = valid
+        if not valid:
+            self._rate_limiter[sender_hex] = [current_time]
+            return False
 
         if len(valid) >= self.rate_limit_per_peer:
+            self._rate_limiter[sender_hex] = valid
             return True
 
         valid.append(current_time)
+        self._rate_limiter[sender_hex] = valid
         return False
+
+    @property
+    def routes(self) -> dict[str, RouteEntry]:
+        """Return shallow copy of current routing table."""
+        return self._routes.copy()
+
+    def add_route(
+        self,
+        destination: str | bytes,
+        next_hop: str | bytes,
+        hop_count: int = 1,
+        now: float | None = None,
+    ) -> None:
+        """Record or update a route to destination via next_hop."""
+        dest_key = _normalize_route_key(destination)
+        next_hop_str = _normalize_route_key(next_hop)
+        current_time = time.time() if now is None else now
+
+        # Prune if table exceeds capacity
+        if len(self._routes) >= self.max_routes:
+            self.prune_routes(now=current_time)
+            if len(self._routes) >= self.max_routes:
+                oldest_dest = min(
+                    self._routes.keys(), key=lambda k: self._routes[k].updated_at
+                )
+                self._routes.pop(oldest_dest, None)
+
+        existing = self._routes.get(dest_key)
+        # If existing route is valid and has strictly lower hop count, keep it
+        if (
+            existing is not None
+            and (current_time - existing.updated_at <= self.route_ttl_seconds)
+            and existing.hop_count < hop_count
+        ):
+            return
+
+        self._routes[dest_key] = RouteEntry(
+            next_hop=next_hop_str,
+            hop_count=hop_count,
+            updated_at=current_time,
+        )
+
+    def get_next_hop(
+        self, destination: str | bytes, now: float | None = None
+    ) -> str | None:
+        """Resolve the next hop address/peer_id for a given destination."""
+        dest_key = _normalize_route_key(destination)
+        current_time = time.time() if now is None else now
+        entry = self._routes.get(dest_key)
+        if entry is None:
+            return None
+        if current_time - entry.updated_at > self.route_ttl_seconds:
+            self._routes.pop(dest_key, None)
+            return None
+        return entry.next_hop
+
+    def remove_route(self, destination: str | bytes) -> None:
+        """Remove a route from the routing table."""
+        dest_key = _normalize_route_key(destination)
+        self._routes.pop(dest_key, None)
+
+    def prune_routes(
+        self, max_age: float | None = None, now: float | None = None
+    ) -> int:
+        """Prune expired routes older than max_age (defaults to route_ttl_seconds)."""
+        current_time = time.time() if now is None else now
+        ttl = self.route_ttl_seconds if max_age is None else max_age
+        expired = [
+            k
+            for k, entry in self._routes.items()
+            if current_time - entry.updated_at > ttl
+        ]
+        for k in expired:
+            self._routes.pop(k, None)
+        return len(expired)
 
     def get_relay_jitter(self) -> float:
         """Return random jitter delay in seconds to mitigate radio collision."""
@@ -128,13 +248,23 @@ class MeshRouter:
                 drop_reason="Duplicate packet suppressed",
             )
 
-        # 5. Determine destination
+        # 5. Route learning from valid incoming packet
+        if ingress_source:
+            hop_count = max(1, 7 - packet.ttl + 1) if packet.ttl <= 7 else 1
+            self.add_route(
+                destination=sender_hex,
+                next_hop=ingress_source,
+                hop_count=hop_count,
+                now=current_time,
+            )
+
+        # 6. Determine destination
         is_broadcast = (
             packet.recipient_id is None or packet.recipient_id == BROADCAST_RECIPIENT
         )
         is_for_us = is_broadcast or (packet.recipient_id == self.local_peer_id)
 
-        # 6. Determine relay action
+        # 7. Determine relay action
         packet_to_relay: BitchatPacket | None = None
         target_peer_id_hex: str | None = None
 

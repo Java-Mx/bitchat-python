@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any
 from bitchat.crypto.identity import LocalIdentity
 from bitchat.crypto.noise import NoiseRole, NoiseSessionState
 from bitchat.crypto.sessions import NoiseSession
-from bitchat.exceptions import PacketDecodingError
+from bitchat.exceptions import (
+    FragmentLimitExceededError,
+    InvalidFragmentError,
+    PacketDecodingError,
+)
 from bitchat.mesh.router import MeshRouter
 from bitchat.network.transport import LANTransport
 from bitchat.protocol.constants import MessageType
@@ -25,12 +29,17 @@ if TYPE_CHECKING:
 
     from bitchat.ble.manager import BLEManager
     from bitchat.ble.server import BLEServer
+    from bitchat.mesh.dedup import PacketDeduplicator
+    from bitchat.mesh.store_forward import StoreAndForwardQueue
     from bitchat.storage.config import StorageInterface
 
 
 logger = logging.getLogger(__name__)
 NOISE_HANDSHAKE_TIMEOUT_SECONDS: float = 10.0
 TRANSPORT_RETRY_TIMEOUT_SECONDS: float = 30.0
+MAX_TTL: int = 7
+MAX_MESSAGE_SIZE: int = 32_768
+PERIODIC_PRUNE_INTERVAL_SECONDS: float = 30.0
 
 
 def _decode_chat_payload(payload_bytes: bytes) -> str:
@@ -96,6 +105,8 @@ class SessionCoordinator:
         self._retry_lock = asyncio.Lock()
 
         self.server_reassembler = FragmentReassembler()
+        self.fragment_reassembler = self.server_reassembler
+        self._prune_task: asyncio.Task[Any] | None = None
         self._is_running: bool = False
 
         # Registered transports dictionary
@@ -179,6 +190,52 @@ class SessionCoordinator:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
         return task
+
+    @property
+    def packet_deduplicator(self) -> PacketDeduplicator:
+        """Return the packet deduplicator instance."""
+        return self.mesh_router.deduplicator
+
+    @property
+    def store_forward(self) -> StoreAndForwardQueue:
+        """Return the store-and-forward queue instance."""
+        return self.mesh_router.store_forward_queue
+
+    def prune_caches(self) -> None:
+        """Prune stale fragment assemblies, dedup entries, and stored packets."""
+        try:
+            self.fragment_reassembler.prune_stale()
+        except Exception as e:
+            logger.warning("Error pruning fragment reassembler: %s", e)
+        try:
+            self.packet_deduplicator.prune_expired()
+        except Exception as e:
+            logger.warning("Error pruning packet deduplicator: %s", e)
+        try:
+            self.store_forward.prune_expired()
+        except Exception as e:
+            logger.warning("Error pruning store-and-forward queue: %s", e)
+        try:
+            self.mesh_router.prune_routes()
+            self.mesh_router.prune_rate_limiter()
+        except Exception as e:
+            logger.warning("Error pruning mesh router: %s", e)
+
+    def _start_prune_task(self) -> None:
+        """Start the periodic background prune task if not already running."""
+        if self._prune_task is None or self._prune_task.done():
+            self._prune_task = self._spawn_task(self._periodic_prune_loop())
+
+    async def _periodic_prune_loop(
+        self, interval_seconds: float = PERIODIC_PRUNE_INTERVAL_SECONDS
+    ) -> None:
+        """Periodically prune expired cache entries and queues in the background."""
+        try:
+            while self._is_running:
+                await asyncio.sleep(interval_seconds)
+                self.prune_caches()
+        except asyncio.CancelledError:
+            pass
 
     def _schedule_handshake_timeout(self, peer_id: str, session: NoiseSession) -> None:
         if peer_id in self._handshake_timeout_tasks:
@@ -318,6 +375,7 @@ class SessionCoordinator:
                 await self.active_transport.start()
                 self.ble_status = self.active_transport.state.value
                 await self.send_announce()
+                self._start_prune_task()
             except Exception as e:
                 self._is_running = False
                 logger.warning(
@@ -466,6 +524,7 @@ class SessionCoordinator:
                     return False
                 self.offline_mode = False
                 await self.send_announce()
+                self._start_prune_task()
                 return True
             except TimeoutError:
                 logger.warning(
@@ -514,12 +573,26 @@ class SessionCoordinator:
         self.ble_status = "offline"
         self.ble_error_message = None
 
+        if self._prune_task and not self._prune_task.done():
+            self._prune_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._prune_task
+        self._prune_task = None
+
         await self._cancel_handshake_timeouts()
         for session in self._sessions.values():
             session.close()
         self._sessions.clear()
         self._pending_messages.clear()
         self._announced_peers.clear()
+
+        # Cancel and cleanly cleanup any remaining background tasks
+        pending_bg = [t for t in self._background_tasks if not t.done()]
+        for t in pending_bg:
+            t.cancel()
+        if pending_bg:
+            await asyncio.gather(*pending_bg, return_exceptions=True)
+        self._background_tasks.clear()
 
         for transport in self._transports.values():
             with contextlib.suppress(Exception):
@@ -657,6 +730,7 @@ class SessionCoordinator:
                 self.offline_mode = False
                 self._is_running = True
                 await self.send_announce()
+                self._start_prune_task()
                 display_name = "LAN / Wi-Fi" if target == "lan" else "Bluetooth"
                 return True, (
                     f"Switched transport to {display_name}. "
@@ -694,15 +768,23 @@ class SessionCoordinator:
 
     async def send_broadcast_message(self, text: str) -> None:
         """Send an unencrypted public message to all connected peers."""
+        encoded = text.encode("utf-8")
+        if len(encoded) > MAX_MESSAGE_SIZE:
+            msg = f"Message payload exceeds maximum size ({MAX_MESSAGE_SIZE} bytes)"
+            raise ValueError(msg)
         packet = BitchatPacket.create(
             message_type=MessageType.Message,
             sender_id=self.local_identity.peer_id,
-            payload=text.encode("utf-8"),
+            payload=encoded,
         )
         await self._broadcast_packet(packet)
 
     async def send_direct_message(self, target_peer_id_hex: str, text: str) -> None:
         """Send an encrypted message to a peer, establishing Noise XX if needed."""
+        encoded = text.encode("utf-8")
+        if len(encoded) > MAX_MESSAGE_SIZE:
+            msg = f"Message payload exceeds maximum size ({MAX_MESSAGE_SIZE} bytes)"
+            raise ValueError(msg)
         session = self.get_or_create_session(target_peer_id_hex)
 
         if not session.is_established:
@@ -749,6 +831,8 @@ class SessionCoordinator:
         for addr, pid in self.address_to_peer_id.items():
             if pid.lower() == target_lower and addr in connected:
                 return addr
+        if target_peer_id_hex in connected:
+            return target_peer_id_hex
         return None
 
     async def _send_packet(
@@ -757,11 +841,14 @@ class SessionCoordinator:
         """Transmit packet via direct transport connection or broadcast."""
         self.mesh_router.deduplicator.record(packet)
 
-        target_addr = (
-            self._resolve_connected_peer_address(target_peer_id_hex)
-            if target_peer_id_hex
-            else None
-        )
+        target_addr: str | None = None
+        if target_peer_id_hex:
+            target_addr = self._resolve_connected_peer_address(target_peer_id_hex)
+            if not target_addr:
+                next_hop = self.mesh_router.get_next_hop(target_peer_id_hex)
+                if next_hop:
+                    target_addr = self._resolve_connected_peer_address(next_hop)
+
         if target_addr:
             await self.active_transport.send_to_peer(target_addr, packet)
             return
@@ -792,7 +879,15 @@ class SessionCoordinator:
             MessageType.FragmentContinue,
             MessageType.FragmentEnd,
         ):
-            reassembled_wire = self.server_reassembler.add_fragment_packet(packet)
+            try:
+                reassembled_wire = self.server_reassembler.add_fragment_packet(packet)
+            except (InvalidFragmentError, FragmentLimitExceededError) as e:
+                logger.warning(
+                    "Invalid or oversized fragment from server client %s: %s",
+                    client_id,
+                    e,
+                )
+                return
             if reassembled_wire is not None:
                 try:
                     full_packet = decode_packet(reassembled_wire)
@@ -823,9 +918,14 @@ class SessionCoordinator:
             )
         elif decision.target_peer_id_hex and not decision.should_process_locally:
             # Store-and-forward for offline destination
-            self.mesh_router.store_forward_queue.enqueue(
+            success = self.mesh_router.store_forward_queue.enqueue(
                 decision.target_peer_id_hex, packet
             )
+            if not success:
+                logger.warning(
+                    "Store-and-forward queue full; packet for %s dropped",
+                    decision.target_peer_id_hex,
+                )
 
     async def _relay_packet_async(
         self,
@@ -837,11 +937,12 @@ class SessionCoordinator:
         if not self._is_running:
             return
 
-        jitter = self.mesh_router.get_relay_jitter()
-        try:
-            await asyncio.sleep(jitter)
-        except asyncio.CancelledError:
-            return
+        if target_peer_id_hex is None:
+            jitter = self.mesh_router.get_relay_jitter()
+            try:
+                await asyncio.sleep(jitter)
+            except asyncio.CancelledError:
+                return
 
         if not self._is_running:
             return
@@ -849,6 +950,11 @@ class SessionCoordinator:
         try:
             if target_peer_id_hex:
                 target_addr = self._resolve_connected_peer_address(target_peer_id_hex)
+                if not target_addr:
+                    next_hop = self.mesh_router.get_next_hop(target_peer_id_hex)
+                    if next_hop:
+                        target_addr = self._resolve_connected_peer_address(next_hop)
+
                 if target_addr and target_addr != exclude_ingress:
                     try:
                         await self.active_transport.send_to_peer(target_addr, packet)
@@ -862,9 +968,14 @@ class SessionCoordinator:
                 if target_peer_id_hex not in self.peer_addresses:
                     await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
                 else:
-                    self.mesh_router.store_forward_queue.enqueue(
+                    success = self.mesh_router.store_forward_queue.enqueue(
                         target_peer_id_hex, packet
                     )
+                    if not success:
+                        logger.warning(
+                            "Store-and-forward queue full; packet for %s dropped",
+                            target_peer_id_hex,
+                        )
             else:
                 await self._broadcast_packet(packet, exclude_peer=exclude_ingress)
         except Exception as e:
@@ -875,13 +986,26 @@ class SessionCoordinator:
     ) -> None:
         """Handle incoming packet state transitions, crypto, and callbacks."""
         sender_hex = packet.sender_id.hex()
-        if peer_address:
+        is_direct_neighbor = peer_address is not None and (
+            packet.sender_id.hex() == peer_address or packet.ttl >= MAX_TTL
+        )
+        if peer_address and is_direct_neighbor:
             self.address_to_peer_id[peer_address] = sender_hex
             is_inbound_lan = isinstance(
                 self.active_transport, LANTransport
             ) and self.active_transport.is_inbound_connection(peer_address)
             if not is_inbound_lan:
                 self.peer_addresses[sender_hex] = peer_address
+
+        # Learn route to sender in mesh router
+        if peer_address:
+            next_hop = self.address_to_peer_id.get(peer_address, peer_address)
+            hop_count = max(1, MAX_TTL - packet.ttl + 1) if packet.ttl <= MAX_TTL else 1
+            self.mesh_router.add_route(
+                destination=sender_hex,
+                next_hop=next_hop,
+                hop_count=hop_count,
+            )
 
         match packet.message_type:
             case MessageType.Announce:
@@ -979,6 +1103,12 @@ class SessionCoordinator:
 
             case MessageType.NoiseEncrypted:
                 session = self._sessions.get(sender_hex)
+                if session is not None and not session.is_established:
+                    for _ in range(25):
+                        await asyncio.sleep(0.04)
+                        if session.is_established:
+                            break
+
                 if session is None or not session.is_established:
                     logger.warning(
                         "Received NoiseEncrypted without established session from %s",
