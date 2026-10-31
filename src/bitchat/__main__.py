@@ -33,7 +33,37 @@ def main() -> None:
         action="store_true",
         help="Run system configuration, hardware detection, and diagnostics",
     )
+    parser.add_argument(
+        "--startup",
+        choices=["enable", "disable", "status"],
+        help="Manage per-user Windows sign-in startup (enable, disable, status)",
+    )
+    parser.add_argument(
+        "--startup-launch",
+        action="store_true",
+        help="Internal flag for Windows Startup shortcut to prevent duplicates",
+    )
     args = parser.parse_args()
+
+    if args.startup:
+        from bitchat.platform.startup import (
+            disable_startup,
+            enable_startup,
+            format_startup_status,
+        )
+
+        if args.startup == "enable":
+            shortcut = enable_startup()
+            print(f"Enabled BitChat Windows sign-in startup shortcut:\n  {shortcut}")
+        elif args.startup == "disable":
+            removed = disable_startup()
+            if removed:
+                print("Disabled BitChat Windows sign-in startup (shortcut removed).")
+            else:
+                print("BitChat Windows sign-in startup was already disabled.")
+        else:
+            print(format_startup_status())
+        sys.exit(0)
 
     if args.configure:
         import asyncio
@@ -53,40 +83,50 @@ def main() -> None:
         print(format_configure_report(report))
         sys.exit(0)
 
-    use_cli = args.cli or (not args.tui and not sys.stdin.isatty())
+    from bitchat.platform.startup import SingleInstanceGuard
 
-    if use_cli:
-        app = Application(enable_ble=True)
-        exit_code = app.run()
-        sys.exit(exit_code)
-    else:
-        from bitchat.app.session_coordinator import SessionCoordinator
-        from bitchat.ble.manager import BLEManager
-        from bitchat.ble.server import BLEServer
-        from bitchat.crypto.identity import LocalIdentity
-        from bitchat.storage.config import FileConfigStorage
-        from bitchat.tui.app import BitChatApp
+    with SingleInstanceGuard() as instance_guard:
+        if args.startup_launch and instance_guard.already_running:
+            print(
+                "BitChat is already running for the current user; "
+                "skipping duplicate startup launch."
+            )
+            sys.exit(0)
 
-        storage = FileConfigStorage()
-        config = storage.load_config()
-        identity = storage.load_identity()
-        if identity is None:
-            identity = LocalIdentity.generate()
-            storage.save_identity(identity)
+        use_cli = args.cli or (not args.tui and not sys.stdin.isatty())
 
-        server = BLEServer()
-        manager = BLEManager(sender_id=identity.peer_id)
-        coordinator = SessionCoordinator(
-            local_identity=identity,
-            ble_manager=manager,
-            ble_server=server,
-            storage=storage,
-            nickname=config.nickname,
-        )
+        if use_cli:
+            app = Application(enable_ble=True)
+            exit_code = app.run()
+            sys.exit(exit_code)
+        else:
+            from bitchat.app.session_coordinator import SessionCoordinator
+            from bitchat.ble.manager import BLEManager
+            from bitchat.ble.server import BLEServer
+            from bitchat.crypto.identity import LocalIdentity
+            from bitchat.storage.config import FileConfigStorage
+            from bitchat.tui.app import BitChatApp
 
-        tui_app = BitChatApp(coordinator=coordinator, storage=storage)
-        tui_app.run()
-        sys.exit(0)
+            storage = FileConfigStorage()
+            config = storage.load_config()
+            identity = storage.load_identity()
+            if identity is None:
+                identity = LocalIdentity.generate()
+                storage.save_identity(identity)
+
+            server = BLEServer()
+            manager = BLEManager(sender_id=identity.peer_id)
+            coordinator = SessionCoordinator(
+                local_identity=identity,
+                ble_manager=manager,
+                ble_server=server,
+                storage=storage,
+                nickname=config.nickname,
+            )
+
+            tui_app = BitChatApp(coordinator=coordinator, storage=storage)
+            tui_app.run()
+            sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -317,23 +317,51 @@ class LANDiscovery:
                 logger.warning("Error in on_peer_discovered: %s", e)
         return peer
 
+    def prune_rate_limiter(self, max_age: float = 1.0, now: float | None = None) -> int:
+        """Prune empty or expired IP entries from rate limiter dict."""
+        current_time = time.time() if now is None else now
+        to_delete = [
+            ip
+            for ip, timestamps in self._rate_limiter.items()
+            if not timestamps or (current_time - max(timestamps) > max_age)
+        ]
+        for ip in to_delete:
+            self._rate_limiter.pop(ip, None)
+        return len(to_delete)
+
     def _is_rate_limited(self, ip: str, now: float | None = None) -> bool:
         current_time = time.time() if now is None else now
-        timestamps = self._rate_limiter[ip]
+        if len(self._rate_limiter) > 256:
+            self.prune_rate_limiter(now=current_time)
+
+        timestamps = self._rate_limiter.get(ip)
+        if timestamps is None:
+            self._rate_limiter[ip] = [current_time]
+            return False
+
         valid = [t for t in timestamps if current_time - t <= 1.0]
-        self._rate_limiter[ip] = valid
+        if not valid:
+            self._rate_limiter[ip] = [current_time]
+            return False
+
         if len(valid) >= MAX_DISCOVERY_RATE_PER_IP:
+            self._rate_limiter[ip] = valid
             return True
+
         valid.append(current_time)
+        self._rate_limiter[ip] = valid
         return False
 
-    def prune_stale_peers(self, max_age: float = 30.0) -> list[str]:
-        """Prune peers not heard from within max_age seconds."""
-        now = time.time()
+    def prune_stale_peers(
+        self, max_age: float = 30.0, now: float | None = None
+    ) -> list[str]:
+        """Prune peers not heard from within max_age seconds and clean rate limiters."""
+        current = time.time() if now is None else now
+        self.prune_rate_limiter(now=current)
         stale = [
             addr
             for addr, peer in self._discovered_peers.items()
-            if peer.is_expired(ttl=max_age, now=now)
+            if peer.is_expired(ttl=max_age, now=current)
         ]
         for addr in stale:
             self._discovered_peers.pop(addr, None)

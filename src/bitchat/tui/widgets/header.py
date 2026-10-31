@@ -9,6 +9,8 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
 
+from bitchat import __version__
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
@@ -39,7 +41,7 @@ class HeaderWidget(Widget):
 
     def compose(self) -> ComposeResult:
         yield Label("● BitChat", id="header-brand")
-        yield Label("v0.1.0", id="header-version")
+        yield Label(f"v{__version__}", id="header-version")
         yield Label("Secure • BLE Mesh", id="header-channel")
         yield Label(self._format_status(), id="header-status")
         yield Label(self._format_identity(), id="header-identity")

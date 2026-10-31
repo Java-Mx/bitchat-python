@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.6.0.schema.json
 
 PackageIdentifier: Java-Mx.BitChat
-PackageVersion: 0.1.0
+PackageVersion: 0.2.0
 PackageLocale: en-US
 Publisher: Java-Mx
 PublisherUrl: https://github.com/Java-Mx
@@ -24,13 +24,13 @@ Tags:
   - mesh
   - p2p
   - terminal
-ReleaseNotesUrl: https://github.com/Java-Mx/bitchat-python/releases/tag/v0.1.0
+ReleaseNotesUrl: https://github.com/Java-Mx/bitchat-python/releases/tag/v0.2.0
 Installers:
   - Architecture: x64
     InstallerType: inno
     Scope: user
-    InstallerUrl: https://github.com/Java-Mx/bitchat-python/releases/download/v0.1.0/BitChat-0.1.0-windows-x64.exe
-    InstallerSha256: A8967BAE048E1C982FAD5FFBC9C657FB86CC8806E34A07C7564D3259F5B81C0A
+    InstallerUrl: https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.0/BitChat-0.2.0-windows-x64.exe
+    InstallerSha256: F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E
     UpgradeBehavior: install
 ManifestType: singleton
 ManifestVersion: 1.6.0

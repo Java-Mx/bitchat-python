@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/download/assets/bitchat-wordmark-dark.png" alt="BitChat" width="280" />
+
 # CLI BitChat Python
 
 **Encrypted peer-to-peer mesh chat over Bluetooth Low Energy and LAN**
@@ -55,7 +57,7 @@ BitChat Python is an asynchronous terminal client implementing the [BitChat](htt
 
 ### Windows (Fastest)
 
-Download and run the standalone installer from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases):
+Download and run the standalone installer from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) (or view the [Official Windows Download Guide](docs/DOWNLOAD.md)):
 ```powershell
 # Or via WinGet once published upstream:
 winget install Java-Mx.BitChat
@@ -92,7 +94,7 @@ BitChat provides dedicated distribution channels tailored for each platform:
 
 > [!NOTE]
 > **Status:** WinGet submission: pending Microsoft review ([microsoft/winget-pkgs#443445](https://github.com/microsoft/winget-pkgs/pull/443445)).
-> Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.1.0/`](manifests/j/Java-Mx/BitChat/0.1.0/).
+> Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.2.0/`](manifests/j/Java-Mx/BitChat/0.2.0/).
 > The public command `winget install Java-Mx.BitChat` becomes available once the manifest pull request is merged into Microsoft's community repository ([microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)).
 > Until upstream review is complete, use the **GitHub Release Installer** below or install directly from the local repository manifest.
 
@@ -103,7 +105,7 @@ winget install Java-Mx.BitChat
 
 To test or install directly from this repository's local manifest:
 ```powershell
-winget install --manifest manifests/j/Java-Mx/BitChat/0.1.0/
+winget install --manifest manifests/j/Java-Mx/BitChat/0.2.0/
 ```
 
 **Upgrade:**
@@ -118,15 +120,23 @@ winget uninstall Java-Mx.BitChat
 
 #### GitHub Release Installer
 
-The self-contained Windows executable installer bundles the Python runtime, BitChat package, Bleak Bluetooth stack, and native cryptographic libraries into a single setup program. No Python installation or virtual environment is needed.
+The self-contained Windows executable installer (`BitChat-<version>-windows-x64.exe`) bundles the Python runtime, BitChat package, Bleak WinRT Bluetooth stack, and native cryptographic libraries into a single setup program. No Python, Git, or Administrator privileges are required.
 
-1. Download `BitChat-<version>-windows-x64.exe` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases).
-2. Run the installer. It supports both an interactive setup wizard and silent unattended installations.
-3. The installer automatically adds BitChat to your user `PATH`.
-4. Open a PowerShell or Command Prompt terminal and launch:
+1. Download `BitChat-<version>-windows-x64.exe` and `BitChat-<version>-windows-x64.exe.sha256` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) (see [`docs/DOWNLOAD.md`](docs/DOWNLOAD.md) and [`docs/platform/WINDOWS.md`](docs/platform/WINDOWS.md)).
+2. Verify the SHA-256 checksum in PowerShell:
+   ```powershell
+   Get-FileHash .\BitChat-0.2.0-windows-x64.exe -Algorithm SHA256
+   ```
+3. Run the installer. The 7-screen setup wizard presents the [Terms of Use](TERMS_OF_USE.md) and [Privacy Policy](PRIVACY_POLICY.md), defaults to user-scope installation (`%LOCALAPPDATA%\Programs\BitChat`), and lets you configure Desktop/Start Menu shortcuts, user `PATH` integration, post-install launch, and optional per-user Windows sign-in startup.
+4. Open a **new** PowerShell or Command Prompt terminal (existing terminals must be reopened to pick up `PATH` changes) and launch:
    ```powershell
    bitchat
+   bitchat --version
+   bitchat --help
+   bitchat --configure
+   bitchat --startup status
    ```
+5. **Upgrades & Uninstallation:** Running a newer installer upgrades BitChat in place while preserving your `%USERPROFILE%\.bitchat\` cryptographic identity (`identity.json`) and configuration (`config.json`). Uninstalling removes binaries, shortcuts, startup registration, and the installer `PATH` entry while preserving `%USERPROFILE%\.bitchat\` by default (with an explicit separate option if you wish to delete local user data).
 
 #### Source & Developer Install
 

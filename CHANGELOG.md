@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
 ### Added
+- **BitChat Windows Installer 2.0 (`packaging/windows/`, `BitChat-0.2.0-windows-x64.exe`):**
+  - 7-screen Inno Setup 6 installation wizard: Welcome, Terms of Use (`TERMS_OF_USE.md`), Privacy Policy (`PRIVACY_POLICY.md`), Installation Location (with write-permission, ≥80 MB disk-space, and user-data path collision validation), Installation Options, Installation Progress, and Completion.
+  - Official BitChat branding integration (`packaging/windows/assets.py`) from official SVG/PNG design assets into multi-resolution `bitchat.ico`, `wizard-large.bmp`, `wizard-small.bmp`, and embedded Windows `VSVersionInfo`.
+  - Per-user Windows sign-in startup management (`bitchat.platform.startup`) and CLI commands (`bitchat --startup {enable,disable,status}`, `bitchat --startup-launch`) with Windows named mutex (`Local\BitChatAppRunningMutex`) duplicate-instance guard (`SingleInstanceGuard`).
+  - Safe user `PATH` management (`HKCU\Environment\Path`) with installer ownership tracking (`PathAddedByInstaller`), automatic running-process shutdown before upgrade/uninstall, and preservation of `~/.bitchat/identity.json` and `~/.bitchat/config.json` across upgrades and default uninstallations (with optional `/REMOVEUSERDATA` cleanup).
+  - Authenticode SHA-256 + RFC3161 timestamp signing and verification pipeline in `packaging/windows/build.py` and `.github/workflows/release.yml`.
+  - Official Windows Download Page (`docs/download/index.html`) and distribution guide (`docs/DOWNLOAD.md`).
 - Cross-platform BLE selection (`bitchat.platform.detection`, `bitchat.platform.recovery`): a single place decides Windows vs Linux from `sys.platform`; BLE backend availability, adapter hardware, GATT/advertising, and the active transport are reported separately. Linux is reported as BLE central-only (no GATT server), Windows keeps the WinRT GATT server.
 - OS-specific Bluetooth recovery guidance now comes from the platform layer instead of text hard-coded in the TUI dialog.
 - WinRT GATT event handlers are unregistered on cleanup, and `SessionCoordinator` ignores `start()` while the user is in offline mode.

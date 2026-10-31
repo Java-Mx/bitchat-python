@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_READ_TIMEOUT_SECONDS: float = 120.0
+DEFAULT_DRAIN_TIMEOUT_SECONDS: float = 5.0
 
 
 class LANConnection:
@@ -42,6 +43,7 @@ class LANConnection:
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         self.is_inbound = is_inbound
+        self.peer_id: str | None = None
 
         self._reader: asyncio.StreamReader | None = reader
         self._writer: asyncio.StreamWriter | None = writer
@@ -161,14 +163,31 @@ class LANConnection:
                 f"Cannot send: peer {self.peer_address} is not connected"
             )
 
+        writer: asyncio.StreamWriter | None = None
         async with self._lock:
             try:
+                if not self.is_ready or not self._writer:
+                    raise ConnectionError(
+                        f"Cannot send: peer {self.peer_address} is not connected"
+                    )
                 encoded = encode_packet(packet, add_padding=False)
                 frame = encode_frame(encoded)
                 self._writer.write(frame)
-                await self._writer.drain()
+                writer = self._writer
             except Exception as e:
                 logger.warning("Failed sending packet to %s: %s", self.peer_address, e)
+                await self.close()
+                raise
+
+        if writer is not None:
+            try:
+                await asyncio.wait_for(
+                    writer.drain(), timeout=DEFAULT_DRAIN_TIMEOUT_SECONDS
+                )
+            except Exception as e:
+                logger.warning(
+                    "Drain failed or timed out for %s: %s", self.peer_address, e
+                )
                 await self.close()
                 raise
 

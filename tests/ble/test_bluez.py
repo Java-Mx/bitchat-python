@@ -260,7 +260,7 @@ async def test_bluez_server_advertisement_fallback_on_initial_failure(
         ):
             attempts += 1
             if attempts == 1:
-                from dbus_fast import Message
+                from bitchat.ble.bluez import Message
 
                 return Message.new_error(
                     msg,
@@ -385,7 +385,7 @@ async def test_bluez_server_multiple_adapters_selects_fully_capable(
     # Setup bus to return two adapters:
     # hci0: powered, has GattManager1 but lacks LEAdvertisingManager1
     # hci1: powered, has BOTH GattManager1 and LEAdvertisingManager1
-    from dbus_fast import Message, Variant
+    from bitchat.ble.bluez import Message, Variant
 
     orig_call = fake_bluez.bus.call
 
@@ -633,7 +633,7 @@ async def test_bluez_managed_objects_reflects_characteristic_state(
 async def test_fake_bluez_unexported_application_and_advertisement_rejected(
     fake_bluez: FakeBlueZ,
 ) -> None:
-    from dbus_fast import Message
+    from bitchat.ble.bluez import Message
 
     # Try registering application without exporting it first
     reply = await fake_bluez.bus.call(

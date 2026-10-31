@@ -63,6 +63,8 @@ class LANTransport(BaseTransport):
         )
 
         self._connections: dict[str, LANConnection] = {}
+        self._peer_connections: dict[str, LANConnection] = {}
+        self._address_to_peer_key: dict[str, str] = {}
         self._is_running: bool = False
         self._state: TransportState = TransportState.OFFLINE
         self._error_message: str | None = None
@@ -83,7 +85,13 @@ class LANTransport(BaseTransport):
 
     @property
     def connected_peers(self) -> list[str]:
-        return [addr for addr, conn in self._connections.items() if conn.is_ready]
+        seen_conns: set[LANConnection] = set()
+        peers: list[str] = []
+        for addr, conn in self._connections.items():
+            if conn.is_ready and conn not in seen_conns:
+                seen_conns.add(conn)
+                peers.append(addr)
+        return peers
 
     @property
     def discovered_peers(self) -> dict[str, Any]:
@@ -112,13 +120,120 @@ class LANTransport(BaseTransport):
         task.add_done_callback(self._background_tasks.discard)
         return task
 
+    def _get_peer_key(self, address: str, peer_id: str | None = None) -> str:
+        """Resolve a canonical peer key for deduplication."""
+        if peer_id:
+            return f"peer:{peer_id.lower()}"
+
+        disc_peer = self.discovery.discovered_peers.get(address)
+        if disc_peer and disc_peer.peer_id:
+            return f"peer:{disc_peer.peer_id.lower()}"
+
+        ip = address.split(":", 1)[0] if ":" in address else address
+        if not ip.startswith("127."):
+            for p in self.discovery.discovered_peers.values():
+                if p.ip == ip and p.peer_id:
+                    return f"peer:{p.peer_id.lower()}"
+            return f"ip:{ip}"
+
+        return f"addr:{address}"
+
+    def _get_remote_id(self, peer_key: str, address: str) -> str:
+        """Return remote peer ID if available, otherwise remote address."""
+        if peer_key.startswith("peer:"):
+            return peer_key[5:]
+        return address
+
+    def _should_keep_outbound(self, remote_id: str, remote_addr: str) -> bool:
+        """Deterministically determine whether local node keeps outbound connection.
+
+        The peer with lexicographically lower peer ID acts as initiator
+        (keeps outbound).
+        """
+        local_id = self.local_peer_id.lower() if self.local_peer_id else ""
+        if local_id and remote_id and local_id != remote_id:
+            return local_id < remote_id.lower()
+        local_port = self.server.bound_port
+        local_ip = self.adapter_manager.current_info.local_ip or "0.0.0.0"
+        local_endpoint = f"{local_ip}:{local_port}"
+        return local_endpoint < remote_addr
+
+    def _find_existing_connection(self, address: str) -> LANConnection | None:
+        """Find an existing active connection to the peer specified by address."""
+        conn = self._connections.get(address)
+        if conn and conn.is_ready:
+            return conn
+
+        peer_key = self._get_peer_key(address)
+        conn = self._peer_connections.get(peer_key)
+        if conn and conn.is_ready:
+            return conn
+
+        ip = address.split(":", 1)[0] if ":" in address else address
+        if not ip.startswith("127."):
+            for c in list(self._connections.values()):
+                if not c.is_ready:
+                    continue
+                c_ip = (
+                    c.peer_address.split(":", 1)[0]
+                    if ":" in c.peer_address
+                    else c.peer_address
+                )
+                if c_ip == ip:
+                    return c
+
+        return None
+
+    def _remove_connection_references(self, conn: LANConnection) -> None:
+        """Remove all mapping references to a connection."""
+        to_remove = [k for k, v in self._connections.items() if v is conn]
+        for k in to_remove:
+            self._connections.pop(k, None)
+            self._address_to_peer_key.pop(k, None)
+        peer_keys_to_remove = [
+            k for k, v in self._peer_connections.items() if v is conn
+        ]
+        for k in peer_keys_to_remove:
+            self._peer_connections.pop(k, None)
+
     def _handle_inbound_connection(self, connection: LANConnection) -> None:
         """Wire up callbacks for an inbound TCP peer connection
-        accepted by LANServer.
+        accepted by LANServer with deduplication against concurrent connections.
         """
         if len(self._connections) >= self.max_connections:
             self._spawn_task(connection.close())
             return
+
+        peer_key = self._get_peer_key(connection.peer_address)
+        existing = self._find_existing_connection(connection.peer_address)
+        if existing and existing.is_ready and existing is not connection:
+            if existing.is_inbound:
+                logger.info(
+                    "Dropping duplicate inbound connection from %s",
+                    connection.peer_address,
+                )
+                self._spawn_task(connection.close())
+                return
+            else:
+                remote_id = self._get_remote_id(peer_key, connection.peer_address)
+                if self._should_keep_outbound(remote_id, connection.peer_address):
+                    logger.info(
+                        "Deduplicating connection to %s: keeping outbound, "
+                        "dropping inbound %s",
+                        existing.peer_address,
+                        connection.peer_address,
+                    )
+                    self._spawn_task(connection.close())
+                    return
+                else:
+                    logger.info(
+                        "Deduplicating connection to %s: keeping inbound %s, "
+                        "dropping outbound",
+                        existing.peer_address,
+                        connection.peer_address,
+                    )
+                    self._spawn_task(existing.close())
+                    self._remove_connection_references(existing)
 
         connection.on_packet_received = self._handle_packet_received
         server_disconnected = connection.on_disconnected
@@ -133,6 +248,9 @@ class LANTransport(BaseTransport):
         connection.on_disconnected = handle_disconnected
 
         self._connections[connection.peer_address] = connection
+        self._peer_connections[peer_key] = connection
+        self._address_to_peer_key[connection.peer_address] = peer_key
+
         self._set_state(TransportState.CONNECTED)
         if self.on_peer_connected:
             self.on_peer_connected(connection.peer_address)
@@ -144,7 +262,13 @@ class LANTransport(BaseTransport):
 
     def _handle_peer_disconnected(self, peer_address: str) -> None:
         """Handle peer disconnection from either inbound or outbound socket."""
-        self._connections.pop(peer_address, None)
+        conn = self._connections.get(peer_address)
+        if conn:
+            self._remove_connection_references(conn)
+        else:
+            self._connections.pop(peer_address, None)
+            self._address_to_peer_key.pop(peer_address, None)
+
         if not self.connected_peers:
             self._set_state(
                 TransportState.SCANNING
@@ -155,6 +279,41 @@ class LANTransport(BaseTransport):
             self.on_peer_disconnected(peer_address)
 
     def _handle_packet_received(self, packet: BitchatPacket, peer_address: str) -> None:
+        sender_id_hex = packet.sender_id.hex()
+        conn = self._connections.get(peer_address)
+        if conn:
+            conn.peer_id = sender_id_hex
+        peer_key = f"peer:{sender_id_hex.lower()}"
+        self._address_to_peer_key[peer_address] = peer_key
+
+        existing = self._peer_connections.get(peer_key)
+        if (
+            existing
+            and existing is not conn
+            and existing.is_ready
+            and conn
+            and conn.is_ready
+        ):
+            if self._should_keep_outbound(sender_id_hex, peer_address):
+                to_keep = existing if not existing.is_inbound else conn
+                to_drop = conn if not existing.is_inbound else existing
+            else:
+                to_keep = existing if existing.is_inbound else conn
+                to_drop = conn if existing.is_inbound else existing
+
+            if to_drop is not to_keep:
+                logger.info(
+                    "Packet-driven deduplication for peer %s: keeping %s, dropping %s",
+                    sender_id_hex,
+                    to_keep.peer_address,
+                    to_drop.peer_address,
+                )
+                self._spawn_task(to_drop.close())
+                self._remove_connection_references(to_drop)
+                self._peer_connections[peer_key] = to_keep
+        elif conn and conn.is_ready:
+            self._peer_connections[peer_key] = conn
+
         if self.on_packet_received:
             self.on_packet_received(packet, peer_address)
 
@@ -306,8 +465,10 @@ class LANTransport(BaseTransport):
             await self.discovery.stop()
             await self.server.stop()
 
-            conns = list(self._connections.values())
+            conns = list(set(self._connections.values()))
             self._connections.clear()
+            self._peer_connections.clear()
+            self._address_to_peer_key.clear()
 
         for conn in conns:
             with contextlib.suppress(Exception):
@@ -333,6 +494,22 @@ class LANTransport(BaseTransport):
             raise RuntimeError("Connection failed: transport unavailable")
         self._set_state(TransportState.CONNECTING)
 
+        # Reuse existing connection if one is already active to this peer
+        existing = self._find_existing_connection(address)
+        if existing and existing.is_ready:
+            self._set_state(TransportState.CONNECTED)
+            async with self._lock:
+                self._connections[address] = existing
+                peer_key = self._get_peer_key(address)
+                self._peer_connections[peer_key] = existing
+                self._address_to_peer_key[address] = peer_key
+            logger.debug(
+                "Reusing existing connection %s for target %s",
+                existing.peer_address,
+                address,
+            )
+            return existing
+
         async with self._lock:
             existing = self._connections.get(address)
             if existing and existing.is_ready:
@@ -353,6 +530,9 @@ class LANTransport(BaseTransport):
                 connect_timeout=timeout,
             )
             self._connections[address] = conn
+            peer_key = self._get_peer_key(address)
+            self._peer_connections[peer_key] = conn
+            self._address_to_peer_key[address] = peer_key
 
         try:
             await conn.connect()
@@ -362,7 +542,7 @@ class LANTransport(BaseTransport):
             return conn
         except Exception as e:
             async with self._lock:
-                self._connections.pop(address, None)
+                self._remove_connection_references(conn)
             self._set_state(
                 TransportState.SCANNING
                 if self.discovery.is_running
@@ -372,7 +552,9 @@ class LANTransport(BaseTransport):
 
     async def disconnect_peer(self, address: str) -> None:
         async with self._lock:
-            conn = self._connections.pop(address, None)
+            conn = self._connections.get(address)
+            if conn:
+                self._remove_connection_references(conn)
         if conn:
             await conn.close()
         if not self.connected_peers:
@@ -393,9 +575,27 @@ class LANTransport(BaseTransport):
         self, packet: BitchatPacket, exclude_address: str | None = None
     ) -> None:
         tasks = []
+        sent_connections: set[LANConnection] = set()
+        sent_peer_keys: set[str] = set()
         for addr, conn in list(self._connections.items()):
-            if (exclude_address is None or addr != exclude_address) and conn.is_ready:
-                tasks.append(conn.send_packet(packet))
+            if not conn.is_ready or conn in sent_connections:
+                continue
+            if exclude_address is not None and (
+                addr == exclude_address
+                or getattr(conn, "peer_address", "") == exclude_address
+            ):
+                continue
+
+            peer_key = self._address_to_peer_key.get(addr) or self._get_peer_key(
+                conn.peer_address
+            )
+            if peer_key in sent_peer_keys:
+                continue
+
+            sent_peer_keys.add(peer_key)
+            sent_connections.add(conn)
+            tasks.append(conn.send_packet(packet))
+
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 

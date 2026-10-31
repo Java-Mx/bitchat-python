@@ -8,8 +8,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from bitchat.ble.models import BLEState
+from bitchat.exceptions import FragmentationError, PacketDecodingError
+from bitchat.protocol.constants import MessageType
+from bitchat.protocol.decoder import decode_packet
 from bitchat.protocol.encoder import encode_packet
 from bitchat.protocol.fragmentation import fragment_encoded_packet, should_fragment
+from bitchat.protocol.reassembly import FragmentReassembler
 from bitchat.transport.base import (
     BaseTransport,
     TransportState,
@@ -64,6 +68,9 @@ class BluetoothTransport(BaseTransport):
         self._start_lock = asyncio.Lock()
         self._halt_task: asyncio.Task[Any] | None = None
 
+        self.server_reassembler = FragmentReassembler()
+        self._server_clients: set[str] = set()
+
         # Wire up internal callbacks
         if self.ble_manager is not None:
             self.ble_manager.on_packet_received = self._handle_manager_packet
@@ -76,6 +83,10 @@ class BluetoothTransport(BaseTransport):
 
         if self.ble_server is not None:
             self.ble_server.on_data_received = self._handle_server_data
+            self.ble_server.on_client_subscribed = self._handle_server_client_subscribed
+            self.ble_server.on_client_unsubscribed = (
+                self._handle_server_client_unsubscribed
+            )
 
     @property
     def transport_type(self) -> TransportType:
@@ -130,9 +141,56 @@ class BluetoothTransport(BaseTransport):
         if self.on_packet_received:
             self.on_packet_received(packet, peer_address)
 
+    def _handle_server_client_subscribed(self, client_id: str) -> None:
+        if client_id:
+            self._server_clients.add(client_id)
+
+    def _handle_server_client_unsubscribed(self, client_id: str) -> None:
+        self._server_clients.discard(client_id)
+
     def _handle_server_data(self, data: bytes, client_address: str = "") -> None:
-        # Pass server received data to listener if handled externally or reassembled
-        pass
+        if client_address:
+            self._server_clients.add(client_address)
+
+        try:
+            packet = decode_packet(data)
+        except PacketDecodingError as e:
+            logger.warning(
+                "Discarding malformed packet from server client %s: %s",
+                client_address,
+                e,
+            )
+            return
+
+        if packet.message_type in (
+            MessageType.FragmentStart,
+            MessageType.FragmentContinue,
+            MessageType.FragmentEnd,
+        ):
+            try:
+                reassembled_wire = self.server_reassembler.add_fragment_packet(packet)
+            except (FragmentationError, PacketDecodingError) as e:
+                logger.warning(
+                    "Error reassembling fragment from server client %s: %s",
+                    client_address,
+                    e,
+                )
+                return
+
+            if reassembled_wire is not None:
+                try:
+                    full_packet = decode_packet(reassembled_wire)
+                    if self.on_packet_received:
+                        self.on_packet_received(full_packet, client_address)
+                except PacketDecodingError as e:
+                    logger.warning(
+                        "Failed to decode reassembled packet from server client %s: %s",
+                        client_address,
+                        e,
+                    )
+        else:
+            if self.on_packet_received:
+                self.on_packet_received(packet, client_address)
 
     def _handle_peer_discovered(self, peer: Any) -> None:
         if self._state == TransportState.SCANNING:
@@ -378,6 +436,8 @@ class BluetoothTransport(BaseTransport):
                 await self.ble_manager.shutdown()
             with contextlib.suppress(Exception):
                 await self.ble_server.stop()
+            self.server_reassembler.clear()
+            self._server_clients.clear()
 
     async def start_discovery(self) -> None:
         if not self._central_supported:
@@ -417,7 +477,54 @@ class BluetoothTransport(BaseTransport):
     async def disconnect_peer(self, address: str) -> None:
         await self.ble_manager.disconnect_peer(address)
 
+    def _is_server_client(self, address: str) -> bool:
+        if address in self._server_clients:
+            return True
+        if self.ble_server is not None:
+            custom_backend = getattr(self.ble_server, "_custom_backend", None)
+            if custom_backend is not None and hasattr(custom_backend, "clients"):
+                for client in custom_backend.clients:
+                    if getattr(client, "address", None) == address:
+                        return True
+            server_clients = getattr(self.ble_server, "connected_clients", None)
+            if server_clients and address in server_clients:
+                return True
+        return False
+
+    async def _send_server_notification(self, data: bytes, client_id: str) -> None:
+        if not self.ble_server:
+            return
+        try:
+            await self.ble_server.send_notification(data, client_id=client_id)
+        except TypeError:
+            send_fn: Any = self.ble_server.send_notification
+            try:
+                await send_fn(client_id, data)
+            except TypeError:
+                await self.ble_server.send_notification(data)
+
     async def send_to_peer(self, address: str, packet: BitchatPacket) -> None:
+        if (
+            self._is_server_client(address)
+            and self.ble_server
+            and self.ble_server.is_advertising
+        ):
+            encoded = encode_packet(packet, add_padding=True)
+            if should_fragment(encoded):
+                fragments = fragment_encoded_packet(
+                    encoded,
+                    sender_id=packet.sender_id,
+                    original_message_type=packet.message_type,
+                )
+                for i, frag in enumerate(fragments):
+                    frag_bytes = encode_packet(frag, add_padding=False)
+                    await self._send_server_notification(frag_bytes, address)
+                    if i < len(fragments) - 1:
+                        await asyncio.sleep(self.inter_fragment_delay)
+            else:
+                await self._send_server_notification(encoded, address)
+            return
+
         if self.ble_manager:
             await self.ble_manager.send_to_peer(address, packet)
 
@@ -438,7 +545,7 @@ class BluetoothTransport(BaseTransport):
                     original_message_type=packet.message_type,
                 )
                 for i, frag in enumerate(fragments):
-                    frag_bytes = encode_packet(frag, add_padding=True)
+                    frag_bytes = encode_packet(frag, add_padding=False)
                     await self.ble_server.send_notification(frag_bytes)
                     if i < len(fragments) - 1:
                         await asyncio.sleep(self.inter_fragment_delay)

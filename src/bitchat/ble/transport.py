@@ -217,7 +217,7 @@ class BLETransport:
         )
 
         for i, frag_pkt in enumerate(fragments):
-            frag_bytes = encode_packet(frag_pkt, add_padding=True)
+            frag_bytes = encode_packet(frag_pkt, add_padding=False)
             await self.connection.write(frag_bytes, response=False)
             if i < len(fragments) - 1:
                 await asyncio.sleep(self.inter_fragment_delay)

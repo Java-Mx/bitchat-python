@@ -9,6 +9,9 @@ block_cipher = None
 # Determine repository root and source directories
 repo_root = Path.cwd().resolve()
 src_dir = repo_root / "src"
+win_pkg_dir = repo_root / "packaging" / "windows"
+icon_file = win_pkg_dir / "assets" / "bitchat.ico"
+version_file = win_pkg_dir / "version_info.txt"
 
 # Collect all package data and assets
 datas = []
@@ -61,6 +64,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(icon_file) if icon_file.exists() else None,
+    version=str(version_file) if version_file.exists() else None,
 )
 
 coll = COLLECT(

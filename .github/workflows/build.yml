@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: uv run python packaging/windows/build.py
 
-      - name: Verify Packaging Artifacts
+      - name: Verify Packaging Artifacts & Installer Lifecycle
         shell: pwsh
         run: |
           $version = (Get-Content pyproject.toml | Select-String '^version = "(.*)"').Matches.Groups[1].Value
@@ -91,6 +91,18 @@ jobs:
           $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
           $recordedHash = (Get-Content $shaFile).Split(' ')[0].Trim()
           if ($hash -ne $recordedHash) { throw "Installer SHA-256 mismatch: $hash vs $recordedHash" }
+          $testInstallDir = Join-Path $env:RUNNER_TEMP "BitChat-CI-Verify"
+          $env:BITCHAT_STARTUP_DIR = Join-Path $env:RUNNER_TEMP "BitChat-CI-Startup"
+          Start-Process -FilePath (Resolve-Path $installer).Path -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$testInstallDir`" /TASKS=`"!desktopicon,!startmenuicon,!envPath,!launchapp`"" -Wait -NoNewWindow
+          $installedExe = Join-Path $testInstallDir "bitchat.exe"
+          if (-not (Test-Path $installedExe)) { throw "Installed binary missing at $installedExe" }
+          & $installedExe --version
+          & $installedExe --help
+          & $installedExe --startup status
+          $uninstaller = Join-Path $testInstallDir "unins000.exe"
+          if (Test-Path $uninstaller) {
+            Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait -NoNewWindow
+          }
           Write-Host "Verification succeeded for $installer ($hash)"
 
       - name: Upload Windows Packaging Artifacts
@@ -100,6 +112,7 @@ jobs:
           path: |
             dist/BitChat-*-windows-x64.exe
             dist/BitChat-*-windows-x64.exe.sha256
+            dist/BitChat-*-windows-x64.metadata.json
             manifests/
             packaging/windows/winget/
 

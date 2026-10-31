@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Download BitChat 0.2.0 for Windows (x64) — Java-Mx</title>
+  <link rel="icon" type="image/svg+xml" href="assets/Bitchat-Icon-Framed.svg" />
+  <link rel="alternate icon" type="image/x-icon" href="assets/bitchat.ico" />
+  <style>
+    :root {
+      --bg-primary: #071826;
+      --bg-panel: #0c2235;
+      --bg-card: #102a42;
+      --border: #1e4263;
+      --accent: #22d3ee;
+      --accent-hover: #67e8f9;
+      --text-main: #f0f6fc;
+      --text-muted: #94a3b8;
+      --warn-bg: #2c2212;
+      --warn-border: #d97706;
+      --ok-bg: #0f2922;
+      --ok-border: #10b981;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand-wordmark {
+      height: 46px;
+      width: auto;
+      display: block;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      margin-left: 1.25rem;
+      font-size: 0.95rem;
+    }
+    .nav-links a:hover {
+      color: var(--accent);
+    }
+    .hero {
+      margin-top: 2rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+    }
+    .hero-top {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .hero-symbol {
+      width: 64px;
+      height: auto;
+    }
+    h1 {
+      margin: 0 0 0.35rem 0;
+      font-size: 1.85rem;
+    }
+    .subtitle {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+    .meta-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+    }
+    .meta-label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    .meta-value {
+      font-weight: 600;
+      margin-top: 0.2rem;
+      word-break: break-word;
+    }
+    .checksum-box {
+      background: #040f19;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.88rem;
+      overflow-x: auto;
+      margin-bottom: 1.25rem;
+    }
+    .legal-consent {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.15rem;
+      margin-bottom: 1.25rem;
+    }
+    .legal-consent label {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      margin-bottom: 0.6rem;
+      cursor: pointer;
+    }
+    .legal-note {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin: 0.5rem 0 0 0;
+    }
+    .btn-primary {
+      display: inline-block;
+      background: var(--accent);
+      color: #041019;
+      font-weight: 700;
+      text-decoration: none;
+      padding: 0.85rem 1.6rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+    .btn-primary.disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .badge-unsigned {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      color: #fbbf24;
+    }
+    .badge-verified {
+      background: var(--ok-bg);
+      border: 1px solid var(--ok-border);
+      color: #34d399;
+    }
+    section {
+      margin-top: 2.25rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem 1.75rem;
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 1.3rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    pre {
+      background: #040f19;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.88rem;
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="assets/bitchat-wordmark-dark.png" alt="BitChat" class="brand-wordmark" />
+      <nav class="nav-links">
+        <a href="https://github.com/Java-Mx/bitchat-python">GitHub Repository</a>
+        <a href="https://github.com/Java-Mx/bitchat-python/releases">All Releases</a>
+        <a href="https://github.com/Java-Mx/bitchat-python/blob/main/TERMS_OF_USE.md">Terms of Use</a>
+        <a href="https://github.com/Java-Mx/bitchat-python/blob/main/PRIVACY_POLICY.md">Privacy Policy</a>
+        <a href="https://github.com/Java-Mx/bitchat-python/blob/main/SECURITY.md">Security</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <div class="hero-top">
+        <img src="assets/bitchat-symbol-dark.png" alt="BitChat Symbol" class="hero-symbol" />
+        <div>
+          <h1>Download BitChat for Windows (x64)</h1>
+          <p class="subtitle">
+            Private peer-to-peer encrypted terminal messaging over Bluetooth Low Energy (BLE) and LAN.
+            No servers, no accounts, and no manual Python installation required.
+          </p>
+        </div>
+      </div>
+
+      <div class="meta-grid">
+        <div class="meta-item">
+          <div class="meta-label">Version</div>
+          <div class="meta-value">0.2.0</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Publisher</div>
+          <div class="meta-value">Java-Mx</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Architecture &amp; OS</div>
+          <div class="meta-value">Windows 10 (1809+) / Windows 11 (x64)</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Installer Size</div>
+          <div class="meta-value">17.81 MB (18,671,755 bytes)</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Release Date</div>
+          <div class="meta-value">2026-10-31</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Digital Signature Status</div>
+          <div class="meta-value"><span class="badge badge-unsigned">Unsigned Open-Source Build (Verify via SHA-256)</span></div>
+        </div>
+      </div>
+
+      <div class="checksum-box">
+        <strong>Official Installer Filename:</strong> BitChat-0.2.0-windows-x64.exe<br />
+        <strong>SHA-256 Checksum:</strong> F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E<br />
+        <strong>Signature Details:</strong> NotSigned — No commercial code-signing certificate configured yet. Do not treat as a Microsoft-verified publisher until a real certificate signature is verified. Always verify the SHA-256 checksum below.
+      </div>
+
+      <div class="legal-consent">
+        <label>
+          <input type="checkbox" id="accept-terms" />
+          <span>
+            I have read and agree to the
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/TERMS_OF_USE.md" target="_blank" rel="noopener noreferrer">BitChat Terms of Use</a>
+            (Draft — pending publisher/legal review).
+          </span>
+        </label>
+        <label>
+          <input type="checkbox" id="ack-privacy" />
+          <span>
+            I have read the
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/PRIVACY_POLICY.md" target="_blank" rel="noopener noreferrer">BitChat Privacy Policy</a>
+            (Draft — zero telemetry, no accounts, local-only keys).
+          </span>
+        </label>
+        <p class="legal-note">
+          <strong>Privacy Guarantee:</strong> Downloading BitChat requires no email address, no account registration,
+          and no tracking or marketing consent. Acknowledging the Privacy Policy is informational only.
+        </p>
+      </div>
+
+      <div>
+        <a id="download-btn" class="btn-primary" href="https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.0/BitChat-0.2.0-windows-x64.exe">
+          Download BitChat-0.2.0-windows-x64.exe (17.81 MB (18,671,755 bytes))
+        </a>
+        <p class="legal-note">
+          Official source: <a href="https://github.com/Java-Mx/bitchat-python/releases">GitHub Releases (Java-Mx/bitchat-python)</a>
+        </p>
+      </div>
+    </div>
+
+    <section>
+      <h2>System Requirements</h2>
+      <ul>
+        <li><strong>Operating System:</strong> Windows 10 (version 1809 / build 17763 or newer) or Windows 11 (64-bit x64).</li>
+        <li><strong>Transports:</strong> Bluetooth 4.0+ BLE adapter with Windows WinRT support, and/or Wi-Fi / Ethernet Local Area Network (LAN).</li>
+        <li><strong>Disk Space:</strong> ~80 MB free disk space.</li>
+        <li><strong>Privileges:</strong> Standard user account (installs to <code>%LOCALAPPDATA%\Programs\BitChat</code> by default; no Administrator rights required).</li>
+        <li><strong>Runtime:</strong> Self-contained (Python, Textual, Bleak, WinRT, and Cryptography are bundled).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Installation &amp; Verification Instructions</h2>
+      <p><strong>1. Verify the SHA-256 Checksum in PowerShell:</strong></p>
+      <pre>Get-FileHash .\BitChat-0.2.0-windows-x64.exe -Algorithm SHA256
+# Expected Hash: F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E</pre>
+      <p><strong>2. Check Authenticode Signature Status:</strong></p>
+      <pre>Get-AuthenticodeSignature .\BitChat-0.2.0-windows-x64.exe</pre>
+      <p><strong>3. Run the Installer (Interactive or WinGet):</strong></p>
+      <pre># Run the downloaded installer wizard:
+.\BitChat-0.2.0-windows-x64.exe
+
+# Or install via Windows Package Manager (WinGet):
+winget install Java-Mx.BitChat</pre>
+      <p><strong>4. Launch BitChat from a new PowerShell window:</strong></p>
+      <pre>bitchat
+bitchat --version
+bitchat --help
+bitchat --configure</pre>
+    </section>
+
+    <section>
+      <h2>Security, Code Signing &amp; Windows SmartScreen</h2>
+      <ul>
+        <li><strong>Authenticode vs. SmartScreen Reputation:</strong> An Authenticode digital signature verifies publisher identity and guarantees that the binary has not been modified since signing. Windows Defender SmartScreen additionally evaluates download reputation across Windows users; even newly signed installers may display a SmartScreen prompt until reputation is established.</li>
+        <li><strong>Current Signing Status:</strong> NotSigned — No commercial code-signing certificate configured yet. Do not treat as a Microsoft-verified publisher until a real certificate signature is verified. Always verify the SHA-256 checksum below.</li>
+        <li><strong>Never Disable Security Protections:</strong> Do not disable Windows Defender or SmartScreen in system settings. Instead, verify the SHA-256 hash above against the official GitHub Release checksum file (<code>BitChat-0.2.0-windows-x64.exe.sha256</code>).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Changelog &amp; Troubleshooting</h2>
+      <ul>
+        <li><strong>v0.2.0 Highlights:</strong> Self-contained Windows x64 installer 2.0 with official BitChat branding, Terms of Use &amp; Privacy Policy wizard screens, user-scope default installation, safe PATH management, optional per-user Windows sign-in startup, and identity-preserving upgrades/uninstallation. Full history in <a href="https://github.com/Java-Mx/bitchat-python/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</li>
+        <li><strong><code>bitchat</code> not recognized after install:</strong> Close and reopen your PowerShell or Command Prompt window so the updated user <code>PATH</code> takes effect.</li>
+        <li><strong>Manage Windows Startup at any time:</strong> Run <code>bitchat --startup status</code>, <code>bitchat --startup enable</code>, or <code>bitchat --startup disable</code>, or re-run the installer.</li>
+        <li><strong>BLE GATT Status 3 on Windows:</strong> Some Windows Bluetooth drivers restrict GATT peripheral hosting; BitChat keeps BLE Central scanning active and offers one-click fallback to LAN transport.</li>
+      </ul>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      var terms = document.getElementById('accept-terms');
+      var privacy = document.getElementById('ack-privacy');
+      var btn = document.getElementById('download-btn');
+      if (!terms || !privacy || !btn) return;
+      function syncState() {
+        if (terms.checked && privacy.checked) {
+          btn.classList.remove('disabled');
+          btn.removeAttribute('aria-disabled');
+        } else {
+          btn.classList.add('disabled');
+          btn.setAttribute('aria-disabled', 'true');
+        }
+      }
+      terms.addEventListener('change', syncState);
+      privacy.addEventListener('change', syncState);
+      syncState();
+    })();
+  </script>
+</body>
+</html>

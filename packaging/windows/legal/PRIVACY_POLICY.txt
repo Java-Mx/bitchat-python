@@ -1,0 +1,69 @@
+========================================================================
+BITCHAT PRIVACY POLICY
+DRAFT — PENDING PUBLISHER AND LEGAL REVIEW BEFORE PUBLIC RELEASE
+========================================================================
+
+Application: BitChat (Java-Mx.BitChat)
+Publisher:   Java-Mx
+Repository:  https://github.com/Java-Mx/bitchat-python
+Effective:   October 2026
+
+IMPORTANT NOTICE: This Privacy Policy draft is based on a technical
+audit of the bitchat-python codebase and is pending publisher/legal
+review before formal public release.
+
+1. ZERO TELEMETRY, NO ACCOUNTS, NO CENTRAL SERVERS
+BitChat is a local-first, peer-to-peer terminal messaging application:
+- No Personal Data Collection: BitChat does NOT collect your name, email
+  address, phone number, IP address, or personal identity.
+- No Analytics or Telemetry: BitChat contains NO analytics SDKs, crash
+  reporters, usage tracking, or telemetry transmission code. It makes
+  zero outbound connections to publisher or third-party servers.
+- No Accounts or Registration: No account or sign-up is required to
+  download, install, or use BitChat.
+- No Marketing or Tracking Consent: Acknowledging this Privacy Policy
+  during setup is informational only and is NEVER treated as consent to
+  analytics, tracking, or marketing.
+  (Note: internal methods named get_telemetry() in the codebase return
+  strictly local, in-memory hardware/transport status for your own TUI
+  status bar and /status command; nothing ever leaves your device.)
+
+2. DATA STORED LOCALLY ON YOUR DEVICE
+BitChat stores local data in %USERPROFILE%\.bitchat\:
+- identity.json: Your locally generated Ed25519 and X25519 private keys,
+  fingerprint, and peer ID, restricted to your Windows user account via
+  protected Windows file ACLs.
+- config.json: Your local display nickname (default "Anonymous"), UI
+  theme/density/accent, active transport ("bluetooth" or "lan"), mesh
+  hop limit, fragment delay, and keybindings.
+- Installer Metadata: Standard per-user uninstall entries under HKCU and
+  an optional per-user Startup shortcut (%APPDATA%\Microsoft\Windows\
+  Start Menu\Programs\Startup\BitChat.lnk) only if you explicitly enable
+  "Start BitChat automatically when Windows starts".
+
+Upgrades and Uninstallation:
+- Upgrades preserve %USERPROFILE%\.bitchat\ automatically.
+- Uninstallation preserves %USERPROFILE%\.bitchat\ by default so you do
+  not lose your private identity keys, while offering an explicit,
+  separate option if you wish to permanently delete local user data.
+
+3. DATA SHARED OVER PEER-TO-PEER TRANSPORTS (BLE & LAN)
+When you run BitChat with Bluetooth or LAN transport enabled:
+- BLE Transport: Broadcasts and scans for the BitChat GATT service UUID
+  (6E400001-B5A3-F393-E0A9-E50E24DCCA9E). Nearby BLE peers can observe
+  your node's BLE advertisement, nickname, peer ID, and public keys.
+- LAN Transport: Broadcasts UDP discovery beacons (port 24024 / 41234)
+  and accepts framed TCP connections (port 24025 / 41235) on your local
+  subnet. Peers on the same subnet can observe your local IP address,
+  nickname, peer ID, and public keys.
+- Messages: #public messages are broadcast to reachable mesh nodes.
+  Direct messages (/dm) are end-to-end encrypted with Noise XX
+  (Noise_XX_25519_ChaChaPoly_SHA256) or AES-256-GCM.
+
+4. FUTURE OPTIONAL FEATURES
+If optional diagnostics or network features are ever introduced in a
+future release, they will require separate, informed opt-in consent.
+
+5. COMPLETE PRIVACY POLICY & LINKS
+- Privacy Policy: https://github.com/Java-Mx/bitchat-python/blob/main/PRIVACY_POLICY.md
+- Terms of Use:   https://github.com/Java-Mx/bitchat-python/blob/main/TERMS_OF_USE.md

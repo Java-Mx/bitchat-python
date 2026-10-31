@@ -9,9 +9,20 @@ Bluetooth hardware or system D-Bus daemon.
 from __future__ import annotations
 
 import sys
+import types
 from typing import TYPE_CHECKING, Any
 
-from dbus_fast import Message, Variant
+from bitchat.ble.bluez import (
+    BusType,
+    DBusError,
+    Message,
+    MessageBus,
+    MessageFlag,
+    MessageType,
+    PropertyAccess,
+    PropertyAccessFlag,
+    Variant,
+)
 
 if TYPE_CHECKING:
     import pytest
@@ -251,12 +262,46 @@ class FakeBlueZ:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> FakeBlueZ:
         """Patch system MessageBus and platform detection to use this FakeBlueZ."""
         monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr("bitchat.ble.bluez.HAS_DBUS_FAST", True)
 
         async def fake_connect(*args: Any, **kwargs: Any) -> FakeBlueZBus:
             self.bus.is_connected = True
             return self.bus
 
-        monkeypatch.setattr("dbus_fast.aio.MessageBus.connect", fake_connect)
+        monkeypatch.setattr(MessageBus, "connect", fake_connect)
+
+        try:
+            import dbus_fast.aio  # pyright: ignore[reportMissingImports]
+
+            monkeypatch.setattr(dbus_fast.aio.MessageBus, "connect", fake_connect)
+        except ImportError:
+            aio_mod: Any = types.ModuleType("dbus_fast.aio")
+            aio_mod.MessageBus = MessageBus
+            errors_mod: Any = types.ModuleType("dbus_fast.errors")
+            errors_mod.DBusError = DBusError
+            constants_mod: Any = types.ModuleType("dbus_fast.constants")
+            constants_mod.BusType = BusType
+            constants_mod.MessageFlag = MessageFlag
+            constants_mod.MessageType = MessageType
+            constants_mod.PropertyAccess = PropertyAccess
+            constants_mod.PropertyAccessFlag = PropertyAccessFlag
+            root_mod: Any = types.ModuleType("dbus_fast")
+            root_mod.__path__ = []
+            root_mod.BusType = BusType
+            root_mod.Message = Message
+            root_mod.MessageFlag = MessageFlag
+            root_mod.MessageType = MessageType
+            root_mod.PropertyAccess = PropertyAccess
+            root_mod.PropertyAccessFlag = PropertyAccessFlag
+            root_mod.Variant = Variant
+            root_mod.aio = aio_mod
+            root_mod.constants = constants_mod
+            root_mod.errors = errors_mod
+            monkeypatch.setitem(sys.modules, "dbus_fast", root_mod)
+            monkeypatch.setitem(sys.modules, "dbus_fast.aio", aio_mod)
+            monkeypatch.setitem(sys.modules, "dbus_fast.constants", constants_mod)
+            monkeypatch.setitem(sys.modules, "dbus_fast.errors", errors_mod)
+
         return self
 
     def get_characteristic(self) -> Any | None:

@@ -1,6 +1,6 @@
 name: bitchat
 base: core24
-version: '0.1.0'
+version: '0.2.0'
 summary: Python terminal client for BitChat BLE and LAN mesh messaging
 description: |
   BitChat is a decentralized peer-to-peer terminal chat client operating
