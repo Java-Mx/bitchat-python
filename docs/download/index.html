@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Download BitChat 0.2.0 for Windows (x64) — Java-Mx</title>
+  <title>Download BitChat 0.2.1 for Windows (x64) — Java-Mx</title>
   <link rel="icon" type="image/svg+xml" href="assets/Bitchat-Icon-Framed.svg" />
   <link rel="alternate icon" type="image/x-icon" href="assets/bitchat.ico" />
   <style>
@@ -224,7 +224,7 @@
       <div class="meta-grid">
         <div class="meta-item">
           <div class="meta-label">Version</div>
-          <div class="meta-value">0.2.0</div>
+          <div class="meta-value">0.2.1</div>
         </div>
         <div class="meta-item">
           <div class="meta-label">Publisher</div>
@@ -236,7 +236,7 @@
         </div>
         <div class="meta-item">
           <div class="meta-label">Installer Size</div>
-          <div class="meta-value">17.81 MB (18,671,755 bytes)</div>
+          <div class="meta-value">17.89 MB (18,759,477 bytes)</div>
         </div>
         <div class="meta-item">
           <div class="meta-label">Release Date</div>
@@ -249,8 +249,8 @@
       </div>
 
       <div class="checksum-box">
-        <strong>Official Installer Filename:</strong> BitChat-0.2.0-windows-x64.exe<br />
-        <strong>SHA-256 Checksum:</strong> F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E<br />
+        <strong>Official Installer Filename:</strong> BitChat-0.2.1-windows-x64.exe<br />
+        <strong>SHA-256 Checksum:</strong> 7D8944F69A958C8E7BBFF29EF23605181151D0E52AB18F2102405D26B657AFF5<br />
         <strong>Signature Details:</strong> NotSigned — No commercial code-signing certificate configured yet. Do not treat as a Microsoft-verified publisher until a real certificate signature is verified. Always verify the SHA-256 checksum below.
       </div>
 
@@ -278,8 +278,8 @@
       </div>
 
       <div>
-        <a id="download-btn" class="btn-primary" href="https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.0/BitChat-0.2.0-windows-x64.exe">
-          Download BitChat-0.2.0-windows-x64.exe (17.81 MB (18,671,755 bytes))
+        <a id="download-btn" class="btn-primary" href="https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.1/BitChat-0.2.1-windows-x64.exe">
+          Download BitChat-0.2.1-windows-x64.exe (17.89 MB (18,759,477 bytes))
         </a>
         <p class="legal-note">
           Official source: <a href="https://github.com/Java-Mx/bitchat-python/releases">GitHub Releases (Java-Mx/bitchat-python)</a>
@@ -301,13 +301,13 @@
     <section>
       <h2>Installation &amp; Verification Instructions</h2>
       <p><strong>1. Verify the SHA-256 Checksum in PowerShell:</strong></p>
-      <pre>Get-FileHash .\BitChat-0.2.0-windows-x64.exe -Algorithm SHA256
-# Expected Hash: F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E</pre>
+      <pre>Get-FileHash .\BitChat-0.2.1-windows-x64.exe -Algorithm SHA256
+# Expected Hash: 7D8944F69A958C8E7BBFF29EF23605181151D0E52AB18F2102405D26B657AFF5</pre>
       <p><strong>2. Check Authenticode Signature Status:</strong></p>
-      <pre>Get-AuthenticodeSignature .\BitChat-0.2.0-windows-x64.exe</pre>
+      <pre>Get-AuthenticodeSignature .\BitChat-0.2.1-windows-x64.exe</pre>
       <p><strong>3. Run the Installer (Interactive or WinGet):</strong></p>
       <pre># Run the downloaded installer wizard:
-.\BitChat-0.2.0-windows-x64.exe
+.\BitChat-0.2.1-windows-x64.exe
 
 # Or install via Windows Package Manager (WinGet):
 winget install Java-Mx.BitChat</pre>
@@ -323,14 +323,14 @@ bitchat --configure</pre>
       <ul>
         <li><strong>Authenticode vs. SmartScreen Reputation:</strong> An Authenticode digital signature verifies publisher identity and guarantees that the binary has not been modified since signing. Windows Defender SmartScreen additionally evaluates download reputation across Windows users; even newly signed installers may display a SmartScreen prompt until reputation is established.</li>
         <li><strong>Current Signing Status:</strong> NotSigned — No commercial code-signing certificate configured yet. Do not treat as a Microsoft-verified publisher until a real certificate signature is verified. Always verify the SHA-256 checksum below.</li>
-        <li><strong>Never Disable Security Protections:</strong> Do not disable Windows Defender or SmartScreen in system settings. Instead, verify the SHA-256 hash above against the official GitHub Release checksum file (<code>BitChat-0.2.0-windows-x64.exe.sha256</code>).</li>
+        <li><strong>Never Disable Security Protections:</strong> Do not disable Windows Defender or SmartScreen in system settings. Instead, verify the SHA-256 hash above against the official GitHub Release checksum file (<code>BitChat-0.2.1-windows-x64.exe.sha256</code>).</li>
       </ul>
     </section>
 
     <section>
       <h2>Changelog &amp; Troubleshooting</h2>
       <ul>
-        <li><strong>v0.2.0 Highlights:</strong> Self-contained Windows x64 installer 2.0 with official BitChat branding, Terms of Use &amp; Privacy Policy wizard screens, user-scope default installation, safe PATH management, optional per-user Windows sign-in startup, and identity-preserving upgrades/uninstallation. Full history in <a href="https://github.com/Java-Mx/bitchat-python/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</li>
+        <li><strong>v0.2.1 Highlights:</strong> Self-contained Windows x64 installer 2.0 with official BitChat branding, Terms of Use &amp; Privacy Policy wizard screens, user-scope default installation, safe PATH management, optional per-user Windows sign-in startup, and identity-preserving upgrades/uninstallation. Full history in <a href="https://github.com/Java-Mx/bitchat-python/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</li>
         <li><strong><code>bitchat</code> not recognized after install:</strong> Close and reopen your PowerShell or Command Prompt window so the updated user <code>PATH</code> takes effect.</li>
         <li><strong>Manage Windows Startup at any time:</strong> Run <code>bitchat --startup status</code>, <code>bitchat --startup enable</code>, or <code>bitchat --startup disable</code>, or re-run the installer.</li>
         <li><strong>BLE GATT Status 3 on Windows:</strong> Some Windows Bluetooth drivers restrict GATT peripheral hosting; BitChat keeps BLE Central scanning active and offers one-click fallback to LAN transport.</li>

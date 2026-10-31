@@ -5,11 +5,11 @@
 ; =============================================================================
 
 #ifndef MyAppVersion
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #endif
 
 #ifndef MyOutputBaseFilename
-#define MyOutputBaseFilename "BitChat-0.2.0-windows-x64"
+#define MyOutputBaseFilename "BitChat-0.2.1-windows-x64"
 #endif
 
 #define MyAppName "BitChat"

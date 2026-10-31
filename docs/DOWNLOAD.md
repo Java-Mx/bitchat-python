@@ -9,15 +9,15 @@
 | Field | Value |
 |---|---|
 | **Application** | BitChat (`Java-Mx.BitChat`) |
-| **Version** | `0.2.0` |
+| **Version** | `0.2.1` |
 | **Publisher** | `Java-Mx` |
 | **Platform / Architecture** | Windows 10 (1809+) & Windows 11 (`x64`) |
-| **Installer Filename** | `BitChat-0.2.0-windows-x64.exe` |
-| **Installer File Size** | 17.81 MB (18,671,755 bytes) |
+| **Installer Filename** | `BitChat-0.2.1-windows-x64.exe` |
+| **Installer File Size** | 17.89 MB (18,759,477 bytes) |
 | **Release Date** | `2026-10-31` |
-| **SHA-256 Checksum** | `F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E` |
+| **SHA-256 Checksum** | `7D8944F69A958C8E7BBFF29EF23605181151D0E52AB18F2102405D26B657AFF5` |
 | **Digital Signature Status** | NotSigned — No commercial code-signing certificate configured yet. Do not treat as a Microsoft-verified publisher until a real certificate signature is verified. Always verify the SHA-256 checksum below. |
-| **Official Download URL** | [https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.0/BitChat-0.2.0-windows-x64.exe](https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.0/BitChat-0.2.0-windows-x64.exe) |
+| **Official Download URL** | [https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.1/BitChat-0.2.1-windows-x64.exe](https://github.com/Java-Mx/bitchat-python/releases/download/v0.2.1/BitChat-0.2.1-windows-x64.exe) |
 | **All Releases** | [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) |
 
 ---
@@ -46,15 +46,15 @@ Before downloading or installing BitChat, please review:
 
 ## Checksum & Signature Verification
 
-After downloading `BitChat-0.2.0-windows-x64.exe`, verify its integrity in PowerShell before running Setup:
+After downloading `BitChat-0.2.1-windows-x64.exe`, verify its integrity in PowerShell before running Setup:
 
 ```powershell
 # 1. Verify SHA-256 Checksum
-Get-FileHash .\BitChat-0.2.0-windows-x64.exe -Algorithm SHA256
-# Expected: F08C9DFA91FE0F1755574D4C2055166E4B95782DBF6C92748B73B7A723F3BC3E
+Get-FileHash .\BitChat-0.2.1-windows-x64.exe -Algorithm SHA256
+# Expected: 7D8944F69A958C8E7BBFF29EF23605181151D0E52AB18F2102405D26B657AFF5
 
 # 2. Inspect Authenticode Signature
-Get-AuthenticodeSignature .\BitChat-0.2.0-windows-x64.exe | Format-List *
+Get-AuthenticodeSignature .\BitChat-0.2.1-windows-x64.exe | Format-List *
 ```
 
 ---
@@ -62,8 +62,8 @@ Get-AuthenticodeSignature .\BitChat-0.2.0-windows-x64.exe | Format-List *
 ## Installation, Startup, Upgrade & Uninstallation
 
 ### Interactive Setup Wizard
-Run `BitChat-0.2.0-windows-x64.exe` to step through the 7-screen setup wizard:
-1. **Welcome** — BitChat branding, version `0.2.0`, and publisher (`Java-Mx`).
+Run `BitChat-0.2.1-windows-x64.exe` to step through the 7-screen setup wizard:
+1. **Welcome** — BitChat branding, version `0.2.1`, and publisher (`Java-Mx`).
 2. **Terms of Use** — Scrollable Terms of Use with required acceptance checkbox.
 3. **Privacy Policy** — Scrollable Privacy Policy with required acknowledgment checkbox.
 4. **Installation Location** — Defaults to `%LOCALAPPDATA%\Programs\BitChat` with permission, disk-space, and conflict validation.

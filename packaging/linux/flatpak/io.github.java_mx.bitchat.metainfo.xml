@@ -28,6 +28,11 @@
     <binary>bitchat</binary>
   </provides>
   <releases>
+    <release version="0.2.1" date="2026-10-31">
+      <description>
+        <p>Device identity hardening with self-connection prevention, rotating redacted diagnostic logging, TUI shutdown fixes and a working Linux and Windows CI matrix.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-30">
       <description>
         <p>Windows Installer 2.0 release with official branding, Terms of Use &amp; Privacy Policy wizard, per-user startup management, single-instance guard, and Authenticode pipeline.</p>

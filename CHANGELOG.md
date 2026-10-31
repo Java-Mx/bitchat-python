@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-31
+
+### Added
+- **Device identity and self-connection prevention (M6):** a persistent device identity
+  is now distinct from per-process instance IDs and per-connection sessions. Two BitChat
+  instances sharing the same profile on one machine recognise each other as the same
+  device and no longer discover or connect to themselves over BLE, LAN or Noise.
+  Identity loading is atomic and guarded by a cross-platform inter-process lock
+  (`msvcrt` on Windows, `fcntl` on Linux).
+- **Diagnostic logging (M5):** rotating file log (`bitchat.log`, 10 MB x 5 backups) with
+  redaction of private keys, tokens and credentials; console logging is suppressed in
+  TUI mode to avoid screen tearing.
+- **Test suites:** mesh routing/rate-limit tests, a 132-test tiered end-to-end suite,
+  M4 crypto hardening/adversarial tests and M5 lifecycle/stress tests.
+
+### Changed
+- Switching transport now preserves the persistent device identity instead of creating a
+  new one.
+- TUI shutdown cancels background tasks and stops the coordinator exactly once.
+- Broad exception suppression in the TUI was replaced with targeted handling and logging.
+
+### Fixed
+- The TUI no longer raises `NoMatches` when an input event arrives before the
+  autocomplete palette is mounted.
+- Noise handshake rejects self-handshakes and hardens nonce-0 replay bounds.
+- CI and Build workflows contained invalid YAML (unquoted `: ` in step names) and never
+  ran; they now run on Linux and Windows (Python 3.12 and 3.13).
+
+### Known limitations
+- No Flatpak bundle is attached to the release.
+- Windows installer authenticode signing depends on repository signing secrets.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

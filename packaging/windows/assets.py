@@ -725,7 +725,7 @@ VSVersionInfo(
     return target
 
 
-def ensure_windows_assets(version: str = "0.2.0") -> dict[str, Path]:
+def ensure_windows_assets(version: str = "0.2.1") -> dict[str, Path]:
     """Sync official BitChat assets and generate Windows installer icons/bitmaps."""
     sync_official_assets()
     ico_path = generate_ico(ASSETS_DIR / "bitchat.ico")
