@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
-from tests.mesh.test_mesh_routing_resolution import DummyTransport
 
 from bitchat.app.session_coordinator import MAX_MESSAGE_SIZE, SessionCoordinator
 from bitchat.crypto.identity import LocalIdentity
@@ -14,6 +15,70 @@ from bitchat.protocol.constants import (
 from bitchat.protocol.packet import BitchatPacket
 from bitchat.protocol.reassembly import FragmentReassembler
 from bitchat.storage.config import InMemoryStorage
+from bitchat.transport.base import BaseTransport, TransportState, TransportType
+
+
+class _DummyTransport(BaseTransport):
+    """Minimal transport for isolating SessionCoordinator message bounds testing."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._state: TransportState = TransportState.READY
+
+    @property
+    def transport_type(self) -> TransportType:
+        return TransportType.BLUETOOTH
+
+    @property
+    def state(self) -> TransportState:
+        return self._state
+
+    @property
+    def is_running(self) -> bool:
+        return self._state == TransportState.CONNECTED
+
+    @property
+    def connected_peers(self) -> list[str]:
+        return []
+
+    @property
+    def discovered_peers(self) -> dict[str, Any]:
+        return {}
+
+    async def start(self) -> None:
+        self._state = TransportState.CONNECTED
+
+    async def stop(self) -> None:
+        self._state = TransportState.OFFLINE
+
+    async def start_discovery(self) -> None:
+        pass
+
+    async def stop_discovery(self) -> None:
+        pass
+
+    async def connect_peer(self, address: str, timeout: float = 10.0) -> Any:
+        pass
+
+    async def disconnect_peer(self, address: str) -> None:
+        pass
+
+    async def send_to_peer(self, address: str, packet: BitchatPacket) -> None:
+        pass
+
+    async def broadcast_packet(
+        self, packet: BitchatPacket, exclude_address: str | None = None
+    ) -> None:
+        pass
+
+    def update_identity(self, peer_id_hex: str, nickname: str) -> None:
+        pass
+
+    def resolve_peer_id_to_address(self, target: str) -> str | None:
+        return None
+
+    def get_telemetry(self) -> dict[str, Any]:
+        return {}
 
 
 @pytest.mark.asyncio
@@ -21,7 +86,7 @@ async def test_send_broadcast_message_oversized_payload_rejected() -> None:
     """send_broadcast_message rejects payload exceeding MAX_MESSAGE_SIZE."""
     coord = SessionCoordinator(
         local_identity=LocalIdentity.generate(),
-        transport=DummyTransport(),
+        transport=_DummyTransport(),
         storage=InMemoryStorage(),
     )
     oversized_text = "A" * (MAX_MESSAGE_SIZE + 1)
@@ -34,7 +99,7 @@ async def test_send_direct_message_oversized_payload_rejected() -> None:
     """send_direct_message rejects payload exceeding MAX_MESSAGE_SIZE."""
     coord = SessionCoordinator(
         local_identity=LocalIdentity.generate(),
-        transport=DummyTransport(),
+        transport=_DummyTransport(),
         storage=InMemoryStorage(),
     )
     oversized_text = "B" * (MAX_MESSAGE_SIZE + 1)
@@ -116,7 +181,7 @@ def test_server_reassembler_error_handling() -> None:
     """Server packet handler handles malformed fragments without unhandled errors."""
     coord = SessionCoordinator(
         local_identity=LocalIdentity.generate(),
-        transport=DummyTransport(),
+        transport=_DummyTransport(),
         storage=InMemoryStorage(),
     )
 
