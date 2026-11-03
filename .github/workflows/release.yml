@@ -224,7 +224,7 @@ jobs:
           ls -la dist/
 
       - name: Create GitHub Release & Upload All Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
