@@ -43,7 +43,7 @@ Documentation = "https://github.com/Java-Mx/bitchat-python/tree/main/docs"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
+    "pytest>=9.2.0",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.17.2",
     "pyright>=1.1.414",
