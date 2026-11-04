@@ -108,7 +108,7 @@ jobs:
           Write-Host "Verification succeeded for $installer ($hash)"
 
       - name: Upload Windows Packaging Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-distributable
           path: |
@@ -201,7 +201,7 @@ jobs:
           echo "Linux artifact validation succeeded!"
 
       - name: Upload Linux Packaging Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-distributables
           path: |
