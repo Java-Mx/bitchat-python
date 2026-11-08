@@ -465,3 +465,28 @@ async def test_offline_mode_friendly_chat_messaging(
 
         # No packets sent or queued
         assert len(coord._pending_messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_late_peer_refresh_after_shutdown_is_a_noop(
+    local_identity: LocalIdentity, mock_storage: FileConfigStorage
+) -> None:
+    """A transport event processed after teardown must not raise ScreenStackError.
+
+    Regression: a late BLE error event (or the periodic refresh timer) reached
+    ``_refresh_peer_lists`` once the screen stack was empty, and the fallback to
+    ``self.screen`` raised on slower runners.
+    """
+    coord = make_test_coordinator(local_identity, mock_storage)
+    app = BitChatApp(coordinator=coord, storage=mock_storage, initial_screen="home")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app._screen_stack
+
+    assert not app._screen_stack
+    app._refresh_peer_lists()
+    from bitchat.tui.app import BleErrorReported, BleWarningReported, LanErrorReported
+
+    app.on_ble_error_reported(BleErrorReported("late ble error"))
+    app.on_ble_warning_reported(BleWarningReported("late ble warning"))
+    app.on_lan_error_reported(LanErrorReported("late lan error"))

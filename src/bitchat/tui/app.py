@@ -422,6 +422,11 @@ class BitChatApp(App[None]):
 
     def _refresh_peer_lists(self) -> None:
         """Refresh sidebar and header with latest peer states and truthful telemetry."""
+        if not self._screen_stack:
+            # The app is starting up or shutting down: late transport events and
+            # the periodic refresh timer have no UI left to update, and touching
+            # ``self.screen`` would raise ScreenStackError.
+            return
         for screen in list(self._screen_stack):
             if isinstance(screen, (HomeScreen, TelemetryScreen)):
                 screen.refresh_status()
@@ -747,7 +752,9 @@ class BitChatApp(App[None]):
         )
         telemetry = ble_transport.get_telemetry() if ble_transport else {}
         self._refresh_peer_lists()
-        if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+        if self._screen_stack and not any(
+            isinstance(s, BLEErrorModal) for s in self._screen_stack
+        ):
             from bitchat.tui.screens.connection import ConnectionModal
 
             if isinstance(self.screen, ConnectionModal):
@@ -799,7 +806,9 @@ class BitChatApp(App[None]):
 
     def _present_ble_recovery_dialog(self, error_message: str) -> None:
         """Show the BLE recovery dialog unless one is already open."""
-        if any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+        if not self._screen_stack or any(
+            isinstance(s, BLEErrorModal) for s in self._screen_stack
+        ):
             return
         from bitchat.tui.screens.connection import ConnectionModal
 
@@ -858,7 +867,9 @@ class BitChatApp(App[None]):
         if chat is not None:
             chat.add_system_message(guidance)
         self._refresh_peer_lists()
-        if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+        if self._screen_stack and not any(
+            isinstance(s, BLEErrorModal) for s in self._screen_stack
+        ):
             from bitchat.tui.screens.connection import ConnectionModal
 
             if isinstance(self.screen, ConnectionModal):
@@ -1377,7 +1388,7 @@ class BitChatApp(App[None]):
                         )
                         if curr_chat is not None:
                             curr_chat.add_system_message(alt)
-                        if not any(
+                        if self._screen_stack and not any(
                             isinstance(s, BLEErrorModal) for s in self._screen_stack
                         ):
                             lan_trans = coord._transports.get("lan")
