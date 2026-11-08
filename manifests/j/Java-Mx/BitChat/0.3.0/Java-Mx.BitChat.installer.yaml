@@ -17,6 +17,6 @@ ReleaseDate: 2026-11-08
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.0/BitChat-0.3.0-windows-x64.exe
-    InstallerSha256: 113CCCB198580D84C82583527B48E2F4591E3776E3AA678F23F685FEB510E02B
+    InstallerSha256: 1704A03E36573EFB53243895F68843E8911570BD643E5F61A8EE7369BF3176F9
 ManifestType: installer
 ManifestVersion: 1.6.0

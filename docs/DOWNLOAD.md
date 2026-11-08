@@ -13,9 +13,9 @@
 | **Publisher** | `Java-Mx` |
 | **Platform / Architecture** | Windows 10 (1809+) & Windows 11 (`x64`) |
 | **Installer Filename** | `BitChat-0.3.0-windows-x64.exe` |
-| **Installer File Size** | 18.05 MB (18,923,324 bytes) |
+| **Installer File Size** | 17.17 MB (18,006,863 bytes) |
 | **Release Date** | `2026-11-08` |
-| **SHA-256 Checksum** | `113CCCB198580D84C82583527B48E2F4591E3776E3AA678F23F685FEB510E02B` |
+| **SHA-256 Checksum** | `1704A03E36573EFB53243895F68843E8911570BD643E5F61A8EE7369BF3176F9` |
 | **Digital Signature Status** | NotSigned — No commercial code-signing certificate configured yet. Do not treat as a Microsoft-verified publisher until a real certificate signature is verified. Always verify the SHA-256 checksum below. |
 | **Official Download URL** | [https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.0/BitChat-0.3.0-windows-x64.exe](https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.0/BitChat-0.3.0-windows-x64.exe) |
 | **All Releases** | [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) |
@@ -51,7 +51,7 @@ After downloading `BitChat-0.3.0-windows-x64.exe`, verify its integrity in Power
 ```powershell
 # 1. Verify SHA-256 Checksum
 Get-FileHash .\BitChat-0.3.0-windows-x64.exe -Algorithm SHA256
-# Expected: 113CCCB198580D84C82583527B48E2F4591E3776E3AA678F23F685FEB510E02B
+# Expected: 1704A03E36573EFB53243895F68843E8911570BD643E5F61A8EE7369BF3176F9
 
 # 2. Inspect Authenticode Signature
 Get-AuthenticodeSignature .\BitChat-0.3.0-windows-x64.exe | Format-List *
