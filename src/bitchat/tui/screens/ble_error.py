@@ -337,6 +337,14 @@ class BLEErrorModal(ModalScreen[str | None]):
         self.call_after_refresh(self._focus_first_action)
 
     def _focus_first_action(self) -> None:
+        """Give the first action initial focus without overriding a user choice.
+
+        This runs deferred after the first refresh. If focus has already moved to
+        a button (keyboard navigation or programmatic selection) it must not be
+        stolen back, otherwise Enter would activate the wrong action.
+        """
+        if self.focused is not None:
+            return
         for button in self.query(Button):
             button.focus()
             break

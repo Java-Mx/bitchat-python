@@ -2715,6 +2715,148 @@ async def test_ble_gatt_unavailable_modal_buttons_mouse_keyboard_and_dismiss(
 
 
 @pytest.mark.asyncio
+async def test_ble_modal_deferred_initial_focus_does_not_steal_selected_button(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """The deferred first-action focus must never override an explicit focus.
+
+    Regression: ``on_mount`` schedules ``_focus_first_action`` after refresh. On a
+    slow runner it fired after the user/test had focused "Continue Wi-Fi/LAN",
+    moving focus back to "Retry Adapter" so Enter returned ``retry``.
+    """
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        results: list[str | None] = []
+        modal = BLEErrorModal(
+            error_message="GATT error",
+            bluetooth_available=True,
+            central_active=False,
+            lan_available=True,
+        )
+        await app.push_screen(modal, results.append)
+        await pilot.pause()
+
+        lan_button = modal.query_one("#btn-ble-lan", Button)
+        lan_button.focus()
+        await pilot.pause()
+        assert modal.focused is lan_button
+        # Simulate the deferred callback firing late.
+        modal._focus_first_action()
+        await pilot.pause()
+        assert modal.focused is lan_button
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert results == ["lan"]
+
+
+@pytest.mark.asyncio
+async def test_ble_modal_buttons_in_sequence_with_repeated_openings(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Each button returns only its own result; reopened modals start fresh."""
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        results: list[str | None] = []
+
+        async def open_modal() -> BLEErrorModal:
+            modal = BLEErrorModal(
+                error_message="GATT error",
+                bluetooth_available=True,
+                central_active=False,
+                lan_available=True,
+            )
+            await app.push_screen(modal, results.append)
+            await pilot.pause()
+            return modal
+
+        sequence = (
+            ("#btn-ble-retry", "retry"),
+            ("#btn-ble-lan", "lan"),
+            ("#btn-ble-close", None),
+            ("#btn-ble-lan", "lan"),
+            ("#btn-ble-retry", "retry"),
+        )
+        # Mouse and keyboard activation of every button, twice over.
+        for use_keyboard in (False, True):
+            for selector, expected in sequence:
+                before = len(results)
+                modal = await open_modal()
+                # A freshly opened modal never carries a previous selection.
+                assert modal.focused is None or modal.focused.id == "btn-ble-retry"
+                if use_keyboard:
+                    modal.query_one(selector, Button).focus()
+                    await pilot.pause()
+                    await pilot.press("enter")
+                else:
+                    await pilot.click(selector)
+                await pilot.pause()
+                assert not isinstance(app.screen, BLEErrorModal)
+                # Exactly one callback, carrying this button's own result.
+                assert len(results) == before + 1
+                assert results[-1] == expected
+
+        # Escape and Q dismiss with None and never trigger another action.
+        for key in ("escape", "q"):
+            before = len(results)
+            await open_modal()
+            await pilot.press(key)
+            await pilot.pause()
+            assert not isinstance(app.screen, BLEErrorModal)
+            assert results[before:] == [None]
+
+
+@pytest.mark.asyncio
+async def test_settings_consecutive_invalid_keybinding_saves_report_current_error(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Back-to-back Save clicks each validate the current input.
+
+    Regression: Textual drops clicks on a Button during its press animation, so a
+    quick second Save click left the previous error on screen.
+    """
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        modal = app.screen
+        hint = modal.query_one("#settings-hint", Static)
+        key_input = modal.query_one("#settings-kb-help", Input)
+        save_button = modal.query_one("#btn-settings-save", Button)
+        # Root cause guard: Textual's Button ignores clicks while ``-active`` is
+        # set. Save must never enter that state, or retries are silently dropped.
+        assert save_button.active_effect_duration == 0
+
+        for invalid_key, expected in (
+            ("f25", "unsupported key"),
+            ("ctrl+ctrl+a", "modifiers may be"),
+            ("escape", "reserved for back"),
+            ("alt+f4", "reserved by the window manager"),
+            ("", "cannot be empty"),
+            ("f2", "conflict"),
+            ("f25", "unsupported key"),
+        ):
+            key_input.value = invalid_key
+            # No pause between clicks beyond message processing: clicks land
+            # well inside the button's 0.2s press-animation window.
+            await pilot.click("#btn-settings-save")
+            assert not save_button.has_class("-active")
+            await pilot.pause()
+            assert isinstance(app.screen, SettingsModal)
+            assert expected in str(hint.render()).lower(), invalid_key
+
+        # A valid key still saves and closes the modal.
+        key_input.value = "f1"
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+        assert not isinstance(app.screen, SettingsModal)
+
+
+@pytest.mark.asyncio
 async def test_ble_modal_continue_wifi_lan_when_lan_unavailable_reports_unavailable(
     test_coordinator: SessionCoordinator,
 ) -> None:

@@ -747,6 +747,12 @@ class SettingsScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         """Render persisted settings immediately; refresh network only when needed."""
+        # Textual ignores clicks on a Button while its press animation is active
+        # (``-active``, 0.2s). Save is retried right after fixing a validation
+        # error, so a click inside that window would be dropped and the previous
+        # error would stay on screen. Every Save click must validate current input.
+        with contextlib.suppress(NoMatches):
+            self.query_one("#btn-settings-save", Button).active_effect_duration = 0
         self._apply_category_visibility()
         self._populate_initial_fields()
         self._render_network_information()
