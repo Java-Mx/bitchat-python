@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,7 +29,7 @@ from bitchat.storage.config import (
     AppConfig,
     InMemoryStorage,
 )
-from bitchat.transport.base import TransportState
+from bitchat.transport.base import TransportError, TransportState
 from bitchat.tui.app import BitChatApp
 from bitchat.tui.screens.ble_error import (
     BLEErrorModal,
@@ -37,7 +38,9 @@ from bitchat.tui.screens.ble_error import (
 )
 from bitchat.tui.screens.edit_theme import EditThemeModal
 from bitchat.tui.screens.help import HelpScreen
+from bitchat.tui.screens.home import HomeScreen
 from bitchat.tui.screens.peer_info import PeerInfoModal
+from bitchat.tui.screens.peers import PeersScreen
 from bitchat.tui.screens.settings import SettingsModal
 from bitchat.tui.widgets.autocomplete import AutocompletePalette
 from bitchat.tui.widgets.chat_view import ChatView
@@ -48,7 +51,16 @@ from bitchat.tui.widgets.status_bar import StatusBar
 
 
 @pytest.fixture
-def test_coordinator() -> SessionCoordinator:
+def test_coordinator(monkeypatch: pytest.MonkeyPatch) -> SessionCoordinator:
+    monkeypatch.setattr(
+        "bitchat.network.adapter.detect_network_info",
+        lambda **kwargs: NetworkInfo(
+            status="Connected",
+            interface="Wi-Fi",
+            ssid="TestLAN",
+            local_ip="192.168.1.50",
+        ),
+    )
     identity = LocalIdentity.generate()
     server = BLEServer(backend=MockBLEServerBackend())
     manager = BLEManager(
@@ -254,7 +266,7 @@ async def test_chat_messages_render_metadata_and_text_on_one_aligned_row(
         assert ": short outgoing" in lines[0]
         assert lines[0].startswith(" ")
         assert not lines[1].strip()
-        assert lines[2].startswith("PeerB [Public] • ")
+        assert lines[2].startswith("PeerB [Unverified] • ")
         assert ": short incoming" in lines[2]
         assert not lines[3].strip()
         assert lines[4].startswith("PeerC [🔒 DM] • ")
@@ -278,7 +290,7 @@ async def test_chat_spacing_is_between_records_not_multiline_lines(
 
         lines = [line.text.rstrip() for line in chat.rich_log.lines]
         assert len(lines) == 4
-        assert lines[0].startswith("PeerB [Public] • ")
+        assert lines[0].startswith("PeerB [Unverified] • ")
         assert lines[0].endswith(": first line")
         assert lines[1].lstrip() == "second line"
         assert lines[2].strip() == ""
@@ -337,7 +349,7 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
         await pilot.pause()
         incoming_lines = [line.text.rstrip() for line in log.lines]
         assert len(incoming_lines) > 1
-        assert incoming_lines[0].startswith("PeerB [Public] • ")
+        assert incoming_lines[0].startswith("PeerB [Unverified] • ")
         assert ": this is a very long message" in incoming_lines[0]
         assert all(line.cell_length <= width for line in log.lines)
         assert all(line.startswith(" ") for line in incoming_lines[1:])
@@ -360,7 +372,7 @@ async def test_chat_long_and_multiline_messages_wrap_with_hanging_alignment(
         await pilot.pause()
         incoming_multiline = [line.text.rstrip() for line in log.lines]
         assert len(incoming_multiline) == 2
-        assert incoming_multiline[0].startswith("PeerB [Public] • ")
+        assert incoming_multiline[0].startswith("PeerB [Unverified] • ")
         assert incoming_multiline[0].endswith(": first line")
         assert incoming_multiline[1].lstrip() == "second line"
         assert incoming_multiline[1].startswith(" ")
@@ -386,10 +398,12 @@ async def test_chat_margins_wrap_and_resize_with_conversation_width(
 
         width = max(1, log.scrollable_content_region.width - 1)
         assert all(line.cell_length <= width for line in log.lines)
-        incoming_lines = [line for line in log.lines if "PeerB [Public]" in line.text]
+        incoming_lines = [
+            line for line in log.lines if "PeerB [Unverified]" in line.text
+        ]
         outgoing_lines = [line for line in log.lines if "You [Public]" in line.text]
         assert incoming_lines and outgoing_lines
-        assert incoming_lines[0].text.startswith("PeerB [Public]")
+        assert incoming_lines[0].text.startswith("PeerB [Unverified]")
         assert outgoing_lines[0].text.lstrip().startswith("You [Public]")
         assert outgoing_lines[0].cell_length == width
         assert outgoing_lines[0].cell_length < log.scrollable_content_region.width
@@ -447,7 +461,7 @@ async def test_chat_narrow_width_keeps_long_sender_metadata_and_message(
 
         rendered = " ".join(" ".join(line.text for line in log.lines).split())
         assert sender in rendered
-        assert "[Public]" in rendered
+        assert "[Unverified]" in rendered
         assert "visible message body" in rendered
         assert all(line.cell_length <= width for line in log.lines)
 
@@ -464,7 +478,7 @@ async def test_ctrl_p_uses_configured_action_and_preserves_palette_access(
     )
     async with app.run_test(size=(120, 40)) as pilot:
         ctrl_p_bindings = app._bindings.key_to_bindings["ctrl+p"]
-        assert [binding.action for binding in ctrl_p_bindings] == ["show_help"]
+        assert [binding.action for binding in ctrl_p_bindings] == ["configured_help"]
         default_screen = app.screen
 
         message_input = app.query_one(MessageInput)
@@ -914,7 +928,7 @@ async def test_tui_ble_truthful_state_and_error_modal(
         app._refresh_peer_lists()
         await pilot.pause()
 
-        assert "BLE Offline" in status_bar.status_message
+        assert "Bluetooth Inactive (unavailable)" in status_bar.status_message
 
         # Trigger BLE error callback
         app._on_coordinator_ble_error("Bluetooth adapter disabled by user")
@@ -955,7 +969,7 @@ async def test_ble_error_from_real_coordinator_uses_active_textual_lifecycle(
         )
         error_content = app.screen.query_one(".ble-error-text", Static)
         error_title = app.screen.query_one("#ble-error-title", Static)
-        assert "Bluetooth Hardware Error" in str(error_title.render())
+        assert "Bluetooth Unavailable" in str(error_title.render())
         assert "Bluetooth adapter offline" in str(error_content.render())
 
         await pilot.press("escape")
@@ -972,7 +986,12 @@ async def test_ble_error_from_real_coordinator_uses_active_textual_lifecycle(
         second_error = "A second BLE failure without an active app context"
 
         async def report_without_textual_context() -> None:
-            test_coordinator._handle_transport_error(second_error)
+            active = test_coordinator.active_transport
+            test_coordinator._handle_transport_error(
+                active,
+                TransportError(active.transport_type, "test_callback", second_error),
+                test_coordinator.transport_generation,
+            )
 
         callback_task = contextvars.Context().run(
             asyncio.create_task, report_without_textual_context()
@@ -993,7 +1012,16 @@ async def test_ble_error_from_real_coordinator_uses_active_textual_lifecycle(
         assert app.is_running
 
         third_error = "A third BLE failure from a worker thread"
-        await asyncio.to_thread(test_coordinator._handle_transport_error, third_error)
+
+        def report_from_worker_thread() -> None:
+            active = test_coordinator.active_transport
+            test_coordinator._handle_transport_error(
+                active,
+                TransportError(active.transport_type, "test_callback", third_error),
+                test_coordinator.transport_generation,
+            )
+
+        await asyncio.to_thread(report_from_worker_thread)
         await pilot.pause()
 
         assert isinstance(app.screen, BLEErrorModal)
@@ -1049,24 +1077,21 @@ async def test_gatt_failure_keeps_bluetooth_central_mode_visible(
         assert telemetry["advertising_active"] is False
 
         status = app.query_one(StatusBar).status_message
-        assert "Bluetooth Available" in status
-        assert "BLE Central Mode" in status
-        assert "Peripheral Advertising Failed" in status
+        assert "Bluetooth Active" in status
+        assert "BLE Central Scanning" in status
+        assert "BLE Peripheral Failed" in status
         rendered = "\n".join(
             line.text for line in app.query_one("#chat-log", RichLog).lines
         )
-        assert "BLE central scanning is active" in rendered
-        assert "status 3" in rendered
+        assert "BLE central scanning is active" not in rendered
+        assert "status 3" not in rendered
 
-        retry_button = app.screen.query_one("#btn-ble-retry", Button)
-        clicked = await pilot.click("#btn-ble-retry")
+        assert app.screen.query_one("#btn-ble-ack", Button)
+        await pilot.click("#btn-ble-ack")
         await pilot.pause(1)
-        assert clicked, retry_button.region
-        assert not isinstance(app.screen, BLEErrorModal), (
-            server_backend.start_attempts,
-            test_coordinator.active_transport.get_telemetry(),
-            [type(screen).__name__ for screen in app._screen_stack],
-        )
+        await app._handle_ble_retry()
+        await pilot.pause(1)
+        assert not isinstance(app.screen, BLEErrorModal)
         assert server_backend.start_attempts == 2
         assert telemetry["advertising_active"] is False
         assert test_coordinator.active_transport.get_telemetry()["advertising_active"]
@@ -1154,8 +1179,9 @@ async def test_tui_phase93_footer_2_2_2_structure_and_actions(
         # 5. Peers button
         await pilot.click("#btn-action-peers")
         await pilot.pause()
-        sidebar = app.query_one(PeerSidebar)
-        assert sidebar.has_focus is True
+        assert isinstance(app.screen, PeersScreen)
+        app.screen.action_dismiss_screen()
+        await pilot.pause()
 
 
 @pytest.mark.asyncio
@@ -1581,11 +1607,99 @@ async def test_phase10_keybinding_conflict_detection_and_validation(
         assert isinstance(app.screen, SettingsModal)
         assert "cannot be empty" in str(hint.render()).lower()
 
+        # Invalid Textual keys and duplicate modifiers are rejected with reasons.
+        for invalid_key, expected_message in (
+            ("f25", "unsupported key"),
+            ("ctrl+ctrl+a", "modifiers may be"),
+            ("escape", "reserved for back"),
+            ("alt+f4", "reserved by the window manager"),
+        ):
+            settings_modal.query_one("#settings-kb-help", Input).value = invalid_key
+            await pilot.click("#btn-settings-save")
+            await pilot.pause()
+            assert isinstance(app.screen, SettingsModal)
+            assert expected_message in str(hint.render()).lower()
+
         # Test restore defaults
         await pilot.click("#btn-settings-restore-defaults")
         await pilot.pause()
         assert settings_modal.query_one("#settings-kb-help", Input).value == "f1"
         assert settings_modal.query_one("#settings-kb-settings", Input).value == "f3"
+        await pilot.click("#btn-settings-save")
+        await pilot.pause()
+        assert not isinstance(app.screen, SettingsModal)
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("f4")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_custom_keybinding_precedes_screen_bindings_but_not_text_entry(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """A custom printable shortcut wins globally, except when an Input has focus."""
+    config = AppConfig()
+    config.keybindings["help"] = "s"
+    app = BitChatApp(coordinator=test_coordinator, config=config)
+
+    async with app.run_test(size=(120, 45)) as pilot:
+        message_input = app.query_one(MessageInput)
+        message_input.focus()
+        await pilot.press("s")
+        await pilot.pause()
+        assert message_input.value == "s"
+        assert not isinstance(app.screen, HelpScreen)
+
+        message_input.value = ""
+        await pilot.press("f3")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsModal)
+        key_input = app.screen.query_one("#settings-kb-help", Input)
+        key_input.focus()
+        await pilot.press("s")
+        await pilot.pause()
+        assert key_input.value == "s"
+        assert isinstance(app.screen, SettingsModal)
+        await pilot.click("#btn-settings-cancel")
+        await pilot.pause()
+
+        app.push_screen(HomeScreen())
+        await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_keybinding_edit_keeps_active_and_persisted_binding(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    storage = InMemoryStorage()
+    app = BitChatApp(coordinator=test_coordinator, storage=storage)
+
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.press("f3")
+        await pilot.pause()
+        settings_modal = app.screen
+        assert isinstance(settings_modal, SettingsModal)
+        settings_modal.query_one("#settings-kb-help", Input).value = "f4"
+        await pilot.click("#btn-settings-cancel")
+        await pilot.pause()
+
+        assert storage.load_config().keybindings["help"] == "f1"
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("f4")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
 
 
 @pytest.mark.asyncio
@@ -1785,17 +1899,42 @@ async def test_ble_error_modal_hides_lan_button_when_lan_unavailable() -> None:
         assert "btn-ble-close" in buttons
 
 
+async def _show_ble_recovery_options(
+    app: BitChatApp, pilot: Any, warning: str = "GATT advertising failed"
+) -> None:
+    """Acknowledge the first BLE warning, then simulate a later failed attempt."""
+    app._on_coordinator_ble_warning(warning)
+    await pilot.pause()
+    assert isinstance(app.screen, BLEErrorModal)
+    assert app.screen.acknowledgement_mode
+    await pilot.click("#btn-ble-ack")
+    await pilot.pause()
+    app._on_coordinator_ble_warning(warning)
+    await pilot.pause()
+    assert isinstance(app.screen, BLEErrorModal)
+    assert not app.screen.acknowledgement_mode
+
+
 @pytest.mark.asyncio
 async def test_ble_warning_modal_includes_lan_button(
     test_coordinator: SessionCoordinator,
 ) -> None:
-    """BLE peripheral warning modal always includes the LAN fallback button."""
+    """The first BLE warning is acknowledged before recovery choices are shown."""
     app = BitChatApp(coordinator=test_coordinator)
     async with app.run_test() as pilot:
         app._on_coordinator_ble_warning("GATT advertising failed with status 3")
         await pilot.pause()
 
         assert isinstance(app.screen, BLEErrorModal)
+        assert app.screen.acknowledgement_mode
+        assert {b.id for b in app.screen.query(Button)} == {"btn-ble-ack"}
+        await pilot.click("#btn-ble-ack")
+        await pilot.pause()
+
+        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
+        await pilot.pause()
+        assert isinstance(app.screen, BLEErrorModal)
+        assert not app.screen.acknowledgement_mode
         buttons = {b.id for b in app.screen.query(Button)}
         assert "btn-ble-lan" in buttons, (
             "LAN button must be present when BLE peripheral fails"
@@ -1814,8 +1953,9 @@ async def test_continue_with_lan_switches_transport(
     """'Continue with LAN' dismisses the modal and switches to LAN transport."""
     app = BitChatApp(coordinator=test_coordinator)
     async with app.run_test(size=(120, 45)) as pilot:
-        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
-        await pilot.pause()
+        await _show_ble_recovery_options(
+            app, pilot, "GATT advertising failed with status 3"
+        )
 
         assert isinstance(app.screen, BLEErrorModal)
         assert test_coordinator.active_transport_name == "bluetooth"
@@ -1840,8 +1980,9 @@ async def test_continue_offline_does_not_start_lan(
     """'Continue Offline' dismisses the modal without starting LAN."""
     app = BitChatApp(coordinator=test_coordinator)
     async with app.run_test() as pilot:
-        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
-        await pilot.pause()
+        await _show_ble_recovery_options(
+            app, pilot, "GATT advertising failed with status 3"
+        )
 
         assert isinstance(app.screen, BLEErrorModal)
         await pilot.click("#btn-ble-close")
@@ -1850,6 +1991,7 @@ async def test_continue_offline_does_not_start_lan(
         assert not isinstance(app.screen, BLEErrorModal)
         # Transport remains bluetooth (no switch happened)
         assert test_coordinator.active_transport_name == "bluetooth"
+        assert test_coordinator.effective_active_transport_name == "offline"
 
 
 @pytest.mark.asyncio
@@ -1859,8 +2001,9 @@ async def test_retry_adapter_still_works_after_modal_changes(
     """'Retry Adapter' still retries BLE; transport must stay bluetooth."""
     app = BitChatApp(coordinator=test_coordinator)
     async with app.run_test() as pilot:
-        app._on_coordinator_ble_warning("GATT advertising failed with status 3")
-        await pilot.pause()
+        await _show_ble_recovery_options(
+            app, pilot, "GATT advertising failed with status 3"
+        )
 
         assert isinstance(app.screen, BLEErrorModal)
         await pilot.click("#btn-ble-retry")
@@ -1878,8 +2021,7 @@ async def test_no_connected_via_lan_before_peer_connection(
     """Status bar must not show 'Connected via LAN' until a real peer connects."""
     app = BitChatApp(coordinator=test_coordinator)
     async with app.run_test(size=(120, 45)) as pilot:
-        app._on_coordinator_ble_warning("GATT failed")
-        await pilot.pause()
+        await _show_ble_recovery_options(app, pilot, "GATT failed")
         assert isinstance(app.screen, BLEErrorModal)
 
         await pilot.click("#btn-ble-lan")
@@ -1960,7 +2102,7 @@ async def test_lan_wifi_drops_ethernet_remains_no_modal() -> None:
             await pilot.pause()
             # Verify initial Wi-Fi status
             status = app.query_one(StatusBar).status_message
-            assert "LAN (Wi-Fi)" in status
+            assert "LAN / Wi-Fi Active" in status
 
             # Transition: Wi-Fi lost, Ethernet remains
             eth_info = NetworkInfo(
@@ -1979,7 +2121,7 @@ async def test_lan_wifi_drops_ethernet_remains_no_modal() -> None:
             assert not any(isinstance(s, BLEErrorModal) for s in app._screen_stack)
             # Status bar must reflect Ethernet
             new_status = app.query_one(StatusBar).status_message
-            assert "LAN (Ethernet)" in new_status
+            assert "LAN / Wi-Fi Active" in new_status
             assert lan_trans.state != TransportState.UNAVAILABLE
 
 
@@ -2041,9 +2183,7 @@ async def test_lan_all_interfaces_disconnect_triggers_recovery_modal() -> None:
             assert "Local network connectivity is unavailable" in content_text
             # Status bar must reflect truthful offline status
             status = app.query_one(StatusBar).status_message
-            expected_status = (
-                "LAN (offline) • Reason: Local network connection unavailable"
-            )
+            expected_status = "LAN Unavailable"
             assert expected_status in status
 
 
@@ -2275,9 +2415,7 @@ async def test_lan_continue_offline_pauses_services_and_enters_offline_mode() ->
             assert "Operating in Offline Mode." in chat_lines
 
             status = app.query_one(StatusBar).status_message
-            assert (
-                "LAN (offline) • Reason: Local network connection unavailable" in status
-            )
+            assert status == "OFFLINE MODE"
 
 
 @pytest.mark.asyncio
@@ -2322,6 +2460,7 @@ async def test_lan_network_recovery_resumes_services_and_updates_status() -> Non
 
         async def _mock_discovery_start() -> None:
             lan_trans.discovery._is_running = True
+            lan_trans.discovery._listen_sock = MagicMock()
 
         async def _mock_discovery_stop() -> None:
             lan_trans.discovery._is_running = False
@@ -2361,7 +2500,7 @@ async def test_lan_network_recovery_resumes_services_and_updates_status() -> Non
 
             assert lan_trans.state in (TransportState.SCANNING, TransportState.READY)
             status = app.query_one(StatusBar).status_message
-            assert "LAN (Wi-Fi)" in status
+            assert "LAN / Wi-Fi Active" in status
 
 
 @pytest.mark.asyncio
@@ -2396,6 +2535,39 @@ def test_modal_aliases_and_ble_regression() -> None:
         bluetooth_available=False,
     )
     assert ble_modal.transport == "bluetooth"
+
+
+@pytest.mark.asyncio
+async def test_sidebar_renders_peer_discovery_markup_as_literal_text(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """Untrusted LAN nicknames are rendered as text, not Rich markup."""
+    from textual.widgets import ListView
+
+    from bitchat.network.models import LANDiscoveredPeer
+
+    nickname = "[bold red]Injected[/bold red]"
+    peer = LANDiscoveredPeer(
+        address="192.0.2.4:41235",
+        ip="192.0.2.4",
+        port=41235,
+        peer_id="fedcba9876543210",
+        nickname=nickname,
+        ssid="",
+        last_seen=1.0,
+    )
+    app = BitChatApp(coordinator=test_coordinator)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        sidebar = app.query_one(PeerSidebar)
+        sidebar.set_discovered_peers(
+            {peer.address: peer}, transport="lan", is_scanning=False
+        )
+        await pilot.pause()
+
+        view = sidebar.query_one("#discovered-peers-list", ListView)
+        rendered_text = "\n".join(str(label.render()) for label in view.query(Label))
+        assert nickname in rendered_text
 
 
 @pytest.mark.asyncio
@@ -2504,7 +2676,7 @@ async def test_ble_gatt_unavailable_modal_buttons_mouse_keyboard_and_dismiss(
 
         title = str(app.screen.query_one("#ble-error-title", Label).render())
         body = str(app.screen.query_one(".ble-error-text", Static).render())
-        assert "Bluetooth Unavailable" in title
+        assert "BLE Peripheral Initialization Failed" in title
         assert (
             "Bluetooth hardware was detected, but BitChat could not initialize or use "
             "the BLE GATT service. Choose how you want to continue." in body
@@ -2577,7 +2749,9 @@ async def test_ble_modal_continue_wifi_lan_when_lan_unavailable_reports_unavaila
             )
             assert "Transport switch failed" in chat_lines
             assert "Switched transport to LAN." not in chat_lines
-            assert test_coordinator.ble_status == "unavailable"
+            assert test_coordinator.ble_status == "scanning"
+            assert test_coordinator.active_transport_name == "bluetooth"
+            assert test_coordinator.is_running
             assert isinstance(app.screen, BLEErrorModal)
             assert app.screen.transport == "lan"
 
@@ -2611,7 +2785,7 @@ async def test_ble_modal_retry_adapter_failure_logs_error_and_reopens_modal(
         chat_lines = "\n".join(
             line.text for line in app.query_one("#chat-log", RichLog).lines
         )
-        assert "Bluetooth retry failed: Adapter still busy" in chat_lines
+        assert "Bluetooth retry failed: Adapter still busy" not in chat_lines
         assert isinstance(app.screen, BLEErrorModal)
         assert app.screen.error_message == "Adapter still busy"
 
@@ -2648,14 +2822,41 @@ async def test_transport_slash_command_variants_and_invalid_args(
             submit("/transport wifi")
             await pilot.pause(1)
             assert test_coordinator.active_transport_name == "lan"
+            assert test_coordinator.effective_active_transport_name == "lan"
+            assert app.config.transport == "lan"
+            assert app.query_one(PeerSidebar).border_title == "Peers (LAN / Wi-Fi)"
+            bt_transport = test_coordinator._transports["bluetooth"]
+            with patch.object(
+                bt_transport,
+                "get_telemetry",
+                return_value={
+                    "adapter_available": True,
+                    "adapter_state": "On",
+                    "peripheral_error": "GATT advertising failed",
+                },
+            ):
+                app._refresh_peer_lists()
+                lan_status = app.query_one(StatusBar).mesh_status
+                assert "LAN / Wi-Fi Active" in lan_status
+                assert "Bluetooth" not in lan_status
+                assert "BLE Peripheral Failed" not in lan_status
+
+            # Repeated, case-insensitive requests report actual state without a restart.
+            lan_transport = test_coordinator.active_transport
+            with patch.object(lan_transport, "start", new=AsyncMock()) as start_lan:
+                submit("/transport LAN")
+                await pilot.pause(1)
+                start_lan.assert_not_awaited()
 
             # 3. /transport ble -> switches to bluetooth
             submit("/transport ble")
             await pilot.pause(1)
             assert test_coordinator.active_transport_name == "bluetooth"
+            assert test_coordinator.effective_active_transport_name == "bluetooth"
+            assert app.query_one(PeerSidebar).border_title == "Peers (BLE Mesh)"
 
             # 4. /transport lan -> switches to lan
-            submit("/transport lan")
+            submit("/transport LAN")
             await pilot.pause(1)
             assert test_coordinator.active_transport_name == "lan"
 
@@ -2664,12 +2865,61 @@ async def test_transport_slash_command_variants_and_invalid_args(
             await pilot.pause(1)
             assert test_coordinator.active_transport_name == "bluetooth"
 
+            submit("/transport offline")
+            await pilot.pause(1)
+            assert test_coordinator.selected_transport_name == "offline"
+            assert test_coordinator.effective_active_transport_name == "offline"
+            assert app.query_one(PeerSidebar).border_title == "Peers (Offline)"
+
             # 6. Invalid argument
             submit("/transport pigeon")
             await pilot.pause()
             lines = "\n".join(line.text for line in chat.rich_log.lines)
             assert "Unknown transport 'pigeon'" in lines
-            assert test_coordinator.active_transport_name == "bluetooth"
+            assert "Usage: /transport" in lines
+            assert test_coordinator.effective_active_transport_name == "offline"
+
+
+@pytest.mark.asyncio
+async def test_transport_command_rejects_overlapping_switch_intents(
+    test_coordinator: SessionCoordinator,
+) -> None:
+    """A later command cannot enqueue a stale switch behind the current one."""
+    app = BitChatApp(coordinator=test_coordinator)
+    original_switch = test_coordinator.switch_transport
+    switch_started = asyncio.Event()
+    release_switch = asyncio.Event()
+    called_targets: list[str] = []
+
+    async def delayed_switch(target: str) -> tuple[bool, str]:
+        called_targets.append(target)
+        if target == "lan":
+            switch_started.set()
+            await release_switch.wait()
+        return await original_switch(target)
+
+    with patch.object(test_coordinator, "switch_transport", side_effect=delayed_switch):
+        async with app.run_test(size=(120, 45)) as pilot:
+            inp = app.query_one(MessageInput)
+
+            def submit(command: str) -> None:
+                inp.value = command
+                app.on_input_submitted(Input.Submitted(inp, command))
+
+            submit("/transport lan")
+            await asyncio.wait_for(switch_started.wait(), timeout=2)
+            submit("/transport bluetooth")
+            await pilot.pause()
+            release_switch.set()
+            await pilot.pause(1)
+
+            assert called_targets == ["lan"]
+            assert test_coordinator.effective_active_transport_name == "lan"
+            rendered = " ".join(
+                line.text for line in app.query_one(ChatView).rich_log.lines
+            )
+            assert "A transport switch is already in progress" in rendered
+            assert "Switched transport to Bluetooth" not in rendered
 
 
 @pytest.mark.asyncio
@@ -2735,7 +2985,7 @@ async def test_lan_fallback_modal_retry_and_switch_to_ble_callbacks_wired_correc
 async def test_continue_offline_with_ble_adapter_on_shows_offline_status_in_tui(
     test_coordinator: SessionCoordinator,
 ) -> None:
-    """Continue Offline with BLE radio On shows BLE Offline in StatusBar."""
+    """Continue Offline with BLE radio On does not claim an active transport."""
     from bitchat.ble.adapter import AdapterInfo
 
     app = BitChatApp(coordinator=test_coordinator)
@@ -2767,8 +3017,9 @@ async def test_continue_offline_with_ble_adapter_on_shows_offline_status_in_tui(
 
         assert test_coordinator.offline_mode is True
         status_msg = str(app.query_one(StatusBar).status_message)
-        assert "BLE Offline • Offline Mode" in status_msg
+        assert status_msg == "OFFLINE MODE"
         assert "Bluetooth Available" not in status_msg
+        assert "Bluetooth Active" not in status_msg
 
 
 @pytest.mark.asyncio

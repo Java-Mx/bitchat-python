@@ -99,20 +99,6 @@ class MessageInput(Input):
             event.stop()
             self.post_message(self.AutocompleteAction("accept"))
 
-        # Check unified dynamic keybinding lookup on parent application
-        get_action = getattr(self.app, "get_action_for_key", None)
-        if callable(get_action):
-            action = get_action(event.key)
-            if action:
-                event.prevent_default()
-                event.stop()
-                trigger = getattr(self.app, "trigger_action", None)
-                if callable(trigger):
-                    trigger(action)
-                else:
-                    getattr(self.app, f"action_{action}", lambda: None)()
-                return
-
     def _navigate_history_prev(self) -> None:
         """Recall older history entry."""
         if not self._history:

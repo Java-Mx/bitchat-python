@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
+### Added
+- **Home Screen Dashboard (`HomeScreen`):** Branded entry dashboard featuring quick-action navigation cards for Connect, Peers, Settings, Commands, and Telemetry, with full keyboard shortcuts and seamless screen transitions.
+- **Connection Modal & Management (`ConnectionModal`, `ConnectionMenu`):** Dedicated modal interfaces for transport switching (BLE Mesh, LAN/Wi-Fi, and Offline Mode) and manual peer connection.
+- **Dedicated Offline Mode:** Complete network isolation mode that suppresses all BLE advertising/scanning and LAN UDP broadcasts, reports explicit `OFFLINE MODE` status in the status bar, and enables safe offline startup.
+- **Strict 2:2:2 Ratio Peer Grid (`PeersScreen`):** 3-column by 2-row action grid layout with standardized button dimensions, keyboard focus navigation, and direct chat launching from discovered peers.
+- **Telemetry Dashboard (`TelemetryScreen`):** Real-time diagnostics displaying active transport state, interface IP and SSID, BLE radio health, MTU, packet transmit/receive counters, and reassembly statistics.
+- **Commands Reference (`CommandsScreen`):** In-app documentation and quick reference for all BitChat slash commands and shortcuts.
+- **Appearance Themes:** Preset color themes (Terminal Emerald, Midnight Blue, Amethyst Purple, Cyber Cyan) with live preview and configuration persistence.
+
+### Changed
+- **Disambiguated Network & BLE Status:** Disambiguated LAN/Wi-Fi status from BLE status; status bar accurately reports network SSID/IP without false Bluetooth errors when operating on LAN.
+- **Transport Lifecycle Hardening:** Transport switching gracefully stops active listeners, cancels background tasks, and cleans up sockets before transitioning.
+- **Navigation Flow:** Bidirectional navigation between Home Screen, Chat View, Peers Screen, Settings, and Telemetry.
+
+### Fixed
+- **Transport Switch Concurrency:** Prevented overlapping transport switch commands from leaving the coordinator in an inconsistent state.
+- **BLE Status Leak in LAN Mode:** Suppressed BLE peripheral warning messages in the status bar when running in LAN mode.
+- **Keybinding Conflict Validation:** Hardened keybinding parser and conflict validator across TUI screens.
+
 ## [0.2.1] - 2026-10-31
 
 ### Added

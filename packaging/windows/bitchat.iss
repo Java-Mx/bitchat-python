@@ -5,11 +5,11 @@
 ; =============================================================================
 
 #ifndef MyAppVersion
-#define MyAppVersion "0.2.1"
+#define MyAppVersion "0.3.0"
 #endif
 
 #ifndef MyOutputBaseFilename
-#define MyOutputBaseFilename "BitChat-0.2.1-windows-x64"
+#define MyOutputBaseFilename "BitChat-0.3.0-windows-x64"
 #endif
 
 #define MyAppName "BitChat"
@@ -304,7 +304,7 @@ begin
   TermsMemo.Left := 0;
   TermsMemo.Top := 0;
   TermsMemo.Width := TermsPage.SurfaceWidth;
-  TermsMemo.Height := TermsPage.SurfaceHeight - ScaleY(60);
+  TermsMemo.Height := TermsPage.SurfaceHeight - ScaleY(68);
   TermsMemo.ScrollBars := ssVertical;
   TermsMemo.ReadOnly := True;
   TermsMemo.Font.Name := 'Consolas';
@@ -324,8 +324,10 @@ begin
   TermsLinkLabel := TNewStaticText.Create(TermsPage);
   TermsLinkLabel.Parent := TermsPage.Surface;
   TermsLinkLabel.Left := 0;
-  TermsLinkLabel.Top := TermsMemo.Top + TermsMemo.Height + ScaleY(8);
+  TermsLinkLabel.Top := TermsMemo.Top + TermsMemo.Height + ScaleY(6);
   TermsLinkLabel.Caption := 'Read the complete Terms of Use online (' + '{#MyTermsURL}' + ')';
+  TermsLinkLabel.Font.Name := 'Segoe UI';
+  TermsLinkLabel.Font.Size := 9;
   TermsLinkLabel.Font.Color := clHighlight;
   TermsLinkLabel.Font.Style := [fsUnderline];
   TermsLinkLabel.Cursor := crHand;
@@ -336,8 +338,13 @@ begin
   TermsCheckBox.Left := 0;
   TermsCheckBox.Top := TermsLinkLabel.Top + TermsLinkLabel.Height + ScaleY(8);
   TermsCheckBox.Width := TermsPage.SurfaceWidth;
+  TermsCheckBox.Height := ScaleY(24);
+  TermsCheckBox.Font.Name := 'Segoe UI';
+  TermsCheckBox.Font.Size := 9;
   TermsCheckBox.Caption := 'I have read and agree to the BitChat Terms of Use.';
   TermsCheckBox.Checked := False;
+  TermsCheckBox.TabStop := True;
+  TermsCheckBox.Cursor := crHand;
   TermsCheckBox.OnClick := @OnTermsCheckBoxClick;
 
   { Screen 3: Privacy Policy }
@@ -352,7 +359,7 @@ begin
   PrivacyMemo.Left := 0;
   PrivacyMemo.Top := 0;
   PrivacyMemo.Width := PrivacyPage.SurfaceWidth;
-  PrivacyMemo.Height := PrivacyPage.SurfaceHeight - ScaleY(78);
+  PrivacyMemo.Height := PrivacyPage.SurfaceHeight - ScaleY(92);
   PrivacyMemo.ScrollBars := ssVertical;
   PrivacyMemo.ReadOnly := True;
   PrivacyMemo.Font.Name := 'Consolas';
@@ -374,6 +381,8 @@ begin
   PrivacyLinkLabel.Left := 0;
   PrivacyLinkLabel.Top := PrivacyMemo.Top + PrivacyMemo.Height + ScaleY(6);
   PrivacyLinkLabel.Caption := 'Read the complete Privacy Policy online (' + '{#MyPrivacyURL}' + ')';
+  PrivacyLinkLabel.Font.Name := 'Segoe UI';
+  PrivacyLinkLabel.Font.Size := 9;
   PrivacyLinkLabel.Font.Color := clHighlight;
   PrivacyLinkLabel.Font.Style := [fsUnderline];
   PrivacyLinkLabel.Cursor := crHand;
@@ -392,8 +401,13 @@ begin
   PrivacyCheckBox.Left := 0;
   PrivacyCheckBox.Top := PrivacyNoteLabel.Top + PrivacyNoteLabel.Height + ScaleY(6);
   PrivacyCheckBox.Width := PrivacyPage.SurfaceWidth;
+  PrivacyCheckBox.Height := ScaleY(24);
+  PrivacyCheckBox.Font.Name := 'Segoe UI';
+  PrivacyCheckBox.Font.Size := 9;
   PrivacyCheckBox.Caption := 'I have read the BitChat Privacy Policy.';
   PrivacyCheckBox.Checked := False;
+  PrivacyCheckBox.TabStop := True;
+  PrivacyCheckBox.Cursor := crHand;
   PrivacyCheckBox.OnClick := @OnPrivacyCheckBoxClick;
 end;
 

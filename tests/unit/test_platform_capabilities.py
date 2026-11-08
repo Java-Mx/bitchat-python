@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
-from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 if TYPE_CHECKING:
     import pytest
 
 from bitchat.app.application import Application
 from bitchat.commands.parser import CommandParser, CommandType
+from bitchat.network.models import NetworkInfo
 from bitchat.platform.capabilities import (
     BluetoothCapabilities,
     ConfiguredTransports,
@@ -21,6 +22,8 @@ from bitchat.platform.capabilities import (
     SystemReport,
     _platform_kind_from_system,
     configure_viable_transports,
+    detect_network_info,
+    detect_system_capabilities,
     detect_system_info,
     format_configure_report,
 )
@@ -573,6 +576,66 @@ def test_format_configure_report() -> None:
     assert "System ready." in formatted
 
 
+def test_configure_network_summary_uses_shared_snapshot() -> None:
+    snapshot = NetworkInfo(
+        status="Connected",
+        interface="Wi-Fi",
+        ssid="Example Wi-Fi",
+        local_ip="192.0.2.10",
+        interface_name="Wi-Fi",
+        interface_description="Wireless Adapter",
+        ipv4_addresses=("192.0.2.10",),
+        ipv6_addresses=("2001:db8::10",),
+        subnet_prefixes=(24, 64),
+        default_gateway="192.0.2.1",
+        dns_servers=("192.0.2.53",),
+        connection_name="Example Wi-Fi",
+        collected_at=100.0,
+        provider_backend="mock Windows provider",
+    )
+    expected_network = detect_network_info(snapshot)
+    with (
+        patch(
+            "bitchat.platform.capabilities.detect_system_info",
+            return_value=SystemCapabilities(
+                "Windows", "Windows 11", "x86_64", "CPython 3.14"
+            ),
+        ),
+        patch(
+            "bitchat.platform.capabilities.detect_bluetooth_info",
+            new=AsyncMock(
+                return_value=BluetoothCapabilities(
+                    "Available",
+                    "Available",
+                    "Unsupported",
+                    "Unsupported",
+                    "Not applicable",
+                    "Granted",
+                )
+            ),
+        ),
+        patch(
+            "bitchat.platform.capabilities.get_network_info_snapshot",
+            new=AsyncMock(return_value=snapshot),
+        ),
+        patch(
+            "bitchat.platform.capabilities.detect_lan_capabilities",
+            return_value=LanCapabilities("Available", "Available"),
+        ),
+    ):
+        report = asyncio.run(detect_system_capabilities())
+
+    formatted = format_configure_report(report)
+    assert report.network_snapshot is snapshot
+    assert report.network == expected_network
+    assert "Example Wi-Fi" in formatted
+    assert "Wi-Fi" in formatted
+    assert "192.0.2.10" in formatted
+    assert "2001:db8::10" in formatted
+    assert "192.0.2.1" in formatted
+    assert "192.0.2.53" in formatted
+
+
 def test_application_cli_configure_dispatch() -> None:
     """Application CLI dispatches /configure and outputs formatted report."""
     stdout_buf = io.StringIO()
@@ -588,45 +651,3 @@ def test_application_cli_configure_dispatch() -> None:
     assert "Network" in output
     assert "LAN" in output
     assert "Configuration" in output
-
-
-def test_detect_linux_interfaces_prioritizes_connected(tmp_path: Path) -> None:
-    """_detect_linux_interfaces prioritizes active interfaces over inactive ones."""
-    from bitchat.platform.capabilities import _detect_linux_interfaces
-
-    net_dir = tmp_path / "sys_class_net"
-    net_dir.mkdir()
-
-    # wlan0: up, wireless
-    wlan0 = net_dir / "wlan0"
-    wlan0.mkdir()
-    (wlan0 / "wireless").mkdir()
-    (wlan0 / "operstate").write_text("up\n", encoding="utf-8")
-
-    # wlan1: down, wireless
-    wlan1 = net_dir / "wlan1"
-    wlan1.mkdir()
-    (wlan1 / "wireless").mkdir()
-    (wlan1 / "operstate").write_text("down\n", encoding="utf-8")
-
-    # eth0: up, ethernet
-    eth0 = net_dir / "eth0"
-    eth0.mkdir()
-    (eth0 / "type").write_text("1\n", encoding="utf-8")
-    (eth0 / "operstate").write_text("up\n", encoding="utf-8")
-
-    # eth1: down, ethernet
-    eth1 = net_dir / "eth1"
-    eth1.mkdir()
-    (eth1 / "type").write_text("1\n", encoding="utf-8")
-    (eth1 / "operstate").write_text("down\n", encoding="utf-8")
-
-    def _mock_path(p: str | Path) -> Path:
-        return net_dir if str(p) == "/sys/class/net" else Path(p)
-
-    with patch("bitchat.platform.capabilities.Path", side_effect=_mock_path):
-        wifi_str, eth_str = _detect_linux_interfaces()
-
-    assert "wlan0" in wifi_str or wifi_str.startswith("Connected")
-    assert "down" not in wifi_str
-    assert eth_str == "Connected (eth0)"

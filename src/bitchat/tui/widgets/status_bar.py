@@ -33,6 +33,15 @@ class StatusBar(Widget):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(id="status-bar", **kwargs)
 
+    @staticmethod
+    def _is_offline_status(status: str) -> bool:
+        """Classify the active transport, not optional hardware details."""
+        status = status.lstrip()
+        return (
+            status.startswith(("✕", "○ Offline", "OFFLINE MODE"))
+            or "OFFLINE" in status.upper()
+        )
+
     @property
     def status_message(self) -> str:
         """Backward-compatible alias for mesh_status."""
@@ -64,16 +73,16 @@ class StatusBar(Widget):
         with Horizontal(id="status-container"):
             with Vertical(id="status-telemetry-col"):
                 mesh_lbl = Label(self.mesh_status, id="status-line-mesh")
-                if any(
-                    w in self.mesh_status
-                    for w in ("Offline", "Unavailable", "Error", "Disabled")
-                ):
+                if self._is_offline_status(self.mesh_status):
                     mesh_lbl.add_class("status-offline")
                 yield mesh_lbl
                 yield Label(self.security_status, id="status-line-crypto")
                 yield Label(self.target_status, id="status-line-target")
 
-            with Grid(id="status-actions-grid"):
+            with Grid(
+                id="status-actions-grid",
+                classes="footer-action-grid",
+            ):
                 yield Button("Edit", id="btn-action-edit", classes="action-btn")
                 yield Button("Settings", id="btn-action-settings", classes="action-btn")
                 yield Button("Peers", id="btn-action-peers", classes="action-btn")
@@ -84,27 +93,38 @@ class StatusBar(Widget):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Forward action button clicks to parent application."""
         bid = event.button.id or ""
+        app: Any = self.app
         match bid:
             case "btn-action-edit":
                 self.post_message(self.ActionTriggered("edit"))
+                if hasattr(app, "action_open_edit_theme"):
+                    app.action_open_edit_theme()
             case "btn-action-settings":
                 self.post_message(self.ActionTriggered("settings"))
+                if hasattr(app, "action_open_settings"):
+                    app.action_open_settings()
             case "btn-action-peers":
                 self.post_message(self.ActionTriggered("peers"))
+                if hasattr(app, "action_open_peers"):
+                    app.action_open_peers()
             case "btn-action-commands":
                 self.post_message(self.ActionTriggered("commands"))
+                if hasattr(app, "action_open_commands"):
+                    app.action_open_commands()
             case "btn-action-help":
                 self.post_message(self.ActionTriggered("help"))
+                if hasattr(app, "action_show_help"):
+                    app.action_show_help()
             case "btn-action-quit":
                 self.post_message(self.ActionTriggered("quit"))
+                if hasattr(app, "action_quit") and hasattr(app, "_spawn_task"):
+                    app._spawn_task(app.action_quit())
 
     def watch_mesh_status(self, new_val: str) -> None:
         try:
             lbl = self.query_one("#status-line-mesh", Label)
             lbl.update(new_val)
-            if any(
-                w in new_val for w in ("Offline", "Unavailable", "Error", "Disabled")
-            ):
+            if self._is_offline_status(new_val):
                 lbl.add_class("status-offline")
             else:
                 lbl.remove_class("status-offline")

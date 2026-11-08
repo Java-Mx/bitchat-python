@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.message import Message
-from textual.screen import ModalScreen
-from textual.widgets import Input
+from textual.widgets import Button, Input, Label
 
 from bitchat.commands.parser import (
     COMMAND_REGISTRY,
@@ -23,11 +24,25 @@ from bitchat.commands.parser import (
 )
 from bitchat.logging import disable_console_logging
 from bitchat.storage.config import AppConfig, FileConfigStorage, StorageInterface
+from bitchat.transport.base import (
+    TransportError,
+    TransportType,
+    TransportWarning,
+    normalize_transport_name,
+)
 from bitchat.tui.screens.ble_error import BLEErrorModal
+from bitchat.tui.screens.commands import CommandsScreen
 from bitchat.tui.screens.edit_theme import EditThemeModal
 from bitchat.tui.screens.help import HelpScreen
+from bitchat.tui.screens.home import HomeScreen
 from bitchat.tui.screens.peer_info import PeerInfoModal
-from bitchat.tui.screens.settings import SettingsModal
+from bitchat.tui.screens.peers import PeersScreen
+from bitchat.tui.screens.settings import (
+    SettingsModal,
+    SettingsScreen,
+    normalize_keybinding,
+)
+from bitchat.tui.screens.telemetry import TelemetryScreen
 from bitchat.tui.theme import TCSS_STYLES
 from bitchat.tui.widgets.autocomplete import AutocompletePalette
 from bitchat.tui.widgets.chat_view import ChatView
@@ -37,8 +52,6 @@ from bitchat.tui.widgets.sidebar import PeerSidebar
 from bitchat.tui.widgets.status_bar import StatusBar
 
 if TYPE_CHECKING:
-    from textual import events
-
     from bitchat.app.session_coordinator import SessionCoordinator
 
 logger = logging.getLogger(__name__)
@@ -47,25 +60,43 @@ logger = logging.getLogger(__name__)
 class BleErrorReported(Message):
     """BLE error forwarded from coordinator or transport callbacks."""
 
-    def __init__(self, error_message: str) -> None:
+    def __init__(
+        self, error: TransportError | str, generation: int | None = None
+    ) -> None:
         super().__init__()
-        self.error_message = error_message
+        self.error = error if isinstance(error, TransportError) else None
+        self.error_message = (
+            error.message if isinstance(error, TransportError) else error
+        )
+        self.generation = generation
 
 
 class LanErrorReported(Message):
     """LAN network error forwarded from coordinator or transport callbacks."""
 
-    def __init__(self, error_message: str) -> None:
+    def __init__(
+        self, error: TransportError | str, generation: int | None = None
+    ) -> None:
         super().__init__()
-        self.error_message = error_message
+        self.error = error if isinstance(error, TransportError) else None
+        self.error_message = (
+            error.message if isinstance(error, TransportError) else error
+        )
+        self.generation = generation
 
 
 class BleWarningReported(Message):
     """BLE capability warning forwarded from transport startup."""
 
-    def __init__(self, warning: str) -> None:
+    def __init__(
+        self, warning: TransportWarning | str, generation: int | None = None
+    ) -> None:
         super().__init__()
-        self.warning = warning
+        self.event = warning if isinstance(warning, TransportWarning) else None
+        self.warning = (
+            warning.message if isinstance(warning, TransportWarning) else warning
+        )
+        self.generation = generation
 
 
 class BitChatApp(App[None]):
@@ -79,6 +110,8 @@ class BitChatApp(App[None]):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+        Binding("f4", "open_peers", "Peers", show=False),
+        Binding("escape", "open_home", "Dashboard", show=False),
     ]
 
     ACTION_TO_APP_METHOD: ClassVar[dict[str, str]] = {
@@ -89,6 +122,9 @@ class BitChatApp(App[None]):
         "quit": "quit",
         "scroll_up": "scroll_chat_up",
         "scroll_down": "scroll_chat_down",
+        "home": "open_home",
+        "peers": "open_peers",
+        "commands": "open_commands",
     }
 
     def __init__(
@@ -96,6 +132,7 @@ class BitChatApp(App[None]):
         coordinator: SessionCoordinator | None = None,
         storage: StorageInterface | None = None,
         config: AppConfig | None = None,
+        initial_screen: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -104,6 +141,17 @@ class BitChatApp(App[None]):
         self.parser = CommandParser(slash_only=True)
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._is_shutting_down: bool = False
+
+        import os
+        import sys
+
+        if initial_screen is None:
+            if "pytest" in sys.modules and not os.environ.get("BITCHAT_FORCE_HOME"):
+                self.initial_screen: str = "chat"
+            else:
+                self.initial_screen = "home"
+        else:
+            self.initial_screen = initial_screen
 
         if storage is not None:
             self.storage: StorageInterface = storage
@@ -133,6 +181,8 @@ class BitChatApp(App[None]):
         self.current_accent: str = self.config.accent
         self._authenticated_transport_peers: set[str] = set()
         self._authenticated_peer_addresses: dict[str, str] = {}
+        self._ble_warning_acknowledged: bool = False
+        self._transport_switch_task: asyncio.Task[Any] | None = None
 
         # Sync nickname to coordinator if coordinator was default "Anonymous"
         if (
@@ -168,14 +218,19 @@ class BitChatApp(App[None]):
             if not t.cancelled():
                 exc = t.exception()
                 if exc is not None:
-                    logger.debug("Background task error: %s", exc)
+                    logger.error(
+                        "TUI background task failed",
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                    )
 
         task.add_done_callback(_task_done)
         return task
 
     def apply_keybindings(self, keymap: dict[str, str]) -> None:
         """Apply dynamic keybindings at runtime."""
-        target_actions = set(self.ACTION_TO_APP_METHOD.values())
+        target_actions = {
+            action for action in self.ACTION_TO_APP_METHOD.values() if action != "quit"
+        } | {f"configured_{action}" for action in self.ACTION_TO_APP_METHOD}
         if hasattr(self, "_bindings") and hasattr(self._bindings, "key_to_bindings"):
             keys_to_remove = [
                 k
@@ -185,18 +240,37 @@ class BitChatApp(App[None]):
             for k in keys_to_remove:
                 self._bindings.key_to_bindings.pop(k, None)
 
-        self._key_to_action = {
-            k.strip().lower(): action for action, k in keymap.items()
-        }
+        self._key_to_action = {}
         for action, key in keymap.items():
             method_name = self.ACTION_TO_APP_METHOD.get(action)
-            if method_name:
-                try:
-                    self.bind(key, method_name)
-                except Exception as e:
-                    logger.warning(
-                        "Failed binding key %r to %r: %s", key, method_name, e
-                    )
+            normalized_key = self._normalize_runtime_key(action, key)
+            if not method_name or normalized_key is None:
+                continue
+            if normalized_key in self._key_to_action:
+                logger.warning(
+                    "Ignoring duplicate keybinding %r for %s; already assigned to %s",
+                    normalized_key,
+                    action,
+                    self._key_to_action[normalized_key],
+                )
+                continue
+            self._key_to_action[normalized_key] = action
+            if normalized_key == "ctrl+c" and action == "quit":
+                continue
+            self._bindings.bind(
+                normalized_key, f"configured_{action}", show=False, priority=True
+            )
+        self.refresh_bindings()
+
+    @staticmethod
+    def _normalize_runtime_key(action: str, key: str) -> str | None:
+        try:
+            return normalize_keybinding(key, action)
+        except ValueError as exc:
+            logger.warning(
+                "Ignoring invalid keybinding for %s (%r): %s", action, key, exc
+            )
+            return None
 
     def get_action_for_key(self, key: str) -> str | None:
         """Return the logical action configured for a given key string."""
@@ -219,20 +293,61 @@ class BitChatApp(App[None]):
                 self.action_scroll_chat_up()
             case "scroll_down":
                 self.action_scroll_chat_down()
+            case "home":
+                self.action_open_home()
+            case "peers":
+                self.action_open_peers()
+            case "commands":
+                self.action_open_commands()
 
-    def on_key(self, event: events.Key) -> None:
-        """Global key event interceptor guaranteeing dynamic binding execution."""
-        action = self.get_action_for_key(event.key)
-        if action:
-            if isinstance(self.screen, ModalScreen) and isinstance(
-                self.screen.focused, Input
-            ):
-                event.prevent_default()
-                event.stop()
-                return
-            event.prevent_default()
-            event.stop()
-            self.trigger_action(action)
+    def _dispatch_configured_keybinding(self, action: str) -> None:
+        if isinstance(self.focused, Input) and not isinstance(
+            self.focused, MessageInput
+        ):
+            return
+        self.trigger_action(action)
+
+    def action_configured_help(self) -> None:
+        self._dispatch_configured_keybinding("help")
+
+    def action_configured_edit_theme(self) -> None:
+        self._dispatch_configured_keybinding("edit_theme")
+
+    def action_configured_settings(self) -> None:
+        self._dispatch_configured_keybinding("settings")
+
+    def action_configured_clear_chat(self) -> None:
+        self._dispatch_configured_keybinding("clear_chat")
+
+    def action_configured_quit(self) -> None:
+        self._dispatch_configured_keybinding("quit")
+
+    def action_configured_scroll_up(self) -> None:
+        self._dispatch_configured_keybinding("scroll_up")
+
+    def action_configured_scroll_down(self) -> None:
+        self._dispatch_configured_keybinding("scroll_down")
+
+    def action_configured_peers(self) -> None:
+        self._dispatch_configured_keybinding("peers")
+
+    def action_configured_home(self) -> None:
+        self._dispatch_configured_keybinding("home")
+
+    def action_configured_commands(self) -> None:
+        self._dispatch_configured_keybinding("commands")
+
+    async def on_event(self, event: events.Event) -> None:
+        """Let printable shortcut keys remain ordinary text in focused inputs."""
+        if (
+            isinstance(event, events.Key)
+            and event.character
+            and event.key in self._key_to_action
+            and isinstance(self.focused, Input)
+        ):
+            self.focused._forward_event(event)
+            return
+        await super().on_event(event)
 
     def compose(self) -> ComposeResult:
         nick = self.coordinator.nickname if self.coordinator else self.config.nickname
@@ -286,20 +401,51 @@ class BitChatApp(App[None]):
                 finally:
                     self._refresh_peer_lists()
 
-            self._spawn_task(_start_coordinator())
+            if (
+                self.initial_screen not in ("home", "connection")
+                and not coord.offline_mode
+                and coord.active_transport_name != "offline"
+            ):
+                self._spawn_task(_start_coordinator())
             self._refresh_peer_lists()
+
+        if self.initial_screen == "connection":
+            from bitchat.tui.screens.connection import ConnectionModal
+
+            home = HomeScreen()
+            self.push_screen(home)
+            self.push_screen(ConnectionModal(), home._on_connection_modal_result)
+        elif self.initial_screen == "home":
+            self.push_screen(HomeScreen())
+
+        self.set_interval(2.0, self._refresh_peer_lists)
 
     def _refresh_peer_lists(self) -> None:
         """Refresh sidebar and header with latest peer states and truthful telemetry."""
+        for screen in list(self._screen_stack):
+            if isinstance(screen, (HomeScreen, TelemetryScreen)):
+                screen.refresh_status()
+            elif isinstance(screen, PeersScreen):
+                screen.refresh_peer_list()
+
         if not self.coordinator:
             return
 
-        sidebar = self.query_one(PeerSidebar)
-        header = self.query_one(HeaderWidget)
-        status_bar = self.query_one(StatusBar)
+        base_screen = self._screen_stack[0] if self._screen_stack else self.screen
+        try:
+            sidebar = base_screen.query_one(PeerSidebar)
+            header = base_screen.query_one(HeaderWidget)
+            status_bar = base_screen.query_one(StatusBar)
+        except NoMatches:
+            try:
+                sidebar = self.query_one(PeerSidebar)
+                header = self.query_one(HeaderWidget)
+                status_bar = self.query_one(StatusBar)
+            except NoMatches:
+                return
 
         active_transport = self.coordinator.active_transport
-        trans_name = self.coordinator.active_transport_name
+        trans_name = self.coordinator.effective_active_transport_name
         telemetry = active_transport.get_telemetry()
         sidebar.active_transport = trans_name
 
@@ -331,11 +477,19 @@ class BitChatApp(App[None]):
         header.peer_count = len(conn_display)
         sidebar.set_connected_peers(conn_display)
         is_sc = getattr(active_transport, "is_scanning", False)
-        is_off = self.coordinator.offline_mode or (
-            telemetry.get("adapter_state") in ("Off", "Unavailable")
-            if trans_name == "bluetooth"
-            else self.coordinator.ble_status in ("unavailable", "disabled", "offline")
-        )
+        if trans_name == "bluetooth":
+            is_off = self.coordinator.offline_mode or telemetry.get(
+                "adapter_state"
+            ) in ("Off", "Unavailable")
+        elif trans_name == "offline":
+            is_off = True
+        else:
+            is_off = self.coordinator.offline_mode or active_transport.state.value in (
+                "unavailable",
+                "disabled",
+                "error",
+                "offline",
+            )
         sidebar.set_discovered_peers(
             active_transport.discovered_peers,
             is_scanning=is_sc,
@@ -343,93 +497,165 @@ class BitChatApp(App[None]):
             transport=trans_name,
         )
 
-        # Truthful state reporting
-        if connected_addrs:
-            if trans_name == "lan":
-                iface = telemetry.get("interface", "")
-                iface_label = (
-                    f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
-                )
-                medium_label = f"{iface_label} Mesh"
-                connection_label = f"TCP active ({len(connected_addrs)} connections)"
-            else:
-                medium_label = "Local Mesh"
-                connection_label = f"Connected ({len(connected_addrs)} peers)"
-            status_bar.mesh_status = f"● {connection_label} • {medium_label}"
-        elif self.coordinator.offline_mode:
-            status_lbl = (
-                "LAN (offline) • Reason: Local network connection unavailable"
-                if trans_name == "lan"
-                else "BLE Offline • Offline Mode"
+        # Determine Bluetooth availability independently for BLE states:
+        bt_trans = (
+            self.coordinator._transports.get("bluetooth")
+            if self.coordinator and hasattr(self.coordinator, "_transports")
+            else None
+        )
+        bt_available = False
+        if bt_trans:
+            bt_telem = bt_trans.get_telemetry()
+            adapter_state = bt_telem.get("adapter_state")
+            bt_available = adapter_state == "On" or (
+                adapter_state not in ("Off", "Unavailable")
+                and bool(bt_telem.get("adapter_available"))
             )
-            status_bar.mesh_status = f"✕ {status_lbl}"
-        elif trans_name == "bluetooth" and telemetry.get("adapter_state") == "On":
-            central_active = telemetry.get("scanner_status") == "Active"
-            peripheral_active = telemetry.get("advertising_active")
-            if central_active and peripheral_active:
-                status_lbl = "Bluetooth Ready • BLE Central + Peripheral"
-            elif central_active:
-                status_lbl = "Bluetooth Available • BLE Central Mode"
-                if not telemetry.get("peripheral_supported"):
-                    status_lbl += " • Peripheral Unsupported"
-                elif telemetry.get("peripheral_error"):
-                    status_lbl += " • Peripheral Advertising Failed"
-            elif peripheral_active:
-                status_lbl = "Bluetooth Available • BLE Peripheral Mode"
-            elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
-                status_lbl = "BLE Error • Bluetooth Available"
-            else:
-                status_lbl = "Bluetooth Available"
-            status_bar.mesh_status = f"● {status_lbl}"
-        elif self.coordinator.ble_status in ("active", "ready", "scanning"):
-            if trans_name == "lan":
-                iface = telemetry.get("interface", "")
-                iface_label = (
-                    f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
+        elif self.coordinator and self.coordinator.is_ble_available():
+            bt_available = True
+
+        # Update header-channel to match active transport
+        with contextlib.suppress(Exception):
+            chan_lbl = self.query_one("#header-channel", Label)
+            if (
+                self.coordinator.offline_mode
+                or self.coordinator.selected_transport_name == "offline"
+                or (
+                    trans_name == "offline"
+                    and getattr(self.coordinator, "selected_transport_name", None)
+                    in (None, "offline")
                 )
-                status_lbl = f"{iface_label} Ready • Local Mesh"
+            ):
+                chan_lbl.update("Secure • Offline")
+            elif trans_name == "lan":
+                chan_lbl.update("Secure • LAN Mesh")
             else:
-                status_lbl = (
+                chan_lbl.update("Secure • BLE Mesh")
+
+        # Truthful, strictly-isolated state reporting
+        if (
+            self.coordinator.offline_mode
+            or self.coordinator.selected_transport_name == "offline"
+        ):
+            status_bar.mesh_status = "OFFLINE MODE"
+        elif trans_name == "offline":
+            bt_label = (
+                "Bluetooth Available" if bt_available else "Bluetooth Unavailable"
+            )
+            if self.coordinator.selected_transport_name == "lan":
+                status_bar.mesh_status = (
+                    "✕ LAN Unavailable (offline) • Local network connection unavailable"
+                )
+            elif self.coordinator.ble_status in (
+                "unavailable",
+                "disabled",
+                "error",
+                "offline",
+            ):
+                status_bar.mesh_status = (
+                    f"✕ Bluetooth Inactive ({self.coordinator.ble_status}) • {bt_label}"
+                )
+            else:
+                status_bar.mesh_status = "OFFLINE MODE"
+        elif trans_name == "lan":
+            info = getattr(active_transport, "adapter_manager", None)
+            current_info = info.current_info if info else None
+            is_net_conn = current_info.is_connected if current_info else True
+            lan_state = active_transport.state.value
+            lan_avail = getattr(active_transport, "is_available", lambda: True)()
+            if (
+                not is_net_conn
+                or lan_state in ("unavailable", "disabled", "error", "offline")
+                or not lan_avail
+            ):
+                status_bar.mesh_status = (
+                    "✕ LAN Unavailable (offline) • Local network connection unavailable"
+                )
+            else:
+                connected_count = len(connected_addrs)
+                authenticated_count = sum(
+                    1
+                    for addr in connected_addrs
+                    if (
+                        session := self.coordinator.get_session(
+                            self.coordinator.address_to_peer_id.get(addr, "")
+                        )
+                    )
+                    and session.is_established
+                )
+                if connected_count > 0:
+                    if authenticated_count > 0:
+                        status_bar.mesh_status = f"● LAN / Wi-Fi Connected • {authenticated_count} session(s)"
+                    else:
+                        status_bar.mesh_status = f"● LAN / Wi-Fi Connected • Handshake pending ({connected_count})"
+                else:
+                    scanning = getattr(active_transport, "is_scanning", False)
+                    server_listening = getattr(
+                        getattr(active_transport, "server", None),
+                        "is_listening",
+                        False,
+                    )
+                    discovered_count = len(active_transport.discovered_peers)
+                    if scanning and server_listening:
+                        status_bar.mesh_status = (
+                            f"● LAN / Wi-Fi Active • Discovering Peers ({discovered_count} discovered)"
+                            if discovered_count
+                            else "● LAN / Wi-Fi Active • Discovering Peers"
+                        )
+                    elif server_listening:
+                        status_bar.mesh_status = "● LAN / Wi-Fi Active • Listening"
+                    else:
+                        status_bar.mesh_status = "● LAN / Wi-Fi Active"
+        else:
+            adapter_state = telemetry.get("adapter_state")
+            adapter_avail = telemetry.get("adapter_available", True)
+            if adapter_state == "Off":
+                status_bar.mesh_status = "✕ Bluetooth Disabled"
+            elif adapter_state == "Unavailable" or not adapter_avail:
+                status_bar.mesh_status = "✕ Bluetooth Unavailable"
+            else:
+                central_status = (
                     "BLE Central Scanning"
                     if telemetry.get("scanner_status") == "Active"
-                    else "BLE Ready"
+                    else "BLE Central Available"
+                    if telemetry.get("central_supported")
+                    else "BLE Central Unavailable"
                 )
-            status_bar.mesh_status = f"● {status_lbl}"
-        elif trans_name == "bluetooth" and telemetry.get("adapter_state") == "Off":
-            status_bar.mesh_status = "✕ BLE Offline • Bluetooth Disabled"
-        elif (
-            trans_name == "bluetooth"
-            and telemetry.get("adapter_state") == "Unavailable"
-        ):
-            status_bar.mesh_status = "✕ BLE Offline • Bluetooth Unavailable"
-        elif self.coordinator.ble_status in ("unavailable", "disabled", "error"):
-            status_lbl = (
-                "LAN (offline) • Reason: Local network connection unavailable"
-                if trans_name == "lan"
-                else "BLE Offline • Bluetooth Unavailable"
-            )
-            status_bar.mesh_status = f"✕ {status_lbl}"
-        elif self.coordinator.ble_status == "offline":
-            status_lbl = (
-                "LAN (offline) • Reason: Local network connection unavailable"
-                if trans_name == "lan"
-                else f"◌ Initializing {trans_name.upper()}..."
-            )
-            status_bar.mesh_status = (
-                f"✕ {status_lbl}" if trans_name == "lan" else status_lbl
-            )
-        elif self.coordinator.ble_status == "checking":
-            status_bar.mesh_status = f"◌ Initializing {trans_name.upper()}..."
-        else:
-            if trans_name == "lan":
-                iface = telemetry.get("interface", "")
-                iface_label = (
-                    f"LAN ({iface})" if iface in ("Wi-Fi", "Ethernet") else "LAN"
+                if not telemetry.get("peripheral_supported", True):
+                    peripheral_status = "BLE Peripheral Unsupported"
+                elif telemetry.get("peripheral_error"):
+                    peripheral_status = "BLE Peripheral Failed"
+                elif telemetry.get("advertising_active"):
+                    peripheral_status = "BLE Peripheral Advertising Active"
+                else:
+                    peripheral_status = "BLE Peripheral Inactive"
+
+                connected_count = len(connected_addrs)
+                authenticated_count = sum(
+                    1
+                    for addr in connected_addrs
+                    if (
+                        session := self.coordinator.get_session(
+                            self.coordinator.address_to_peer_id.get(addr, "")
+                        )
+                    )
+                    and session.is_established
                 )
-                status_lbl = f"{iface_label} Ready • Local Mesh"
-            else:
-                status_lbl = "BitChat Ready • Local Mesh"
-            status_bar.mesh_status = f"● {status_lbl}"
+                if connected_count > 0:
+                    if authenticated_count > 0:
+                        status_bar.mesh_status = (
+                            f"● Bluetooth Connected • {authenticated_count} session(s)"
+                        )
+                    else:
+                        status_bar.mesh_status = f"● Bluetooth Connected • Handshake pending ({connected_count})"
+                elif self.coordinator.effective_active_transport_name == "bluetooth":
+                    status_bar.mesh_status = (
+                        f"● Bluetooth Active • {central_status} • {peripheral_status}"
+                    )
+                elif telemetry.get("adapter_state") == "On":
+                    status_bar.mesh_status = f"● Bluetooth Available • {central_status} • {peripheral_status}"
+                else:
+                    status_bar.mesh_status = "✕ Bluetooth Unavailable"
 
         self._update_target_status()
 
@@ -471,33 +697,65 @@ class BitChatApp(App[None]):
         except Exception as e:
             logger.debug("Failed to post message %s: %s", message, e)
 
-    def _on_coordinator_ble_error(self, err_msg: str) -> None:
+    def _on_coordinator_ble_error(self, error: TransportError | str) -> None:
         """Queue BLE failures for handling inside the active Textual app context."""
-        self._safe_post_message(BleErrorReported(err_msg))
+        generation = self.coordinator.transport_generation if self.coordinator else None
+        self._safe_post_message(BleErrorReported(error, generation))
 
-    def _on_coordinator_ble_warning(self, warning: str) -> None:
+    def _on_coordinator_ble_warning(self, warning: TransportWarning | str) -> None:
         """Queue non-fatal BLE role limitations inside the Textual app context."""
-        self._safe_post_message(BleWarningReported(warning))
+        generation = self.coordinator.transport_generation if self.coordinator else None
+        self._safe_post_message(BleWarningReported(warning, generation))
 
-    def _on_coordinator_lan_error(self, err_msg: str) -> None:
+    def _on_coordinator_lan_error(self, error: TransportError | str) -> None:
         """Queue LAN failures for handling inside the active Textual app context."""
-        self._safe_post_message(LanErrorReported(err_msg))
+        generation = self.coordinator.transport_generation if self.coordinator else None
+        self._safe_post_message(LanErrorReported(error, generation))
+
+    def _get_chat_view(self) -> ChatView | None:
+        """Safely retrieve active ChatView without raising if on modal or HomeScreen."""
+        try:
+            return self.query_one(ChatView)
+        except Exception:
+            if self._screen_stack:
+                for s in self._screen_stack:
+                    with contextlib.suppress(Exception):
+                        return s.query_one(ChatView)
+        return None
 
     def on_ble_warning_reported(self, event: BleWarningReported) -> None:
         """Present a BLE role limitation without marking Bluetooth offline."""
-        if self.coordinator is None:
-            return
-        telemetry = self.coordinator.active_transport.get_telemetry()
         if (
-            telemetry.get("central_supported")
-            and telemetry.get("scanner_status") == "Active"
+            self.coordinator is not None
+            and (
+                self.coordinator.offline_mode
+                or self.coordinator.active_transport_name != "bluetooth"
+            )
+            and not self.coordinator.is_transport_starting("bluetooth")
         ):
-            prefix = "Bluetooth is available and BLE central scanning is active. "
-        else:
-            prefix = "Bluetooth is available. "
-        self.query_one(ChatView).add_system_message(prefix + event.warning)
+            return
+        if (
+            event.generation is not None
+            and self.coordinator is not None
+            and event.generation != self.coordinator.transport_generation
+        ):
+            return
+        if event.event and event.event.transport != TransportType.BLUETOOTH:
+            return
+        ble_transport = (
+            self.coordinator._transports.get("bluetooth") if self.coordinator else None
+        )
+        telemetry = ble_transport.get_telemetry() if ble_transport else {}
         self._refresh_peer_lists()
         if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+            from bitchat.tui.screens.connection import ConnectionModal
+
+            if isinstance(self.screen, ConnectionModal):
+                self.screen.dismiss(None)
+            peripheral_failure = bool(
+                telemetry.get("peripheral_error")
+                or "peripheral" in event.warning.lower()
+            )
             self.push_screen(
                 BLEErrorModal(
                     error_message=event.warning,
@@ -506,39 +764,36 @@ class BitChatApp(App[None]):
                         telemetry.get("central_supported", False)
                         and telemetry.get("scanner_status") == "Active"
                     ),
-                    peripheral_failure=bool(telemetry.get("peripheral_error")),
-                    peripheral_supported=bool(telemetry.get("peripheral_supported")),
+                    peripheral_failure=peripheral_failure,
+                    peripheral_supported=bool(
+                        telemetry.get("peripheral_supported", True)
+                    ),
                     lan_available=True,
+                    failed_stage=telemetry.get("failed_stage"),
+                    error_code=telemetry.get("error_code"),
+                    hresult=telemetry.get("hresult"),
+                    error_source=telemetry.get("error_source"),
+                    acknowledgement_mode=not self._ble_warning_acknowledged,
                 ),
                 self._on_ble_modal_dismissed,
             )
 
     def on_ble_error_reported(self, event: BleErrorReported) -> None:
         """Present a coordinator BLE failure from the Textual message loop."""
-        chat = self.query_one(ChatView)
-        chat.add_error_message(f"Bluetooth Error: {event.error_message}")
-        if self.coordinator and self.coordinator.active_transport_name == "bluetooth":
-            adapter_state = self.coordinator.active_transport.get_telemetry().get(
-                "adapter_state"
-            )
-            if adapter_state == "On":
-                guidance = (
-                    "Bluetooth radio is ON, but BLE startup failed. "
-                    "Click 'Retry Adapter' or type /scan."
-                )
-            elif adapter_state == "Off":
-                guidance = (
-                    "Bluetooth adapter is present but the radio is OFF. "
-                    "Enable it, then click 'Retry Adapter'."
-                )
-            else:
-                guidance = (
-                    "Bluetooth adapter or radio is unavailable. "
-                    "Check settings, then click 'Retry Adapter'."
-                )
-        else:
-            guidance = "BLE transport startup failed. Click 'Retry Adapter' to retry."
-        chat.add_system_message(guidance)
+        if (
+            (event.error is not None or event.generation is not None)
+            and self.coordinator is not None
+            and self.coordinator.active_transport_name != "bluetooth"
+        ):
+            return
+        if (
+            event.generation is not None
+            and self.coordinator is not None
+            and event.generation != self.coordinator.transport_generation
+        ):
+            return
+        if event.error and event.error.transport != TransportType.BLUETOOTH:
+            return
         self._refresh_peer_lists()
         self._present_ble_recovery_dialog(event.error_message)
 
@@ -546,12 +801,14 @@ class BitChatApp(App[None]):
         """Show the BLE recovery dialog unless one is already open."""
         if any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
             return
-        telemetry = (
-            self.coordinator.active_transport.get_telemetry()
-            if self.coordinator
-            and self.coordinator.active_transport_name == "bluetooth"
-            else {}
+        from bitchat.tui.screens.connection import ConnectionModal
+
+        if isinstance(self.screen, ConnectionModal):
+            self.screen.dismiss(None)
+        ble_transport = (
+            self.coordinator._transports.get("bluetooth") if self.coordinator else None
         )
+        telemetry = ble_transport.get_telemetry() if ble_transport else {}
         radio_available = telemetry.get("adapter_state") == "On"
         self.push_screen(
             BLEErrorModal(
@@ -563,32 +820,74 @@ class BitChatApp(App[None]):
                 peripheral_failure=bool(telemetry.get("peripheral_error")),
                 peripheral_supported=bool(telemetry.get("peripheral_supported", True)),
                 lan_available=True,
+                failed_stage=telemetry.get("failed_stage"),
+                error_code=telemetry.get("error_code"),
+                hresult=telemetry.get("hresult"),
+                error_source=telemetry.get("error_source"),
+                acknowledgement_mode=not self._ble_warning_acknowledged,
             ),
             self._on_ble_modal_dismissed,
         )
 
     def on_lan_error_reported(self, event: LanErrorReported) -> None:
         """Present a coordinator LAN failure from the Textual message loop."""
-        chat = self.query_one(ChatView)
-        chat.add_error_message(f"LAN Error: {event.error_message}")
+        if (
+            (event.error is not None or event.generation is not None)
+            and self.coordinator is not None
+            and (
+                self.coordinator.offline_mode
+                or self.coordinator.active_transport_name != "lan"
+            )
+        ):
+            return
+        if (
+            event.generation is not None
+            and self.coordinator is not None
+            and event.generation != self.coordinator.transport_generation
+        ):
+            return
+        if event.error and event.error.transport != TransportType.LAN:
+            return
+        chat = self._get_chat_view()
+        if chat is not None:
+            chat.add_error_message(f"LAN Error: {event.error_message}")
         guidance = (
             "Local network connectivity is unavailable. "
             "BitChat cannot currently use LAN/Wi-Fi transport."
         )
-        chat.add_system_message(guidance)
+        if chat is not None:
+            chat.add_system_message(guidance)
         self._refresh_peer_lists()
         if not any(isinstance(s, BLEErrorModal) for s in self._screen_stack):
+            from bitchat.tui.screens.connection import ConnectionModal
+
+            if isinstance(self.screen, ConnectionModal):
+                self.screen.dismiss(None)
             ble_available = self._is_ble_available()
+            lan_trans = (
+                self.coordinator._transports.get("lan")
+                if self.coordinator and hasattr(self.coordinator, "_transports")
+                else None
+            )
+            lan_telem = lan_trans.get_telemetry() if lan_trans else {}
             self.push_screen(
                 BLEErrorModal(
                     error_message=event.error_message,
                     transport="lan",
                     ble_available=ble_available,
+                    failed_stage=lan_telem.get("failed_stage"),
+                    error_code=lan_telem.get("error_code"),
+                    hresult=lan_telem.get("hresult"),
+                    error_source=lan_telem.get("error_source"),
                 ),
                 self._on_lan_modal_dismissed,
             )
 
     def _on_ble_modal_dismissed(self, result: str | None) -> None:
+        if result == "acknowledged":
+            self._ble_warning_acknowledged = True
+            return
+        self._ble_warning_acknowledged = True
         if result == "retry":
             self._spawn_task(self._handle_ble_retry())
         elif result == "lan":
@@ -606,55 +905,65 @@ class BitChatApp(App[None]):
 
     def _handle_lan_fallback(self) -> None:
         """Switch to LAN transport after BLE failure, reusing existing switch path."""
-        chat = self.query_one(ChatView)
-        chat.add_system_message(
-            "Switching to LAN / Wi-Fi transport. Discovering local peers..."
-        )
+        chat = self._get_chat_view()
+        if chat is not None:
+            chat.add_system_message(
+                "Switching to LAN / Wi-Fi transport. Discovering local peers..."
+            )
         self._handle_transport_switch("lan")
 
     def _handle_ble_fallback(self) -> None:
         """Switch to BLE transport after LAN failure, reusing existing switch path."""
-        chat = self.query_one(ChatView)
-        chat.add_system_message(
-            "Switching to Bluetooth Low Energy transport. Scanning for local peers..."
-        )
+        chat = self._get_chat_view()
+        if chat is not None:
+            chat.add_system_message(
+                "Switching to Bluetooth Low Energy transport. Scanning for local peers..."
+            )
         self._handle_transport_switch("bluetooth")
 
     async def _handle_lan_retry(self) -> None:
         """Attempt to re-initialize LAN services and notify user."""
-        chat = self.query_one(ChatView)
-        chat.add_system_message("Retrying LAN initialization...")
+        chat = self._get_chat_view()
+        if chat is not None:
+            chat.add_system_message("Retrying LAN initialization...")
         if self.coordinator:
             success = await self.coordinator.retry_lan()
             if success:
                 telemetry = self.coordinator.active_transport.get_telemetry()
                 iface = telemetry.get("interface", "Network")
-                chat.add_system_message(
-                    f"LAN reconnected successfully on {iface}. LAN Mesh Active."
-                )
+                if chat is not None:
+                    chat.add_system_message(
+                        f"LAN reconnected successfully on {iface}. LAN Mesh Active."
+                    )
                 self._refresh_peer_lists()
             else:
                 err = (
-                    self.coordinator.ble_error_message
+                    self.coordinator.lan_error_message
                     or "Local network connection unavailable"
                 )
-                chat.add_error_message(
-                    f"LAN retry failed: {err}. Remaining in offline mode."
-                )
+                if chat is not None:
+                    chat.add_error_message(
+                        f"LAN retry failed: {err}. Remaining in offline mode."
+                    )
                 self._refresh_peer_lists()
 
     def _handle_continue_offline(self) -> None:
         """Disable networking cleanly; local UI features stay available."""
-        chat = self.query_one(ChatView)
+        chat = self._get_chat_view()
         if self.coordinator:
             self._spawn_task(self._go_offline(self.coordinator))
-        else:
+        elif chat is not None:
             chat.add_system_message("Operating in Offline Mode.")
 
     async def _go_offline(self, coordinator: SessionCoordinator) -> None:
         await coordinator.go_offline()
+        self.config.transport = "offline"
+        with contextlib.suppress(Exception):
+            self.storage.save_config(self.config)
         self._refresh_peer_lists()
-        self.query_one(ChatView).add_system_message("Operating in Offline Mode.")
+        chat = self._get_chat_view()
+        if chat is not None:
+            chat.add_system_message("Operating in Offline Mode.")
 
     def _is_ble_available(self) -> bool:
         """Check if Bluetooth transport is registered and adapter is available."""
@@ -845,12 +1154,29 @@ class BitChatApp(App[None]):
             case "settings":
                 self.action_open_settings()
             case "peers":
-                self.action_focus_peers()
+                self.action_open_peers()
             case "commands":
                 self.action_open_commands()
             case "help":
                 self.action_show_help()
             case "quit":
+                self._spawn_task(self.action_quit())
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button pressed events from bottom action bar or screens."""
+        bid = event.button.id or ""
+        match bid:
+            case "btn-action-edit":
+                self.action_open_edit_theme()
+            case "btn-action-settings":
+                self.action_open_settings()
+            case "btn-action-peers":
+                self.action_open_peers()
+            case "btn-action-commands":
+                self.action_open_commands()
+            case "btn-action-help":
+                self.action_show_help()
+            case "btn-action-quit":
                 self._spawn_task(self.action_quit())
 
     def on_peer_sidebar_peer_selected(self, event: PeerSidebar.PeerSelected) -> None:
@@ -869,7 +1195,7 @@ class BitChatApp(App[None]):
         """Handle user selecting Direct Message from PeerInfoModal."""
         self.switch_conversation_context(f"@{event.nickname}")
 
-    def on_settings_modal_settings_saved(
+    def on_settings_screen_settings_saved(
         self, event: SettingsModal.SettingsSaved
     ) -> None:
         """Handle applied settings changes."""
@@ -880,118 +1206,205 @@ class BitChatApp(App[None]):
                 event.inter_fragment_delay_ms / 1000.0
             )
             self._spawn_task(self.coordinator.send_announce(event.nickname))
-            self.query_one(PeerSidebar).update_identity(event.nickname)
-            self.query_one(HeaderWidget).nickname = event.nickname
+            try:
+                base_screen = (
+                    self._screen_stack[0] if self._screen_stack else self.screen
+                )
+                base_screen.query_one(PeerSidebar).update_identity(event.nickname)
+                base_screen.query_one(HeaderWidget).nickname = event.nickname
+            except Exception:
+                pass
 
-        # Update and persist config
+        # SettingsScreen has already persisted the complete configuration. Update
+        # the in-memory copy without writing a potentially stale partial snapshot.
         self.config.nickname = event.nickname
         self.config.max_hops = event.max_hops
         self.config.inter_fragment_delay_ms = event.inter_fragment_delay_ms
         self.config.keybindings = event.keybindings
         self.apply_keybindings(self.config.keybindings)
-        try:
-            self.storage.save_config(self.config)
-        except Exception as e:
-            logger.warning("Failed to save config after settings update: %s", e)
 
-        chat = self.query_one(ChatView)
-        chat.add_system_message(
-            f"Settings updated and saved: nickname='{event.nickname}', "
-            f"max_hops={event.max_hops}, delay={event.inter_fragment_delay_ms}ms, "
-            f"keybindings={len(event.keybindings)} active"
+        # Settings saved status is exclusively displayed in the dedicated Settings
+        # indicator; chat log is kept clean.
+
+        # Update visual theme accent and message density if modified
+        if (
+            hasattr(event, "accent")
+            and event.accent
+            and event.accent != self.current_accent
+        ):
+            old_accent = self.current_accent
+            self.current_accent = event.accent
+            self.remove_class(f"accent-{old_accent}")
+            self.add_class(f"accent-{self.current_accent}")
+            self.config.accent = self.current_accent
+
+        if (
+            hasattr(event, "density")
+            and event.density
+            and event.density != self.current_density
+        ):
+            old_density = self.current_density
+            self.current_density = event.density
+            self.remove_class(f"density-{old_density}")
+            self.add_class(f"density-{self.current_density}")
+            self.config.density = self.current_density
+
+        target_trans = normalize_transport_name(
+            getattr(event, "transport", "bluetooth")
         )
-
-        target_trans = getattr(event, "transport", "bluetooth")
         curr_trans = (
-            self.coordinator.active_transport_name
+            self.coordinator.effective_active_transport_name
             if self.coordinator
             else getattr(self.config, "transport", "bluetooth")
         )
-        if target_trans != curr_trans:
+        if target_trans and target_trans != curr_trans:
             self._handle_transport_switch(target_trans)
 
     def _handle_transport_switch(self, target_transport: str) -> None:
-        """Switch active transport between Bluetooth and LAN."""
-        chat = self.query_one(ChatView)
-        target = target_transport.lower().strip()
-        if target in ("wifi", "wi-fi", "lan", "ethernet"):
-            target = "lan"
-        elif target in ("ble", "bluetooth", "bt"):
-            target = "bluetooth"
-        if target not in ("bluetooth", "lan"):
-            chat.add_error_message(
-                f"Invalid transport: '{target}'. Supported: bluetooth, lan"
-            )
+        """Switch active transport between Bluetooth, LAN, and Offline."""
+        chat = None
+        try:
+            chat = self.query_one(ChatView)
+        except Exception:
+            if self._screen_stack:
+                with contextlib.suppress(Exception):
+                    chat = self._screen_stack[0].query_one(ChatView)
+
+        target = normalize_transport_name(target_transport)
+        if target is None:
+            if chat is not None:
+                chat.add_error_message(
+                    "Invalid transport. Usage: /transport "
+                    "<bluetooth|ble|lan|wifi|offline>"
+                )
             return
 
         if not self.coordinator:
-            self.config.transport = target
-            try:
-                self.storage.save_config(self.config)
-            except Exception as e:
-                logger.warning("Failed to save transport to config: %s", e)
-            chat.add_system_message(f"Selected transport: {target.upper()}")
+            if chat is not None:
+                chat.add_error_message(
+                    "Cannot switch transport because the coordinator is not running."
+                )
+            return
+
+        if (
+            self._transport_switch_task is not None
+            and not self._transport_switch_task.done()
+        ):
+            if chat is not None:
+                chat.add_error_message(
+                    "A transport switch is already in progress. Please wait."
+                )
             return
 
         coord = self.coordinator
 
         async def _do_switch() -> None:
-            success, msg = await coord.switch_transport(target)
-            sidebar = self.query_one(PeerSidebar)
-            header = self.query_one(HeaderWidget)
-            sidebar.active_transport = coord.active_transport_name
-            sidebar.peer_id_hex = coord.local_identity.peer_id_hex
-            sidebar.fingerprint = coord.local_identity.fingerprint
-            sidebar.update_identity(coord.nickname)
-            header.peer_id_hex = coord.local_identity.peer_id_hex
-            header.fingerprint = coord.local_identity.fingerprint
-            header.nickname = coord.nickname
-            if success:
-                if "Already active" in msg:
-                    chat.add_system_message(msg)
-                    return
-                self.config.transport = target
-                try:
-                    self.storage.save_config(self.config)
-                except Exception as e:
-                    logger.warning("Failed to save switched transport config: %s", e)
-
-                chat.add_system_message(
-                    f"Switched transport to {target.upper()}. "
-                    f"New secure chat session created. "
-                    f"New peer identity: {coord.local_identity.peer_id_hex[:8]}"
+            previous_ble_warning_ids = {
+                diagnostic.operation_id
+                for diagnostic in coord.transport_diagnostics.get(
+                    TransportType.BLUETOOTH, []
                 )
-            else:
-                chat.add_error_message(f"Transport switch failed: {msg}")
-                detail = coord.ble_error_message or msg
-                if target == "lan":
-                    alt = (
-                        "Use /transport bluetooth, retry with /scan, "
-                        "or continue offline."
-                        if coord.is_ble_available()
-                        else "Retry with /scan once connected, or continue offline."
-                    )
-                    chat.add_system_message(alt)
-                    if coord.active_transport_name == "lan" and not any(
-                        isinstance(s, BLEErrorModal) for s in self._screen_stack
-                    ):
-                        self.push_screen(
-                            BLEErrorModal(
-                                error_message=detail,
-                                transport="lan",
-                                ble_available=coord.is_ble_available(),
-                            ),
-                            self._on_lan_modal_dismissed,
-                        )
-                else:
-                    chat.add_system_message(
-                        "Use /transport lan, retry with /scan, or continue offline."
-                    )
-                    if coord.active_transport_name == "bluetooth":
-                        self._present_ble_recovery_dialog(detail)
-            self._refresh_peer_lists()
+                if not isinstance(diagnostic, TransportError)
+            }
+            try:
+                success, msg = await coord.switch_transport(target)
+                base_screen = (
+                    self._screen_stack[0] if self._screen_stack else self.screen
+                )
+                try:
+                    sidebar = base_screen.query_one(PeerSidebar)
+                    header = base_screen.query_one(HeaderWidget)
+                    sidebar.active_transport = coord.effective_active_transport_name
+                    sidebar.peer_id_hex = coord.local_identity.peer_id_hex
+                    sidebar.fingerprint = coord.local_identity.fingerprint
+                    sidebar.update_identity(coord.nickname)
+                    header.peer_id_hex = coord.local_identity.peer_id_hex
+                    header.fingerprint = coord.local_identity.fingerprint
+                    header.nickname = coord.nickname
+                except Exception:
+                    logger.debug("Unable to refresh transport identity widgets")
 
-        self._spawn_task(_do_switch())
+                curr_chat = self._get_chat_view()
+                if success:
+                    if target in ("bluetooth", "lan"):
+                        self.config.transport = target
+                        try:
+                            self.storage.save_config(self.config)
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to save switched transport config: %s", e
+                            )
+                    if curr_chat is not None:
+                        curr_chat.add_system_message(msg)
+                    if target == "bluetooth":
+                        new_ble_warnings = [
+                            diagnostic
+                            for diagnostic in coord.transport_diagnostics.get(
+                                TransportType.BLUETOOTH, []
+                            )
+                            if not isinstance(diagnostic, TransportError)
+                            and diagnostic.operation_id not in previous_ble_warning_ids
+                        ]
+                        ble_transport = coord._transports.get("bluetooth")
+                        ble_telem = (
+                            ble_transport.get_telemetry() if ble_transport else {}
+                        )
+                        peripheral_error = ble_telem.get("peripheral_error") or (
+                            new_ble_warnings[-1].message if new_ble_warnings else None
+                        )
+                        if peripheral_error:
+                            self._present_ble_recovery_dialog(str(peripheral_error))
+                else:
+                    if curr_chat is not None:
+                        if (
+                            target == "bluetooth"
+                            and coord.effective_active_transport_name == "lan"
+                        ):
+                            curr_chat.add_error_message(
+                                "Requested transport was not activated; "
+                                "LAN remains active."
+                            )
+                        else:
+                            curr_chat.add_error_message(
+                                f"Transport switch failed: {msg}"
+                            )
+                    if target == "lan":
+                        alt = (
+                            "Use /transport bluetooth, retry with /scan, "
+                            "or continue offline."
+                            if coord.is_ble_available()
+                            else "Retry with /scan once connected, or continue offline."
+                        )
+                        if curr_chat is not None:
+                            curr_chat.add_system_message(alt)
+                        if not any(
+                            isinstance(s, BLEErrorModal) for s in self._screen_stack
+                        ):
+                            lan_trans = coord._transports.get("lan")
+                            lan_telem = lan_trans.get_telemetry() if lan_trans else {}
+                            self.push_screen(
+                                BLEErrorModal(
+                                    error_message=msg,
+                                    transport="lan",
+                                    ble_available=coord.is_ble_available(),
+                                    failed_stage=lan_telem.get("failed_stage"),
+                                    error_code=lan_telem.get("error_code"),
+                                    hresult=lan_telem.get("hresult"),
+                                    error_source=lan_telem.get("error_source"),
+                                ),
+                                self._on_lan_modal_dismissed,
+                            )
+                    elif target == "bluetooth":
+                        if curr_chat is not None:
+                            curr_chat.add_system_message(
+                                "Use /transport lan, retry with /scan, or continue offline."
+                            )
+                        self._present_ble_recovery_dialog(msg)
+            finally:
+                self._refresh_peer_lists()
+                coord.record_transport_indicator_update()
+
+        self._transport_switch_task = self._spawn_task(_do_switch())
 
     def on_edit_theme_modal_theme_applied(
         self, event: EditThemeModal.ThemeApplied
@@ -1010,10 +1423,11 @@ class BitChatApp(App[None]):
         self.remove_class(f"accent-{old_accent}")
         self.add_class(f"accent-{self.current_accent}")
 
-        chat = self.query_one(ChatView)
-        chat.compact_mode = event.density == "compact"
-        chat.show_timestamps = event.show_timestamps
-        chat.re_render_all()
+        chat = self._get_chat_view()
+        if chat is not None:
+            chat.compact_mode = event.density == "compact"
+            chat.show_timestamps = event.show_timestamps
+            chat.re_render_all()
 
         # Update and persist config
         self.config.density = self.current_density
@@ -1024,39 +1438,37 @@ class BitChatApp(App[None]):
         except Exception as e:
             logger.warning("Failed to save theme settings to storage: %s", e)
 
-        chat.add_system_message(
-            f"Theme applied and saved: density={event.density}, "
-            f"timestamps={event.show_timestamps}, accent={event.accent_name}"
-        )
+        # Theme applied directly to UI; chat log kept clean.
 
     async def _handle_ble_retry(self) -> None:
-        """Attempt to re-initialize BLE services and notify user."""
-        chat = self.query_one(ChatView)
-        chat.add_system_message("Retrying Bluetooth initialization...")
+        """Attempt to re-initialize BLE services and update dashboard."""
         if self.coordinator:
             success = await self.coordinator.retry_ble()
+            self._refresh_peer_lists()
+            for s in self._screen_stack:
+                if isinstance(s, HomeScreen):
+                    s.refresh_status()
+
+            chat = None
+            try:
+                chat = self.query_one(ChatView)
+            except Exception:
+                if self._screen_stack:
+                    with contextlib.suppress(Exception):
+                        chat = self._screen_stack[0].query_one(ChatView)
+
             if success:
                 telemetry = self.coordinator.active_transport.get_telemetry()
                 if telemetry.get("peripheral_error"):
-                    chat.add_system_message(
-                        "Bluetooth central mode is active; peripheral advertising "
-                        f"failed: {telemetry['peripheral_error']}"
-                    )
-                elif not telemetry.get("peripheral_supported"):
-                    chat.add_system_message(
-                        "Bluetooth central mode is active; peripheral advertising "
-                        "is not supported by this adapter or platform backend."
-                    )
-                else:
+                    self._present_ble_recovery_dialog(telemetry["peripheral_error"])
+                elif telemetry.get("peripheral_supported") and chat is not None:
                     chat.add_system_message(
                         "Bluetooth reconnected successfully. BLE Mesh Active."
                     )
-                self._refresh_peer_lists()
             else:
-                detail = self.coordinator.ble_error_message or "BLE did not start"
-                chat.add_error_message(f"Bluetooth retry failed: {detail}")
-                self._refresh_peer_lists()
-                self._present_ble_recovery_dialog(detail)
+                self._present_ble_recovery_dialog(
+                    self.coordinator.ble_error_message or "Bluetooth did not start"
+                )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Dynamically evaluate input and manage autocomplete suggestions."""
@@ -1211,6 +1623,13 @@ class BitChatApp(App[None]):
 
     def _send_chat_message(self, chat: ChatView, text: str) -> None:
         """Send normal chat message honoring active conversation context."""
+        if self.coordinator and self.coordinator.offline_mode:
+            chat.add_system_message(
+                "Cannot send message: BitChat is in Offline Mode. "
+                "Select Bluetooth or LAN in Connection menu to enable networking."
+            )
+            return
+
         if self.active_context.startswith("@"):
             target_peer = self.active_context[1:]
             chat.add_chat_message(
@@ -1242,6 +1661,13 @@ class BitChatApp(App[None]):
         self, chat: ChatView, target_peer: str, dm_text: str
     ) -> None:
         """Send an encrypted direct message to a specified peer."""
+        if self.coordinator and self.coordinator.offline_mode:
+            chat.add_system_message(
+                "Cannot send direct message: BitChat is in Offline Mode. "
+                "Select Bluetooth or LAN in Connection menu to enable networking."
+            )
+            return
+
         chat.add_chat_message(
             self.coordinator.nickname if self.coordinator else "You",
             f"(to {target_peer}): {dm_text}",
@@ -1321,11 +1747,14 @@ class BitChatApp(App[None]):
             case CommandType.HELP:
                 self.action_show_help()
 
+            case CommandType.HOME:
+                self.action_open_home()
+
             case CommandType.SETTINGS:
                 self.action_open_settings()
 
             case CommandType.CONFIGURE:
-                self._display_configure_diagnostics(chat)
+                self._handle_configure_command(cmd, chat)
 
             case CommandType.EDIT:
                 self.action_open_edit_theme()
@@ -1344,25 +1773,61 @@ class BitChatApp(App[None]):
             case CommandType.TRANSPORT:
                 if not cmd.args:
                     curr = (
-                        self.coordinator.active_transport_name
+                        self.coordinator.effective_active_transport_name
                         if self.coordinator
                         else getattr(self.config, "transport", "bluetooth")
                     )
-                    chat.add_system_message(f"Active transport medium: {curr.upper()}")
+                    state = (
+                        (
+                            "offline"
+                            if curr == "offline"
+                            else self.coordinator.active_transport.state.value
+                        )
+                        if self.coordinator
+                        else "offline"
+                    )
+                    telem = (
+                        self.coordinator.active_transport.get_telemetry()
+                        if self.coordinator
+                        and curr != "offline"
+                        and hasattr(self.coordinator.active_transport, "get_telemetry")
+                        else {}
+                    )
+                    port = telem.get("listening_port") or "N/A"
+                    discovery = (
+                        telem.get("discovery") or telem.get("scanner_status") or "N/A"
+                    )
                     chat.add_system_message(
-                        "Switch medium using: /transport bluetooth (or ble) "
-                        "OR /transport lan (or wifi)"
+                        f"Active transport medium: {curr.upper()} (state: {state})"
+                    )
+                    chat.add_system_message(
+                        f"Listener port: {port} | Discovery: {discovery}"
+                    )
+                    bt_avail = (
+                        "Available"
+                        if (self.coordinator and self.coordinator.is_ble_available())
+                        else "Unavailable"
+                    )
+                    lan_avail = (
+                        "Available"
+                        if (self.coordinator and self.coordinator.is_lan_available())
+                        else "Unavailable"
+                    )
+                    chat.add_system_message(
+                        f"Supported transports: Bluetooth ({bt_avail}), "
+                        f"LAN ({lan_avail}), Offline (Available)"
+                    )
+                    chat.add_system_message(
+                        "Switch medium using: /transport bluetooth, "
+                        "/transport ble, /transport lan, /transport wifi, "
+                        "or /transport offline"
                     )
                     return
-                raw_target = cmd.args[0].lower().strip()
-                if raw_target in ("wifi", "wi-fi", "lan", "ethernet"):
-                    target_trans = "lan"
-                elif raw_target in ("ble", "bluetooth", "bt"):
-                    target_trans = "bluetooth"
-                else:
+                target_trans = normalize_transport_name(cmd.args[0])
+                if target_trans is None:
                     chat.add_error_message(
-                        f"Unknown transport '{cmd.args[0]}'. "
-                        "Supported: bluetooth, ble, lan, wifi"
+                        f"Unknown transport '{cmd.args[0]}'. Usage: /transport "
+                        "<bluetooth|ble|lan|wifi|offline>"
                     )
                     return
                 self._handle_transport_switch(target_trans)
@@ -1381,6 +1846,12 @@ class BitChatApp(App[None]):
                     chat.add_system_message("Transport coordinator offline.")
                     return
                 coord = self.coordinator
+                if coord.offline_mode or coord.active_transport_name == "offline":
+                    chat.add_system_message(
+                        "Cannot connect: BitChat is in Offline Mode. "
+                        "Select Bluetooth or LAN in Connection menu to enable networking."
+                    )
+                    return
                 trans_name = coord.active_transport_name
 
                 if not cmd.args:
@@ -1474,6 +1945,12 @@ class BitChatApp(App[None]):
             case CommandType.SCAN:
                 if self.coordinator is not None:
                     coord = self.coordinator
+                    if coord.offline_mode or coord.active_transport_name == "offline":
+                        chat.add_system_message(
+                            "Cannot scan: BitChat is in Offline Mode. "
+                            "Select Bluetooth or LAN in Connection menu to enable discovery."
+                        )
+                        return
                     trans_name = coord.active_transport_name
                     chat.add_system_message(
                         f"Starting {trans_name.upper()} discovery scan..."
@@ -1490,6 +1967,9 @@ class BitChatApp(App[None]):
                     self._spawn_task(_perform_scan())
 
             case CommandType.ONLINE:
+                if cmd.raw_input.strip().lower().startswith(("/peers", "peers")):
+                    self.action_open_peers()
+                    return
                 if not self.coordinator:
                     chat.add_system_message("Coordinator offline.")
                     return
@@ -1575,6 +2055,35 @@ class BitChatApp(App[None]):
                 chat.add_error_message(
                     cmd.error_message or f"Unknown command: '{text}'."
                 )
+
+    def _handle_configure_command(self, cmd: Command, chat: ChatView) -> None:
+        """Run diagnostics or open the requested configuration category."""
+        if not cmd.args:
+            self._display_configure_diagnostics(chat)
+            return
+        cat = cmd.args[0].lower().strip()
+        valid_categories = {
+            "general",
+            "identity",
+            "bluetooth",
+            "network",
+            "notifications",
+            "appearance",
+            "startup",
+            "advanced",
+            "lan",
+            "wifi",
+            "ble",
+            "theme",
+        }
+        if cat in valid_categories:
+            self.action_open_settings(category=cat)
+        else:
+            self.notify(
+                f"Unknown configuration category: '{cat}'. "
+                "Valid: general, network, bluetooth, appearance",
+                severity="warning",
+            )
 
     def _display_configure_diagnostics(self, chat: ChatView) -> None:
         """Run system, Bluetooth, and LAN capability diagnostics and display in chat."""
@@ -1686,38 +2195,131 @@ class BitChatApp(App[None]):
         """Alias action for help keybinding."""
         self.action_show_help()
 
-    def action_open_settings(self) -> None:
-        """Action handler to open settings modal."""
-        if isinstance(self.screen, SettingsModal):
-            self.pop_screen()
+    def action_open_settings(self, category: str | None = None) -> None:
+        """Action handler to open categorized settings screen."""
+        cat = category or "general"
+        if isinstance(self.screen, SettingsScreen):
+            if category is None:
+                self.screen._handle_cancel_or_back()
+            else:
+                self.screen.switch_category(cat)
             return
-        if not isinstance(self.screen, BitChatApp) and len(self._screen_stack) > 1:
+        if (
+            not isinstance(self.screen, BitChatApp)
+            and len(self._screen_stack) > 1
+            and not isinstance(self.screen, (HomeScreen, PeersScreen, CommandsScreen))
+        ):
             self.pop_screen()
         nick = (
-            self.config.nickname
-            if self.config.nickname != "Anonymous"
-            else (self.coordinator.nickname if self.coordinator else "Anonymous")
+            self.coordinator.nickname
+            if (
+                self.coordinator
+                and self.coordinator.nickname
+                and self.coordinator.nickname != "Anonymous"
+            )
+            else self.config.nickname
         )
         hops = self.config.max_hops
         delay = self.config.inter_fragment_delay_ms
-        current_trans = (
-            self.coordinator.active_transport_name
-            if self.coordinator
-            else getattr(self.config, "transport", "bluetooth")
-        )
+        current_trans = getattr(self.config, "transport", "bluetooth")
         self.push_screen(
-            SettingsModal(
+            SettingsScreen(
                 current_nickname=nick,
                 current_max_hops=hops,
                 current_delay_ms=delay,
                 current_keybindings=self.config.keybindings,
                 current_transport=current_trans,
+                current_density=self.config.density,
+                current_accent=self.config.accent,
+                current_show_timestamps=self.config.show_timestamps,
+                current_debug=self.config.debug,
+                initial_category=cat,
             )
         )
 
     def action_settings(self) -> None:
         """Alias action for settings keybinding."""
         self.action_open_settings()
+
+    def action_open_home(self) -> None:
+        """Action handler to navigate to the BitChat dashboard home screen."""
+        if isinstance(self.screen, HomeScreen):
+            return
+        with contextlib.suppress(Exception):
+            msg_inp = self.query_one(MessageInput)
+            if msg_inp.value:
+                return
+        if any(isinstance(s, HomeScreen) for s in self._screen_stack):
+            while len(self._screen_stack) > 1 and not isinstance(
+                self.screen, HomeScreen
+            ):
+                self.pop_screen()
+            return
+        self.push_screen(HomeScreen())
+
+    def action_open_chat(self) -> None:
+        """Action handler to transition to the primary chat screen."""
+        while len(self._screen_stack) > 1 and not isinstance(
+            self.screen, BLEErrorModal
+        ):
+            self.pop_screen()
+        with contextlib.suppress(Exception):
+            self.query_one(MessageInput).focus()
+
+    def action_open_peers(self) -> None:
+        """Action handler to navigate to the peer management screen."""
+        if isinstance(self.screen, PeersScreen):
+            return
+        if any(isinstance(s, PeersScreen) for s in self._screen_stack):
+            while len(self._screen_stack) > 1 and not isinstance(
+                self.screen, PeersScreen
+            ):
+                self.pop_screen()
+            return
+        self.push_screen(PeersScreen())
+
+    def action_open_telemetry(self) -> None:
+        """Action handler to navigate to the system & radio telemetry screen."""
+        if isinstance(self.screen, TelemetryScreen):
+            return
+        if any(isinstance(s, TelemetryScreen) for s in self._screen_stack):
+            while len(self._screen_stack) > 1 and not isinstance(
+                self.screen, TelemetryScreen
+            ):
+                self.pop_screen()
+            return
+        self.push_screen(TelemetryScreen())
+
+    def action_open_commands(self) -> None:
+        """Action handler: populate chat input if in chat, or open CommandsScreen."""
+        try:
+            msg_input = self.query_one(MessageInput)
+            msg_input.value = "/"
+            msg_input.focus()
+            msg_input.cursor_position = 1
+            palette = self.query_one(AutocompletePalette)
+            suggestions = get_command_suggestions("/")
+            items = [(s.name, s.description) for s in suggestions]
+            palette.show_suggestions(items, title="Commands")
+        except Exception:
+            self.action_open_commands_screen()
+
+    def action_open_commands_screen(self) -> None:
+        """Action handler to display the commands reference screen."""
+        if isinstance(self.screen, CommandsScreen):
+            self.pop_screen()
+            return
+        if (
+            not isinstance(self.screen, BitChatApp)
+            and len(self._screen_stack) > 1
+            and not isinstance(self.screen, (HomeScreen, PeersScreen))
+        ):
+            self.pop_screen()
+        self.push_screen(CommandsScreen())
+
+    def action_retry_bluetooth(self) -> None:
+        """Action handler to retry BLE transport initialization."""
+        self._spawn_task(self._handle_ble_retry())
 
     def action_open_edit_theme(self) -> None:
         """Action handler to open theme customization modal."""
@@ -1741,17 +2343,6 @@ class BitChatApp(App[None]):
     def action_focus_peers(self) -> None:
         """Focus the sidebar peer list."""
         self.query_one(PeerSidebar).focus()
-
-    def action_open_commands(self) -> None:
-        """Open command autocomplete palette by populating prompt."""
-        msg_input = self.query_one(MessageInput)
-        msg_input.value = "/"
-        msg_input.focus()
-        msg_input.cursor_position = 1
-        palette = self.query_one(AutocompletePalette)
-        suggestions = get_command_suggestions("/")
-        items = [(s.name, s.description) for s in suggestions]
-        palette.show_suggestions(items, title="Commands")
 
     def action_scroll_chat_up(self) -> None:
         """Action handler to scroll chat view up one page."""

@@ -4,31 +4,36 @@
 - **Python version**: 3.12+
 - **Package manager**: uv
 
-To set up the environment:
+The Windows PowerShell and Linux commands are the same. From the repository root,
+create or synchronize the environment with:
 ```bash
 uv sync --all-groups
 ```
+Project and development dependencies are defined only in `pyproject.toml`; `uv.lock`
+pins the resolved environment. Use `uv add` / `uv remove` for dependency changes and
+`uv lock` to refresh the lockfile. Do not maintain a second requirements file.
 
 ## Running Tests
-Run the test suite using pytest:
+Run the checks through uv so they use the synchronized project environment (these
+commands work in both PowerShell and a Linux shell):
 ```bash
 uv run pytest
 uv run pytest -v
 uv run pytest tests/protocol/  # Protocol binary packet layer tests
 uv run pytest tests/unit/      # Application core unit tests
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
 ```
 
 ## Code Quality Tools
-Running Ruff for linting and formatting:
+To apply Ruff formatting:
 ```bash
-uv run ruff check .
 uv run ruff format .
-uv run ruff format --check .
 ```
-
-Running Pyright for static type checking:
+Build the package with:
 ```bash
-uv run pyright
+uv build
 ```
 
 ## Running the CLI
@@ -46,6 +51,10 @@ uv run bitchat
 2. Implement your changes.
 3. Test, format, lint, and type-check.
 4. Open a Pull Request.
+
+On Windows, run these commands from PowerShell; on Linux, run them from a shell.
+Bluetooth hardware checks still require a supported adapter and are not replaced by
+the platform-mocked test suite.
 
 ## Pull Request Expectations
 - All tests and checks must pass.

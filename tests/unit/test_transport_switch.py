@@ -4,8 +4,9 @@ generation, and peer state teardown.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -54,8 +55,10 @@ async def test_transport_switching_lifecycle(
         nickname="AliceNode",
         storage=mock_storage,
     )
+    start_counts = {"bluetooth": 0, "lan": 0}
 
     async def mock_bt_start() -> None:
+        start_counts["bluetooth"] += 1
         bt: Any = coordinator._transports["bluetooth"]
         bt._is_running = True
         bt._state = TransportState.READY
@@ -66,6 +69,7 @@ async def test_transport_switching_lifecycle(
         bt._state = TransportState.OFFLINE
 
     async def mock_lan_start() -> None:
+        start_counts["lan"] += 1
         lan: Any = coordinator._transports["lan"]
         lan._is_running = True
         lan._state = TransportState.READY
@@ -88,6 +92,7 @@ async def test_transport_switching_lifecycle(
             "bitchat.network.transport.LANTransport.start", side_effect=mock_lan_start
         ),
         patch("bitchat.network.transport.LANTransport.stop", side_effect=mock_lan_stop),
+        patch.object(coordinator, "_transport_is_operational", return_value=True),
     ):
         await coordinator.start()
         assert coordinator.active_transport_name == "bluetooth"
@@ -121,6 +126,16 @@ async def test_transport_switching_lifecycle(
         assert "Switched transport" in msg
         assert coordinator.active_transport_name == "lan"
         assert coordinator.active_transport.is_running
+        metrics = coordinator.get_detailed_status()["transport_switch_metrics"]
+        assert metrics["result"] == "success"
+        assert metrics["cleanup_seconds"] >= 0
+        assert metrics["initialization_seconds"] >= 0
+        assert metrics["total_seconds"] >= metrics["initialization_seconds"]
+        coordinator.record_transport_indicator_update()
+        assert (
+            coordinator.last_transport_switch_metrics["indicator_update_seconds"]
+            is not None
+        )
 
         # Verify persistent device identity was preserved across interface switch
         assert coordinator.local_identity.peer_id_hex == original_peer_id
@@ -148,6 +163,8 @@ async def test_transport_switching_lifecycle(
         success_dup, msg_dup = await coordinator.switch_transport("lan")
         assert success_dup is True
         assert "Already active" in msg_dup
+        assert start_counts["lan"] == 1
+        assert coordinator.last_transport_switch_metrics["initialization_seconds"] == 0
         assert coordinator.local_identity.peer_id_hex == original_peer_id
 
         # 3. Switch back to Bluetooth
@@ -167,6 +184,127 @@ async def test_transport_switching_lifecycle(
         assert bad_success is False
         assert "Unknown transport" in bad_msg
 
+        await coordinator.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_transport_start_releases_candidate_and_restores_previous(
+    test_identity: LocalIdentity,
+) -> None:
+    coordinator = SessionCoordinator(
+        local_identity=test_identity,
+        ble_manager=BLEManager(sender_id=test_identity.peer_id),
+        ble_server=BLEServer(),
+        nickname="AliceNode",
+    )
+    lan_starting = asyncio.Event()
+
+    async def start_bluetooth(transport: Any) -> None:
+        transport._is_running = True
+        transport._state = TransportState.READY
+
+    async def stop_bluetooth(transport: Any) -> None:
+        transport._is_running = False
+        transport._state = TransportState.OFFLINE
+
+    async def start_lan(transport: Any) -> None:
+        transport._is_running = True
+        transport._state = TransportState.CHECKING
+        lan_starting.set()
+        await asyncio.Event().wait()
+
+    async def stop_lan(transport: Any) -> None:
+        transport._is_running = False
+        transport._state = TransportState.OFFLINE
+
+    with (
+        patch(
+            "bitchat.transport.bluetooth.BluetoothTransport.start",
+            start_bluetooth,
+        ),
+        patch(
+            "bitchat.transport.bluetooth.BluetoothTransport.stop",
+            stop_bluetooth,
+        ),
+        patch("bitchat.network.transport.LANTransport.start", start_lan),
+        patch("bitchat.network.transport.LANTransport.stop", stop_lan),
+        patch.object(coordinator, "send_announce", new=AsyncMock()),
+        patch.object(coordinator, "_start_prune_task"),
+        patch.object(coordinator, "_transport_is_operational", return_value=True),
+    ):
+        await coordinator.start()
+        switching = asyncio.create_task(coordinator.switch_transport("lan"))
+        await asyncio.wait_for(lan_starting.wait(), timeout=1)
+        switching.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await switching
+
+        assert coordinator.active_transport_name == "bluetooth"
+        assert coordinator.active_transport.is_running
+        assert not coordinator._transports["lan"].is_running
+        assert coordinator.last_transport_switch_metrics["result"] == "cancelled"
+        await coordinator.stop()
+
+
+@pytest.mark.asyncio
+async def test_failed_bluetooth_switch_restores_lan_transport(
+    test_identity: LocalIdentity, mock_storage: FileConfigStorage
+) -> None:
+    coordinator = SessionCoordinator(
+        local_identity=test_identity,
+        ble_manager=BLEManager(sender_id=test_identity.peer_id),
+        ble_server=BLEServer(),
+        nickname="AliceNode",
+        storage=mock_storage,
+    )
+    fail_bluetooth = False
+
+    async def mock_bluetooth_start(transport: Any) -> None:
+        if fail_bluetooth:
+            transport._is_running = False
+            transport._state = TransportState.ERROR
+            raise RuntimeError("BLE peripheral initialization failed")
+        transport._is_running = True
+        transport._state = TransportState.READY
+
+    async def mock_bluetooth_stop(transport: Any) -> None:
+        transport._is_running = False
+        transport._state = TransportState.OFFLINE
+
+    async def mock_lan_start(transport: Any) -> None:
+        transport._is_running = True
+        transport._state = TransportState.READY
+
+    async def mock_lan_stop(transport: Any) -> None:
+        transport._is_running = False
+        transport._state = TransportState.OFFLINE
+
+    with (
+        patch(
+            "bitchat.transport.bluetooth.BluetoothTransport.start",
+            mock_bluetooth_start,
+        ),
+        patch(
+            "bitchat.transport.bluetooth.BluetoothTransport.stop",
+            mock_bluetooth_stop,
+        ),
+        patch("bitchat.network.transport.LANTransport.start", mock_lan_start),
+        patch("bitchat.network.transport.LANTransport.stop", mock_lan_stop),
+    ):
+        await coordinator.start()
+        assert (await coordinator.switch_transport("lan"))[0] is True
+        fail_bluetooth = True
+
+        success, message = await coordinator.switch_transport("bluetooth")
+
+        assert success is False
+        assert "BLE peripheral initialization failed" in message
+        assert "lan transport restored" in message.lower()
+        assert coordinator.active_transport_name == "lan"
+        assert coordinator.active_transport.is_running is True
+        assert coordinator.is_running is True
+        assert coordinator.lan_error_message is None
+        assert coordinator.ble_error_message == "BLE peripheral initialization failed"
         await coordinator.stop()
 
 

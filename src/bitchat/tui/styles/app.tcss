@@ -125,6 +125,10 @@ PeerSidebar {
     height: auto;
 }
 
+.peer-list-view > ListItem > Label {
+    width: 100%;
+}
+
 .peer-list-view > ListItem:hover {
     background: #141824;
 }
@@ -272,40 +276,48 @@ StatusBar {
     grid-size: 3 2;
     grid-columns: 1fr 1fr 1fr;
     grid-rows: 1 1;
+    grid-gutter: 0;
     width: 48;
-    min-width: 33;
+    min-width: 42;
     max-width: 54;
     height: 3;
     align-vertical: middle;
 }
 
-.action-btn {
-    height: 1;
+.footer-action-grid Button {
     width: 100%;
-    background: #141824;
-    color: #8b949e;
-    border: none;
+    min-width: 0;
+    height: 1;
+    margin: 0;
+}
+
+Button {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    margin: 0 1 0 0;
     padding: 0 1;
+    border: none;
+    background: #161b22;
+    color: #e6edf3;
+    content-align: center middle;
     text-align: center;
 }
 
-.action-btn:hover {
-    background: #1e2438;
-    color: #e6edf3;
-    border: none;
+Button:hover {
+    background: #21262d;
+    color: #ffffff;
 }
 
-.action-btn:focus {
-    background: #1f283d;
-    color: #ffffff;
+Button:focus, Button.-active {
+    background: #202838;
+    color: #58a6ff;
     text-style: bold;
-    border: none;
 }
 
-Button.-active, .action-btn.-active {
-    background: #253352;
-    color: #ffffff;
-    border: none;
+Button:disabled {
+    background: #161b22;
+    color: #57606a;
 }
 
 /* ------------------------------------------------------------------------------
@@ -330,7 +342,7 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     layout: vertical;
 }
 
-#peer-info-dialog, #edit-theme-dialog {
+#peer-info-dialog {
     width: 76;
     max-width: 95%;
     height: auto;
@@ -341,6 +353,20 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     border-title-style: bold;
     border-title-color: #58a6ff;
     padding: 1 2;
+}
+
+#edit-theme-dialog {
+    width: 76;
+    max-width: 95%;
+    height: auto;
+    max-height: 95%;
+    background: #0f121c;
+    border: round #28334e;
+    border-title-align: left;
+    border-title-style: bold;
+    border-title-color: #58a6ff;
+    padding: 1 2;
+    overflow-y: auto;
 }
 
 #settings-dialog {
@@ -377,20 +403,6 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     border-top: solid #1b2030;
 }
 
-#help-close-btn {
-    min-width: 16;
-    height: 1;
-    background: #161b26;
-    color: #e6edf3;
-    border: round #22283a;
-    text-align: center;
-}
-
-#help-close-btn:hover {
-    background: #1e2438;
-    border: round #28334e;
-    color: #58a6ff;
-}
 
 /* Peer Info Modal Styling */
 #peer-info-card {
@@ -408,8 +420,62 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
 
 #peer-info-actions {
     height: 1;
+    width: 100%;
     layout: horizontal;
-    align: right middle;
+    align: center middle;
+}
+
+#peer-info-footer-buttons,
+#edit-theme-footer-buttons,
+#unsaved-footer-buttons {
+    max-width: 100%;
+    height: 1;
+    grid-gutter: 0;
+}
+
+#peer-info-footer-buttons {
+    width: 69;
+    grid-size: 3 1;
+    grid-columns: 1fr 1fr 1fr;
+    grid-rows: 1;
+}
+
+#edit-theme-footer-buttons {
+    width: 60;
+    grid-size: 3 1;
+    grid-columns: 1fr 1fr 1fr;
+    grid-rows: 1;
+}
+
+#unsaved-footer-buttons {
+    width: 44;
+    grid-size: 2 1;
+    grid-columns: 1fr 1fr;
+    grid-rows: 1;
+}
+
+#ble-error-buttons {
+    max-width: 100%;
+    height: 1;
+    grid-gutter: 0;
+}
+
+#ble-error-buttons.footer-actions-1 {
+    width: 22;
+    grid-size: 1 1;
+    grid-columns: 1fr;
+}
+
+#ble-error-buttons.footer-actions-2 {
+    width: 64;
+    grid-size: 2 1;
+    grid-columns: 1fr 1fr;
+}
+
+#ble-error-buttons.footer-actions-3 {
+    width: 75;
+    grid-size: 3 1;
+    grid-columns: 1fr 1fr 1fr;
 }
 
 /* Settings & Theme Forms */
@@ -427,8 +493,20 @@ HelpScreen, PeerInfoModal, SettingsModal, EditThemeModal, BLEErrorModal {
     height: auto;
     background: #080a0f;
     border: round #22283a;
-    padding: 1;
-    margin-bottom: 1;
+    padding: 0 1;
+    margin-bottom: 0;
+}
+
+#edit-theme-form RadioSet {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin-bottom: 0;
+}
+
+#edit-theme-form .settings-field-label {
+    margin-top: 1;
+    margin-bottom: 0;
 }
 
 .settings-kb-row {
@@ -504,21 +582,52 @@ RadioSet > RadioButton:focus {
     margin-top: 1;
 }
 
-#settings-actions, #edit-theme-actions {
+#settings-actions {
     height: 1;
     layout: horizontal;
     align: right middle;
 }
 
-#settings-actions .action-btn, #edit-theme-actions .action-btn, #peer-info-actions .action-btn, #ble-error-actions .action-btn {
-    width: auto;
-    min-width: 14;
-    margin-left: 1;
+#edit-theme-footer-bar {
+    width: 100%;
+    height: auto;
+    border-top: solid #1b2030;
+    layout: vertical;
+    align: center middle;
+    padding: 0;
+    margin-top: 1;
 }
+
+#edit-theme-actions {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    align: center middle;
+}
+
+#edit-theme-actions-right {
+    width: 100%;
+    height: 1;
+    margin-top: 1;
+    margin-bottom: 0;
+    align: center middle;
+    layout: horizontal;
+}
+
+#edit-theme-save-indicator {
+    width: 100%;
+    height: 1;
+    text-style: bold;
+    content-align: center middle;
+    text-align: center;
+    border: none;
+    background: transparent;
+}
+
 
 /* BLE Error Modal */
 #ble-error-dialog {
-    width: 70;
+    width: 84;
     max-width: 95%;
     height: auto;
     max-height: 85%;
@@ -550,8 +659,9 @@ RadioSet > RadioButton:focus {
 
 #ble-error-actions {
     height: 1;
+    width: 100%;
     layout: horizontal;
-    align: right middle;
+    align: center middle;
 }
 
 /* ------------------------------------------------------------------------------
@@ -587,12 +697,16 @@ RadioSet > RadioButton:focus {
 }
 
 /* ------------------------------------------------------------------------------
-   Accent Themes (Strict 5-Family Palette Integration)
+   Accent Themes (Centralized 4-Theme Token Integration)
    ------------------------------------------------------------------------------ */
-.accent-blue #header-brand {
-    color: #58a6ff;
-}
-.accent-blue #identity-title {
+
+/* Theme 1: Midnight Blue */
+.accent-blue #header-brand,
+.accent-blue #identity-title,
+.accent-blue #settings-title,
+.accent-blue #edit-theme-title,
+.accent-blue #peers-title,
+.accent-blue .settings-field-label {
     color: #58a6ff;
 }
 .accent-blue PeerSidebar {
@@ -601,25 +715,61 @@ RadioSet > RadioButton:focus {
 .accent-blue ChatView {
     border-title-color: #58a6ff;
 }
-.accent-blue MessageInput:focus, .accent-blue Input:focus, .accent-blue RadioSet:focus {
+.accent-blue #edit-theme-dialog {
+    border: round #28334e;
+    background: #0f121c;
+}
+.accent-blue #edit-theme-form {
+    border: round #22283a;
+    background: #080a0f;
+}
+.accent-blue #edit-theme-hint {
+    color: #8b949e;
+}
+.accent-blue MessageInput:focus,
+.accent-blue Input:focus,
+.accent-blue RadioSet:focus {
     border: round #28334e;
     background: #121624;
 }
-.accent-blue .action-btn:focus {
-    background: #152238;
+.accent-blue .cat-nav-btn.active-cat {
     color: #58a6ff;
-    text-style: bold;
-    border: none;
+    border-left: wide #58a6ff;
+    background: #161b26;
+}
+.accent-blue .cat-nav-btn:focus {
+    color: #ffffff;
+    border-left: wide #58a6ff;
+    background: #202838;
+}
+.accent-blue #settings-active-cat-badge {
+    color: #58a6ff;
+}
+.accent-blue DataTable > .datatable--cursor {
+    background: #1e2438;
+    color: #58a6ff;
 }
 .accent-blue #autocomplete-option-list > .option-list--option-highlighted {
     background: #1e2438;
     color: #58a6ff;
 }
-
-.accent-cyan #header-brand {
-    color: #39c5cf;
+.accent-blue #status-line-target {
+    color: #58a6ff;
 }
-.accent-cyan #identity-title {
+.accent-blue #status-actions-grid Button:focus,
+.accent-blue #peers-footer-buttons Button:focus,
+.accent-blue #edit-theme-footer-buttons Button:focus {
+    background: #202838;
+    color: #58a6ff;
+}
+
+/* Theme 2: Cyber Cyan */
+.accent-cyan #header-brand,
+.accent-cyan #identity-title,
+.accent-cyan #settings-title,
+.accent-cyan #edit-theme-title,
+.accent-cyan #peers-title,
+.accent-cyan .settings-field-label {
     color: #39c5cf;
 }
 .accent-cyan PeerSidebar {
@@ -628,25 +778,61 @@ RadioSet > RadioButton:focus {
 .accent-cyan ChatView {
     border-title-color: #39c5cf;
 }
-.accent-cyan MessageInput:focus, .accent-cyan Input:focus, .accent-cyan RadioSet:focus {
+.accent-cyan #edit-theme-dialog {
     border: round #1d3840;
-    background: #0f1820;
+    background: #0a161c;
 }
-.accent-cyan .action-btn:focus {
+.accent-cyan #edit-theme-form {
+    border: round #1d3840;
+    background: #060d10;
+}
+.accent-cyan #edit-theme-hint {
+    color: #70979e;
+}
+.accent-cyan MessageInput:focus,
+.accent-cyan Input:focus,
+.accent-cyan RadioSet:focus {
+    border: round #1d3840;
+    background: #0c1b22;
+}
+.accent-cyan .cat-nav-btn.active-cat {
+    color: #39c5cf;
+    border-left: wide #39c5cf;
+    background: #0f2028;
+}
+.accent-cyan .cat-nav-btn:focus {
+    color: #ffffff;
+    border-left: wide #39c5cf;
+    background: #14303c;
+}
+.accent-cyan #settings-active-cat-badge {
+    color: #39c5cf;
+}
+.accent-cyan DataTable > .datatable--cursor {
     background: #10262e;
     color: #39c5cf;
-    text-style: bold;
-    border: none;
 }
 .accent-cyan #autocomplete-option-list > .option-list--option-highlighted {
     background: #10262e;
     color: #39c5cf;
 }
-
-.accent-emerald #header-brand {
-    color: #56d364;
+.accent-cyan #status-line-target {
+    color: #39c5cf;
 }
-.accent-emerald #identity-title {
+.accent-cyan #status-actions-grid Button:focus,
+.accent-cyan #peers-footer-buttons Button:focus,
+.accent-cyan #edit-theme-footer-buttons Button:focus {
+    background: #14303c;
+    color: #39c5cf;
+}
+
+/* Theme 3: Terminal Emerald */
+.accent-emerald #header-brand,
+.accent-emerald #identity-title,
+.accent-emerald #settings-title,
+.accent-emerald #edit-theme-title,
+.accent-emerald #peers-title,
+.accent-emerald .settings-field-label {
     color: #56d364;
 }
 .accent-emerald PeerSidebar {
@@ -655,25 +841,61 @@ RadioSet > RadioButton:focus {
 .accent-emerald ChatView {
     border-title-color: #56d364;
 }
-.accent-emerald MessageInput:focus, .accent-emerald Input:focus, .accent-emerald RadioSet:focus {
+.accent-emerald #edit-theme-dialog {
     border: round #1d3a24;
-    background: #101c13;
+    background: #0a180f;
 }
-.accent-emerald .action-btn:focus {
+.accent-emerald #edit-theme-form {
+    border: round #1d3a24;
+    background: #060f09;
+}
+.accent-emerald #edit-theme-hint {
+    color: #6e9674;
+}
+.accent-emerald MessageInput:focus,
+.accent-emerald Input:focus,
+.accent-emerald RadioSet:focus {
+    border: round #1d3a24;
+    background: #0c1d10;
+}
+.accent-emerald .cat-nav-btn.active-cat {
+    color: #56d364;
+    border-left: wide #56d364;
+    background: #0f2416;
+}
+.accent-emerald .cat-nav-btn:focus {
+    color: #ffffff;
+    border-left: wide #56d364;
+    background: #15331c;
+}
+.accent-emerald #settings-active-cat-badge {
+    color: #56d364;
+}
+.accent-emerald DataTable > .datatable--cursor {
     background: #13261a;
     color: #56d364;
-    text-style: bold;
-    border: none;
 }
 .accent-emerald #autocomplete-option-list > .option-list--option-highlighted {
     background: #13261a;
     color: #56d364;
 }
-
-.accent-purple #header-brand {
-    color: #bc8cff;
+.accent-emerald #status-line-target {
+    color: #56d364;
 }
-.accent-purple #identity-title {
+.accent-emerald #status-actions-grid Button:focus,
+.accent-emerald #peers-footer-buttons Button:focus,
+.accent-emerald #edit-theme-footer-buttons Button:focus {
+    background: #15331c;
+    color: #56d364;
+}
+
+/* Theme 4: Amethyst Purple */
+.accent-purple #header-brand,
+.accent-purple #identity-title,
+.accent-purple #settings-title,
+.accent-purple #edit-theme-title,
+.accent-purple #peers-title,
+.accent-purple .settings-field-label {
     color: #bc8cff;
 }
 .accent-purple PeerSidebar {
@@ -682,17 +904,864 @@ RadioSet > RadioButton:focus {
 .accent-purple ChatView {
     border-title-color: #bc8cff;
 }
-.accent-purple MessageInput:focus, .accent-purple Input:focus, .accent-purple RadioSet:focus {
+.accent-purple #edit-theme-dialog {
     border: round #392557;
-    background: #181224;
+    background: #140d1f;
 }
-.accent-purple .action-btn:focus {
+.accent-purple #edit-theme-form {
+    border: round #392557;
+    background: #0c0812;
+}
+.accent-purple #edit-theme-hint {
+    color: #8e7a9e;
+}
+.accent-purple MessageInput:focus,
+.accent-purple Input:focus,
+.accent-purple RadioSet:focus {
+    border: round #392557;
+    background: #160e24;
+}
+.accent-purple .cat-nav-btn.active-cat {
+    color: #bc8cff;
+    border-left: wide #bc8cff;
+    background: #1c122c;
+}
+.accent-purple .cat-nav-btn:focus {
+    color: #ffffff;
+    border-left: wide #bc8cff;
+    background: #2a1b42;
+}
+.accent-purple #settings-active-cat-badge {
+    color: #bc8cff;
+}
+.accent-purple DataTable > .datatable--cursor {
     background: #271b3d;
     color: #bc8cff;
-    text-style: bold;
-    border: none;
 }
 .accent-purple #autocomplete-option-list > .option-list--option-highlighted {
     background: #271b3d;
     color: #bc8cff;
+}
+.accent-purple #status-line-target {
+    color: #bc8cff;
+}
+.accent-purple #status-actions-grid Button:focus,
+.accent-purple #peers-footer-buttons Button:focus,
+.accent-purple #edit-theme-footer-buttons Button:focus {
+    background: #2a1b42;
+    color: #bc8cff;
+}
+
+/* ==============================================================================
+   BitChat M6: Central Dashboard, Multi-Screen Navigation & Settings Architecture
+   ============================================================================== */
+
+/* ------------------------------------------------------------------------------
+   HomeScreen (Terminal-Native Centered Dashboard & Interactive Text Navigation)
+   ------------------------------------------------------------------------------ */
+#home-screen-container {
+    background: #080a0f;
+    height: 100%;
+    width: 100%;
+    align: center middle;
+    layout: vertical;
+}
+
+#home-dashboard {
+    width: 60;
+    max-width: 95%;
+    height: auto;
+    max-height: 95%;
+    background: #0b0e14;
+    border: round #22283a;
+    padding: 1 2;
+    align: center middle;
+}
+
+#home-banner {
+    align: center middle;
+    height: auto;
+    margin-bottom: 1;
+    width: 100%;
+}
+
+#home-wordmark {
+    color: #58a6ff;
+    text-style: bold;
+    height: 3;
+    width: 100%;
+    text-align: center;
+    content-align: center middle;
+}
+
+#home-subtitle {
+    color: #8b949e;
+    height: 1;
+    margin-top: 1;
+    margin-bottom: 1;
+    text-align: center;
+    width: 100%;
+}
+
+#home-nav-menu {
+    width: 24;
+    height: auto;
+    margin-bottom: 1;
+    align: center middle;
+}
+
+.menu-item {
+    width: 100%;
+    height: 1;
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: #8b949e;
+    text-align: left;
+}
+
+.menu-item:hover {
+    color: #58a6ff;
+}
+
+.menu-item.selected {
+    color: #58a6ff;
+    text-style: bold;
+}
+
+#home-nav-hint {
+    text-align: center;
+    height: 1;
+    margin-top: 1;
+    color: #8b949e;
+    width: 100%;
+}
+
+#home-hidden-compat {
+    display: none;
+    height: 0;
+    width: 0;
+}
+
+/* ------------------------------------------------------------------------------
+   TelemetryScreen (Dedicated System, Radio, LAN & Identity Diagnosis)
+   ------------------------------------------------------------------------------ */
+#telemetry-screen-container {
+    height: 100%;
+    width: 100%;
+    background: #080a0f;
+    layout: vertical;
+}
+
+#telemetry-top-header {
+    dock: top;
+    height: 1;
+    background: #0a0d14;
+    border-bottom: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: left middle;
+}
+
+#telemetry-title {
+    text-style: bold;
+    color: #58a6ff;
+    width: auto;
+}
+
+#telemetry-header-runtime {
+    dock: right;
+    width: auto;
+    color: #8b949e;
+}
+
+#telemetry-sections-scroll {
+    height: 1fr;
+    padding: 0 1;
+}
+
+.telemetry-card {
+    height: auto;
+    margin-bottom: 0;
+    background: #0b0e14;
+    border: round #22283a;
+    padding: 0 1;
+}
+
+.telemetry-card .card-header {
+    text-style: bold;
+    height: 1;
+    margin-bottom: 0;
+    color: #58a6ff;
+}
+
+.telemetry-card .card-body {
+    height: auto;
+}
+
+.telem-row {
+    height: auto;
+    min-height: 1;
+    color: #e6edf3;
+}
+
+.telem-row-warning {
+    height: auto;
+    min-height: 1;
+    color: #d29922;
+    padding-left: 1;
+}
+
+.telem-row-error {
+    height: auto;
+    color: #d29922;
+    margin-top: 0;
+}
+
+.telem-note {
+    height: auto;
+    color: #8b949e;
+    margin-top: 0;
+}
+
+#telemetry-sections-scroll Collapsible {
+    height: auto;
+    margin-top: 0;
+}
+
+#telemetry-sections-scroll Collapsible > .collapsible--title {
+    color: #8b949e;
+    text-style: none;
+}
+
+#telemetry-action-bar {
+    dock: bottom;
+    height: 3;
+    background: #0a0d14;
+    border-top: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: left middle;
+}
+
+
+/* ------------------------------------------------------------------------------
+   ConnectionModal (Terminal-Native Mandatory Connection Workflow)
+   ------------------------------------------------------------------------------ */
+ConnectionModal {
+    align: center middle;
+    background: rgba(8, 10, 15, 0.85);
+}
+
+#connection-dialog {
+    width: 66;
+    max-width: 95%;
+    height: auto;
+    max-height: 90%;
+    background: #0b0e14;
+    border: round #28334e;
+    padding: 1 2;
+    align: center middle;
+}
+
+#conn-header {
+    height: auto;
+    margin-bottom: 1;
+    align: center middle;
+}
+
+#conn-title {
+    text-style: bold;
+    color: #58a6ff;
+    text-align: center;
+}
+
+#conn-subtitle {
+    color: #8b949e;
+    height: 1;
+    text-align: center;
+}
+
+#conn-options-list {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+.conn-menu-item {
+    width: 100%;
+    height: 2;
+    margin-bottom: 1;
+    background: transparent;
+    border: none;
+    padding: 0 1;
+    color: #8b949e;
+}
+
+.conn-menu-item:hover {
+    color: #58a6ff;
+}
+
+.conn-menu-item.selected {
+    color: #58a6ff;
+    text-style: bold;
+}
+
+#conn-status-panel {
+    height: auto;
+    min-height: 1;
+    text-align: center;
+    margin-top: 1;
+    color: #6e7681;
+}
+
+#conn-hidden-compat {
+    display: none;
+    height: 0;
+    width: 0;
+}
+
+/* ------------------------------------------------------------------------------
+   PeersScreen
+   ------------------------------------------------------------------------------ */
+#peers-screen-container {
+    background: #080a0f;
+    height: 100%;
+    width: 100%;
+    layout: vertical;
+}
+
+#peers-top-header {
+    dock: top;
+    height: 1;
+    background: #0a0d14;
+    border-bottom: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: left middle;
+}
+
+#peers-title {
+    text-style: bold;
+    color: #58a6ff;
+    width: auto;
+}
+
+#peers-local-info {
+    dock: right;
+    width: auto;
+}
+
+#peers-table-container {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#peers-empty-container {
+    align: center middle;
+    width: 100%;
+    height: 100%;
+    border: round #22283a;
+    background: #080a0f;
+    padding: 2;
+}
+
+#peers-empty-title {
+    text-style: bold;
+    color: #e6edf3;
+    margin-bottom: 1;
+    text-align: center;
+    width: 100%;
+    content-align: center middle;
+}
+
+#peers-empty-subtitle {
+    color: #8b949e;
+    text-align: center;
+    width: 100%;
+    content-align: center middle;
+}
+
+#peers-table {
+    height: 100%;
+    background: #080a0f;
+    border: round #22283a;
+}
+
+#peers-action-bar {
+    dock: bottom;
+    height: 5;
+    width: 100%;
+    background: #0a0d14;
+    border-top: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: left middle;
+}
+
+#peer-connect-input {
+    width: 1fr;
+    min-width: 24;
+    height: 3;
+    margin-right: 1;
+    background: #161b22;
+    border: solid #30363d;
+    color: #e6edf3;
+    padding: 0 1;
+}
+
+#peers-footer-buttons {
+    dock: right;
+    width: 48;
+    min-width: 42;
+    max-width: 54;
+    height: 3;
+    grid-size: 3 2;
+    grid-columns: 2fr 2fr 2fr;
+    grid-rows: 1 1;
+    grid-gutter: 0;
+    align-vertical: middle;
+}
+
+#peers-footer-buttons Button {
+    width: 100%;
+    min-width: 0;
+    height: 1;
+    margin: 0;
+    padding: 0 1;
+}
+
+.action-btn-spacer {
+    width: 100%;
+    height: 1;
+    background: transparent;
+}
+
+#peers-action-bar.compact-footer {
+    height: 7;
+    layout: vertical;
+    align: left middle;
+}
+
+#peers-action-bar.compact-footer #peer-connect-input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0 0 1 0;
+}
+
+#peers-action-bar.compact-footer #peers-footer-buttons {
+    dock: none;
+    width: 100%;
+    max-width: 100%;
+    height: 2;
+    grid-size: 3 2;
+    grid-columns: 2fr 2fr 2fr;
+    grid-rows: 1 1;
+    grid-gutter: 0;
+}
+
+#peers-footer-buttons Button:disabled {
+    background: #12151c;
+    color: #484f58;
+}
+
+/* ------------------------------------------------------------------------------
+   CommandsScreen
+   ------------------------------------------------------------------------------ */
+#commands-screen-container {
+    background: #080a0f;
+    height: 100%;
+    width: 100%;
+    layout: vertical;
+}
+
+#commands-top-header {
+    dock: top;
+    height: 1;
+    background: #0a0d14;
+    border-bottom: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: left middle;
+}
+
+#commands-title {
+    text-style: bold;
+    color: #58a6ff;
+    width: auto;
+}
+
+#commands-tables-scroll {
+    height: 1fr;
+    padding: 1 2;
+}
+
+.table-section-title {
+    text-style: bold;
+    margin: 1 0 0 0;
+}
+
+#commands-table, #shortcuts-table {
+    height: auto;
+    min-height: 6;
+    margin-bottom: 1;
+    background: #080a0f;
+    border: round #22283a;
+}
+
+#commands-action-bar {
+    dock: bottom;
+    height: 3;
+    width: 100%;
+    background: #0a0d14;
+    border-top: solid #1b2030;
+    padding: 0 1;
+    layout: horizontal;
+    align: right middle;
+}
+
+#commands-footer-buttons {
+    width: 56;
+    max-width: 100%;
+    height: 1;
+    grid-size: 2 1;
+    grid-columns: 1fr 1fr;
+    grid-rows: 1;
+    grid-gutter: 0;
+}
+
+/* ------------------------------------------------------------------------------
+   SettingsScreen Architecture & Dedicated Save Status Indicator
+   ------------------------------------------------------------------------------ */
+SettingsScreen {
+    align: center middle;
+    padding: 1 2;
+    background: rgba(8, 10, 15, 0.85);
+}
+
+#settings-dialog {
+    width: 104;
+    max-width: 98%;
+    height: 34;
+    max-height: 95%;
+    background: #0f121c;
+    border: round #22283a;
+    padding: 1;
+    layout: vertical;
+    align: left top;
+}
+
+#settings-header-bar {
+    height: 1;
+    layout: horizontal;
+    margin-bottom: 1;
+    align: left middle;
+    width: 100%;
+}
+
+#settings-title {
+    text-style: bold;
+    color: #58a6ff;
+}
+
+#settings-active-cat-badge {
+    dock: right;
+    width: auto;
+    color: #8b949e;
+}
+
+#settings-body-split {
+    height: 1fr;
+    layout: horizontal;
+    width: 100%;
+}
+
+#settings-category-nav {
+    width: 32;
+    min-width: 32;
+    height: 100%;
+    border-right: solid #1b2030;
+    padding-right: 1;
+    background: #0d1117;
+    align: left top;
+}
+
+.cat-nav-header {
+    text-style: bold;
+    color: #8b949e;
+    margin-bottom: 1;
+    padding-left: 1;
+}
+
+.cat-nav-btn {
+    width: 100%;
+    height: 1;
+    min-height: 1;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: #8b949e;
+    text-align: left;
+    content-align: left middle;
+    padding-left: 1;
+    padding-right: 1;
+    text-wrap: nowrap;
+}
+
+.cat-nav-btn:focus {
+    text-style: bold;
+    color: #ffffff;
+    background: #202838;
+    border-left: wide #58a6ff;
+}
+
+.cat-nav-btn:hover {
+    color: #ffffff;
+    background: #161b22;
+}
+
+.cat-nav-btn.active-cat {
+    text-style: bold;
+    color: #58a6ff;
+    background: #161b26;
+    border-left: wide #58a6ff;
+}
+
+#settings-form {
+    height: 100%;
+    padding-left: 2;
+    padding-right: 1;
+    background: #0f121c;
+    align: left top;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: #30363d;
+    scrollbar-color-hover: #58a6ff;
+    scrollbar-color-active: #388bfd;
+}
+
+.settings-cat-section {
+    height: auto;
+    margin-bottom: 1;
+    align: left top;
+}
+
+.settings-cat-intro {
+    color: #8b949e;
+    margin-bottom: 1;
+    text-align: left;
+}
+
+.settings-field-label {
+    text-style: bold;
+    color: #58a6ff;
+    margin-bottom: 1;
+    text-align: left;
+}
+
+.settings-cat-section Label {
+    color: #e6edf3;
+    text-align: left;
+    margin-top: 1;
+}
+
+.settings-cat-section Input {
+    background: #161b22;
+    border: solid #30363d;
+    color: #e6edf3;
+    height: 3;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+.settings-cat-section Input:focus {
+    border: solid #58a6ff;
+}
+
+.safe-ident-display {
+    background: #161b22;
+    color: #79c0ff;
+    padding: 0 1;
+    height: 1;
+    margin-bottom: 1;
+    border: solid #30363d;
+}
+
+#section-cat-network .safe-ident-display {
+    height: auto;
+    min-height: 1;
+}
+
+.settings-note {
+    color: #8b949e;
+    margin-top: 1;
+}
+
+.settings-switch-row {
+    height: auto;
+    min-height: 1;
+    margin: 1 0;
+    layout: horizontal;
+    align: left middle;
+}
+
+.settings-switch-row Label {
+    width: auto;
+    margin-right: 2;
+    margin-top: 0;
+}
+
+.settings-switch-row Switch {
+    height: auto;
+}
+
+#settings-footer-bar {
+    dock: bottom;
+    height: auto;
+    min-height: 4;
+    border-top: solid #1b2030;
+    layout: vertical;
+    align: center middle;
+    padding: 1 0 0 0;
+}
+
+#settings-footer-buttons-row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    align: center middle;
+}
+
+#settings-actions-left {
+    width: 39;
+    height: 1;
+    grid-size: 3 1;
+    grid-columns: 1fr 1fr 1fr;
+    grid-rows: 1;
+    grid-gutter: 0;
+    align: center middle;
+}
+
+#settings-actions-left Button {
+    width: 100%;
+    min-width: 0;
+    height: 1;
+    margin: 0;
+    border: none;
+    background: #161b22;
+    color: #e6edf3;
+}
+
+#settings-actions-left Button:hover {
+    background: #21262d;
+    color: #ffffff;
+}
+
+#settings-actions-left #btn-settings-save {
+    background: #161b22;
+    color: #e6edf3;
+    text-style: bold;
+}
+
+#settings-actions-right {
+    width: 100%;
+    height: 1;
+    margin-top: 1;
+    margin-bottom: 0;
+    align: center middle;
+    layout: horizontal;
+}
+
+#settings-save-indicator {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    text-style: bold;
+    content-align: center middle;
+    border: none;
+    background: transparent;
+}
+
+#settings-save-indicator.state-saved {
+    background: transparent;
+    color: #3fb950;
+}
+
+#settings-save-indicator.state-unsaved {
+    background: transparent;
+    color: #d29922;
+}
+
+/* ------------------------------------------------------------------------------
+   UnsavedChangesModal
+   ------------------------------------------------------------------------------ */
+UnsavedChangesModal {
+    align: center middle;
+}
+
+#unsaved-changes-dialog {
+    width: 56;
+    height: auto;
+    max-height: 18;
+    background: #0f121c;
+    border: round #f85149;
+    padding: 1 2;
+    align: center middle;
+}
+
+#unsaved-title {
+    text-style: bold;
+    color: #f85149;
+    height: 1;
+    margin-bottom: 1;
+}
+
+#unsaved-desc {
+    color: #e6edf3;
+    height: auto;
+    margin-bottom: 1;
+    text-align: left;
+}
+
+#unsaved-actions {
+    width: 100%;
+    height: 3;
+    align: center middle;
+    margin-top: 1;
+    layout: horizontal;
+}
+
+.unsaved-btn {
+    width: auto;
+}
+
+#btn-unsaved-discard {
+    background: #da3633;
+    color: #ffffff;
+}
+
+#btn-unsaved-stay {
+    background: #388bfd;
+    color: #ffffff;
+}
+
+#unsaved-actions Button:focus {
+    background: #388bfd;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#telemetry-action-bar {
+    width: 100%;
+    align: right middle;
+}
+
+#telemetry-footer-buttons {
+    width: 80;
+    max-width: 100%;
+    height: 1;
+    grid-size: 4 1;
+    grid-columns: 1fr 1fr 1fr 1fr;
+    grid-rows: 1;
+    grid-gutter: 0;
 }

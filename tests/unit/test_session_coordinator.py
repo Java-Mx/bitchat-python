@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.ble.mocks import (
@@ -22,6 +22,9 @@ from bitchat.protocol.constants import MessageType
 from bitchat.protocol.packet import BitchatPacket
 from bitchat.tui.app import BitChatApp
 from bitchat.tui.widgets.chat_view import ChatView
+
+if TYPE_CHECKING:
+    from bitchat.transport.base import TransportError
 
 
 def _create_linked_pair() -> tuple[
@@ -428,14 +431,14 @@ class TestSessionCoordinator:
             scanner_factory=failing_scanner_factory,
         )
 
-        reported_errors: list[str] = []
+        reported_errors: list[TransportError] = []
         coord = SessionCoordinator(
             local_identity=id_a,
             ble_manager=manager,
             ble_server=server,
             nickname="Alice",
         )
-        coord.on_ble_error = lambda err: reported_errors.append(err)
+        coord.on_ble_error = reported_errors.append
 
         await coord.start()
 
@@ -443,6 +446,7 @@ class TestSessionCoordinator:
         assert coord.ble_error_message is not None
         assert "Hardware adapter missing" in coord.ble_error_message
         assert len(reported_errors) >= 1
+        assert all(error.transport.value == "bluetooth" for error in reported_errors)
 
         # Test retry failure
         success = await coord.retry_ble()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, ClassVar
 
-from textual.containers import Horizontal, Vertical
+from textual.containers import Grid, Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -121,7 +121,13 @@ class PeerInfoModal(ModalScreen[None]):
                     classes="peer-info-section",
                 )
 
-            with Horizontal(id="peer-info-actions"):
+            with (
+                Horizontal(id="peer-info-actions"),
+                Grid(
+                    id="peer-info-footer-buttons",
+                    classes="footer-action-grid",
+                ),
+            ):
                 yield Button("Direct Message", id="btn-peer-dm", classes="action-btn")
                 yield Button(
                     "Copy Fingerprint", id="btn-peer-copy-fp", classes="action-btn"

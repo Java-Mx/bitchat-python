@@ -7,15 +7,14 @@ import errno
 import logging
 import platform
 import re
-import shutil
 import socket
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bitchat.network.adapter import get_local_ip, get_wifi_ssid_and_state
+from bitchat.network.adapter import get_network_info_snapshot
+from bitchat.network.provider import discover_network_info
 from bitchat.platform.detection import (
     PlatformKind,
     detect_platform,
@@ -24,6 +23,9 @@ from bitchat.platform.detection import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from bitchat.network.models import NetworkInfo
 
 DEFAULT_UDP_PORT = 24024
 DEFAULT_TCP_PORT = 24025
@@ -76,6 +78,15 @@ class NetworkCapabilities:
     ethernet: str
     ipv4: str
     ipv6: str
+    connection_name: str = "Unavailable"
+    connection_type: str = "Unavailable"
+    interface_name: str = "Unavailable"
+    interface_description: str = "Unavailable"
+    ssid: str = "Unavailable"
+    subnet: str = "Unavailable"
+    gateway: str = "Unavailable"
+    dns: str = "Unavailable"
+    profile: str = "Unavailable"
 
 
 @dataclass(frozen=True)
@@ -106,6 +117,7 @@ class SystemReport:
     network: NetworkCapabilities
     lan: LanCapabilities
     configuration: ConfiguredTransports
+    network_snapshot: NetworkInfo | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -414,143 +426,40 @@ def _detect_generic_bluetooth() -> BluetoothCapabilities:
     )
 
 
-def detect_network_info() -> NetworkCapabilities:
-    """Detect Wi-Fi, Ethernet, IPv4, and IPv6 networking capabilities."""
-    kind = detect_platform()
-    ipv4 = get_local_ip() or "Not detected"
-    ipv6 = _detect_ipv6_address()
-
-    wifi_status = "Not detected"
-    eth_status = "Not detected"
-
-    if kind is PlatformKind.LINUX:
-        wifi_status, eth_status = _detect_linux_interfaces()
-    elif kind is PlatformKind.WINDOWS:
-        ssid, wifi_state = get_wifi_ssid_and_state()
-        if wifi_state == "connected" and ssid:
-            wifi_status = f"Connected ({ssid})"
-            eth_status = "Available"
-        elif ipv4 != "Not detected":
-            wifi_status = "Disconnected"
-            eth_status = "Connected"
-        else:
-            wifi_status = "Disconnected"
-            eth_status = "Disconnected"
-    else:
-        if ipv4 != "Not detected":
-            eth_status = "Connected"
-            wifi_status = "Available"
-
+def detect_network_info(snapshot: NetworkInfo | None = None) -> NetworkCapabilities:
+    """Map the authoritative normalized OS snapshot to capability summaries."""
+    info = snapshot or discover_network_info()
+    connected = info.status == "Connected"
+    wifi_status = (
+        f"Connected ({info.ssid})"
+        if connected and info.interface == "Wi-Fi" and info.ssid != "Unavailable"
+        else "Disconnected"
+        if info.interface == "Wi-Fi"
+        else "Not detected"
+    )
+    ethernet_status = (
+        "Connected"
+        if connected and info.interface == "Ethernet"
+        else "Disconnected"
+        if info.interface == "Ethernet"
+        else "Not detected"
+    )
     return NetworkCapabilities(
         wifi=wifi_status,
-        ethernet=eth_status,
-        ipv4=ipv4,
-        ipv6=ipv6,
+        ethernet=ethernet_status,
+        ipv4=", ".join(info.ipv4_addresses) or "Not detected",
+        ipv6=", ".join(info.ipv6_addresses) or "Not detected",
+        connection_name=info.connection_name,
+        connection_type=info.interface,
+        interface_name=info.interface_name,
+        interface_description=info.interface_description,
+        ssid=info.ssid,
+        subnet=", ".join(str(prefix) for prefix in info.subnet_prefixes)
+        or "Unavailable",
+        gateway=info.default_gateway,
+        dns=", ".join(info.dns_servers) or "Unavailable",
+        profile=info.connection_name,
     )
-
-
-def _detect_linux_interfaces() -> tuple[str, str]:
-    """Scan /sys/class/net on Linux for Wi-Fi and Ethernet status."""
-    wifi_str = "Not detected"
-    eth_str = "Not detected"
-    net_path = Path("/sys/class/net")
-
-    if not net_path.is_dir():
-        return wifi_str, eth_str
-
-    for iface_dir in net_path.iterdir():
-        name = iface_dir.name
-        if name in ("lo",) or name.startswith(("docker", "veth", "br-", "virbr")):
-            continue
-
-        operstate = "unknown"
-        oper_file = iface_dir / "operstate"
-        if oper_file.is_file():
-            with contextlib.suppress(Exception):
-                operstate = oper_file.read_text(encoding="utf-8").strip()
-
-        # Check Wi-Fi
-        if (iface_dir / "wireless").is_dir():
-            ssid = _detect_linux_wifi_ssid(name)
-            if operstate == "up":
-                if ssid:
-                    wifi_str = f"Connected ({ssid})"
-                elif not wifi_str.startswith("Connected"):
-                    wifi_str = f"Available ({name})"
-            elif wifi_str == "Not detected":
-                wifi_str = f"Available ({name}, {operstate})"
-
-        # Check Ethernet: type 1 is ARPHRD_ETHER
-        type_file = iface_dir / "type"
-        if type_file.is_file() and not (iface_dir / "wireless").is_dir():
-            with contextlib.suppress(Exception):
-                if type_file.read_text(encoding="utf-8").strip() == "1":
-                    if operstate == "up":
-                        eth_str = f"Connected ({name})"
-                    elif eth_str == "Not detected":
-                        eth_str = f"Available ({name}, {operstate})"
-
-    return wifi_str, eth_str
-
-
-def _detect_linux_wifi_ssid(iface: str) -> str | None:
-    """Attempt detection of active Wi-Fi SSID on Linux."""
-    # 1. nmcli
-    if shutil.which("nmcli"):
-        with contextlib.suppress(Exception):
-            res = subprocess.run(
-                ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"],
-                capture_output=True,
-                text=True,
-                timeout=1.5,
-                check=False,
-            )
-            for line in res.stdout.splitlines():
-                if line.startswith("yes:"):
-                    return line.split(":", 1)[1].strip()
-
-    # 2. iwgetid
-    if shutil.which("iwgetid"):
-        with contextlib.suppress(Exception):
-            res = subprocess.run(
-                ["iwgetid", iface, "-r"],
-                capture_output=True,
-                text=True,
-                timeout=1.5,
-                check=False,
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                return res.stdout.strip()
-
-    return None
-
-
-def _detect_ipv6_address() -> str:
-    """Test IPv6 connectivity and return active address or status."""
-    if not socket.has_ipv6:
-        return "Disabled"
-
-    # Route probe to public IPv6 DNS
-    try:
-        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as s:
-            s.connect(("2001:4860:4860::8888", 80))
-            addr = s.getsockname()[0]
-            if addr and not addr.startswith("::1"):
-                return addr
-    except OSError as e:
-        logger.debug("IPv6 route probe failed: %s", e)
-
-    # Hostname probe
-    try:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None, socket.AF_INET6):
-            cand = info[4][0]
-            if isinstance(cand, str) and not cand.startswith("::1"):
-                return cand
-    except OSError as e:
-        logger.debug("IPv6 hostname probe failed: %s", e)
-
-    return "Not detected"
 
 
 def detect_lan_capabilities(
@@ -694,7 +603,8 @@ async def detect_system_capabilities() -> SystemReport:
     """Run full system, Bluetooth, and LAN diagnostic detection."""
     system = detect_system_info()
     bluetooth = await detect_bluetooth_info()
-    network = detect_network_info()
+    network_snapshot = await get_network_info_snapshot()
+    network = detect_network_info(network_snapshot)
     lan = detect_lan_capabilities()
     config = configure_viable_transports(system, bluetooth, network, lan)
 
@@ -704,6 +614,7 @@ async def detect_system_capabilities() -> SystemReport:
         network=network,
         lan=lan,
         configuration=config,
+        network_snapshot=network_snapshot,
     )
 
 
@@ -786,17 +697,77 @@ def format_configure_report(report: SystemReport) -> str:
         f"  Ethernet           {_badge(net_sec.ethernet)}",
         f"  IPv4               {_badge(net_sec.ipv4)}",
         f"  IPv6               {_badge(net_sec.ipv6)}",
-        "",
-        "LAN",
-        f"  UDP Discovery      {_badge(lan_sec.udp_discovery)}",
-        f"  TCP Transport      {_badge(lan_sec.tcp_transport)}",
-        "",
-        "Configuration",
-        f"  BLE                {_badge(cfg_sec.ble)}",
-        f"  LAN                {_badge(cfg_sec.lan)}",
-        f"  Fallback           {_badge(cfg_sec.fallback)}",
-        "",
-        f"{cfg_sec.status}",
     ]
+    if report.network_snapshot is not None:
+        snapshot = report.network_snapshot
+        signal = (
+            f"{snapshot.signal_strength_percent}%"
+            if snapshot.signal_strength_percent is not None
+            else f"{snapshot.signal_strength_dbm} dBm"
+            if snapshot.signal_strength_dbm is not None
+            else "Not reported"
+        )
+        interface_id = snapshot.interface_id or "Not exposed"
+        additional_interfaces = []
+        for item in snapshot.interfaces:
+            if item.name == snapshot.interface_name:
+                continue
+            if item.operational_state.lower() not in {"up", "connected"}:
+                continue
+            addresses = (*item.ipv4_addresses, *item.ipv6_addresses)
+            address_text = ", ".join(addresses) if addresses else "no IP address"
+            additional_interfaces.append(
+                f"{item.name} ({item.kind}, {item.operational_state}): {address_text}"
+            )
+        additional_interfaces_text = (
+            "; ".join(additional_interfaces)
+            if additional_interfaces
+            else "None reported"
+        )
+        lines.extend(
+            [
+                f"  Network status     {_badge(snapshot.status)}",
+                f"  Connection         {_badge(net_sec.connection_name)}",
+                f"  Network profile    {_badge(net_sec.profile)}",
+                f"  Type               {_badge(net_sec.connection_type)}",
+                f"  Interface          {_badge(net_sec.interface_name)}",
+                f"  Adapter            {_badge(net_sec.interface_description)}",
+                f"  Interface ID       {_badge(interface_id)}",
+                f"  Wi-Fi SSID         {_badge(net_sec.ssid)}",
+                f"  Wi-Fi signal       {_badge(signal)}",
+                f"  Subnet prefix      {_badge(net_sec.subnet)}",
+                f"  Default gateway    {_badge(net_sec.gateway)}",
+                f"  DNS servers        {_badge(net_sec.dns)}",
+                f"  Other interfaces   {additional_interfaces_text}",
+                f"  Provider           {_badge(snapshot.provider_backend)}",
+                f"  Snapshot age       {_badge(_snapshot_age(snapshot))}",
+            ]
+        )
+        if snapshot.network_name_reason:
+            lines.append(f"  Connection name    {snapshot.network_name_reason}")
+        if snapshot.collection_errors:
+            lines.extend(
+                f"  Collection warning {error}" for error in snapshot.collection_errors
+            )
+    lines.extend(
+        [
+            "",
+            "LAN",
+            f"  UDP Discovery      {_badge(lan_sec.udp_discovery)}",
+            f"  TCP Transport      {_badge(lan_sec.tcp_transport)}",
+            "",
+            "Configuration",
+            f"  BLE                {_badge(cfg_sec.ble)}",
+            f"  LAN                {_badge(cfg_sec.lan)}",
+            f"  Fallback           {_badge(cfg_sec.fallback)}",
+            "",
+            f"{cfg_sec.status}",
+        ]
+    )
 
     return "\n".join(lines)
+
+
+def _snapshot_age(snapshot: NetworkInfo) -> str:
+    age = snapshot.cache_age_seconds
+    return f"{age:.1f}s" if age is not None else "Unknown"

@@ -49,7 +49,13 @@ class TestStorage:
         assert default_cfg.nickname == "Anonymous"
 
         # Save new configuration
-        storage.save_config(AppConfig(nickname="FileUser", debug=True))
+        storage.save_config(
+            AppConfig(
+                nickname="FileUser",
+                debug=True,
+                keybindings={"help": "f4"},
+            )
+        )
         assert config_file.exists()
 
         # Reload configuration
@@ -57,6 +63,7 @@ class TestStorage:
         loaded = reloaded_storage.load_config()
         assert loaded.nickname == "FileUser"
         assert loaded.debug is True
+        assert loaded.keybindings["help"] == "f4"
 
     def test_file_storage_corrupted_file_raises(self, tmp_path: Path) -> None:
         """Invalid JSON file raises ConfigurationError."""
@@ -65,6 +72,16 @@ class TestStorage:
 
         storage = FileConfigStorage(config_path=config_file)
         with pytest.raises(ConfigurationError, match="Failed to read configuration"):
+            storage.load_config()
+
+    def test_invalid_security_mode_does_not_fall_back_to_normal(
+        self, tmp_path: Path
+    ) -> None:
+        config_file = tmp_path / "invalid_security_mode.json"
+        config_file.write_text('{"security_mode":"unknown"}', encoding="utf-8")
+
+        storage = FileConfigStorage(config_path=config_file)
+        with pytest.raises(ConfigurationError, match="Invalid security_mode"):
             storage.load_config()
 
     def test_file_storage_closed_operations_raise(self, tmp_path: Path) -> None:

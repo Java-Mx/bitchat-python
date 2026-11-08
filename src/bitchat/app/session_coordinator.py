@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from bitchat.crypto.noise import NoiseRole, NoiseSessionState
@@ -14,13 +15,22 @@ from bitchat.exceptions import (
     InvalidFragmentError,
     PacketDecodingError,
 )
+from bitchat.logging import log_transport_diagnostic
 from bitchat.mesh.router import MeshRouter
 from bitchat.network.transport import LANTransport
 from bitchat.protocol.constants import MessageType
 from bitchat.protocol.decoder import decode_packet
 from bitchat.protocol.packet import BitchatPacket
 from bitchat.protocol.reassembly import FragmentReassembler
-from bitchat.transport.base import BaseTransport, TransportState
+from bitchat.transport.base import (
+    BaseTransport,
+    OfflineTransport,
+    TransportError,
+    TransportState,
+    TransportType,
+    TransportWarning,
+    normalize_transport_name,
+)
 from bitchat.transport.bluetooth import BluetoothTransport
 
 if TYPE_CHECKING:
@@ -73,6 +83,8 @@ class SessionCoordinator:
         inter_fragment_delay: float = 0.02,
         mesh_router: MeshRouter | None = None,
         initial_transport: str = "bluetooth",
+        lan_tcp_port: int = 41235,
+        lan_discovery_port: int = 41234,
     ) -> None:
         self.local_identity = local_identity
         self.storage = storage
@@ -85,12 +97,20 @@ class SessionCoordinator:
         self.on_message_received = on_message_received
         self.on_peer_status_changed = on_peer_status_changed
         self.on_handshake_completed = on_handshake_completed
-        self.on_ble_error: Callable[[str], None] | None = None
-        self.on_ble_warning: Callable[[str], None] | None = None
-        self.on_lan_error: Callable[[str], None] | None = None
+        self.on_ble_error: Callable[[TransportError], None] | None = None
+        self.on_ble_warning: Callable[[TransportWarning], None] | None = None
+        self.on_lan_error: Callable[[TransportError], None] | None = None
         self.ble_status: str = "offline"
+        self.lan_status: str = "offline"
         self.ble_error_message: str | None = None
+        self.lan_error_message: str | None = None
+        self.transport_errors: dict[TransportType, TransportError] = {}
+        self.transport_diagnostics: dict[
+            TransportType, list[TransportError | TransportWarning]
+        ] = {}
+        self._transport_generation = 0
         self.offline_mode: bool = False
+        self._starting_transport: BaseTransport | None = None
         # Last error already delivered through the transport's on_error hook, so
         # start() does not report the same failure to the UI a second time.
         self._notified_error: str | None = None
@@ -104,6 +124,8 @@ class SessionCoordinator:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._handshake_timeout_tasks: dict[str, asyncio.Task[Any]] = {}
         self._retry_lock = asyncio.Lock()
+        self.last_transport_switch_metrics: dict[str, Any] = {}
+        self._transport_state_committed_at: float | None = None
 
         self.server_reassembler = FragmentReassembler()
         self.fragment_reassembler = self.server_reassembler
@@ -123,6 +145,8 @@ class SessionCoordinator:
             )
             self._transports["bluetooth"] = bt_transport
 
+        self._transports["offline"] = OfflineTransport()
+
         if transport is not None:
             self._transports[transport.transport_type.value] = transport
             self.active_transport = transport
@@ -139,6 +163,8 @@ class SessionCoordinator:
                 self._transports["lan"] = LANTransport(
                     local_peer_id=self.local_identity.peer_id_hex,
                     local_nickname=self.nickname,
+                    tcp_port=lan_tcp_port,
+                    discovery_port=lan_discovery_port,
                 )
 
             if sel == "auto":
@@ -148,49 +174,125 @@ class SessionCoordinator:
             if sel == "lan":
                 self.active_transport = self._transports["lan"]
                 self.active_transport_name = "lan"
+            elif sel == "offline":
+                self.offline_mode = True
+                self.active_transport = self._transports["offline"]
+                self.active_transport_name = "offline"
+                self.ble_status = "offline"
             else:
                 self.active_transport = self._transports["bluetooth"]
                 self.active_transport_name = "bluetooth"
 
+        self.selected_transport_name = self.active_transport_name
+        self.last_successful_transport_name: str | None = None
         self._wire_transport_callbacks(self.active_transport)
 
     def _wire_transport_callbacks(self, transport: BaseTransport) -> None:
         """Attach session coordinator packet and state handlers to a transport."""
+        generation = self._transport_generation
         transport.on_packet_received = self._handle_incoming_packet
         transport.on_peer_discovered = self._handle_peer_discovered
         transport.on_peer_connected = self._handle_peer_connected
         transport.on_peer_disconnected = self._handle_peer_disconnected
-        transport.on_state_changed = self._handle_transport_state_changed
-        transport.on_error = self._handle_transport_error
-        transport.on_warning = self._handle_transport_warning
+        transport.on_state_changed = lambda state: self._handle_transport_state_changed(
+            transport, state, generation
+        )
+        transport.on_error = lambda event: self._handle_transport_error(
+            transport, event, generation
+        )
+        transport.on_warning = lambda event: self._handle_transport_warning(
+            transport, event, generation
+        )
 
-    def _handle_transport_state_changed(self, state: TransportState) -> None:
-        self.ble_status = state.value
+    def _handle_transport_state_changed(
+        self,
+        transport: BaseTransport,
+        state: TransportState,
+        generation: int,
+    ) -> None:
+        if (
+            generation != self._transport_generation
+            or transport is not self.active_transport
+        ):
+            return
+        if transport.transport_type == TransportType.BLUETOOTH:
+            self.ble_status = state.value
+        elif transport.transport_type == TransportType.LAN:
+            self.lan_status = state.value
         if self.on_peer_status_changed:
             self.on_peer_status_changed("mesh", state.value)
 
-    def _handle_transport_error(self, err_msg: str) -> None:
-        self.ble_error_message = err_msg
-        self._notified_error = err_msg
-        if self.active_transport_name == "lan":
+    def _handle_transport_error(
+        self,
+        transport: BaseTransport,
+        event: TransportError,
+        generation: int,
+    ) -> None:
+        if (
+            generation != self._transport_generation
+            or (
+                transport is not self.active_transport
+                and transport is not self._starting_transport
+            )
+            or event.transport != transport.transport_type
+        ):
+            return
+        self.transport_errors[event.transport] = event
+        self._record_transport_diagnostic(event)
+        self._notified_error = event.message
+        if transport is self._starting_transport:
+            return
+        if event.transport == TransportType.LAN:
+            self.lan_error_message = event.message
             if self.on_lan_error:
-                self.on_lan_error(err_msg)
-            elif self.on_ble_error:
-                self.on_ble_error(err_msg)
+                self.on_lan_error(event)
         else:
+            self.ble_error_message = event.message
             if self.on_ble_error:
-                self.on_ble_error(err_msg)
+                self.on_ble_error(event)
 
-    def _handle_transport_warning(self, warning: str) -> None:
+    def _handle_transport_warning(
+        self,
+        transport: BaseTransport,
+        event: TransportWarning,
+        generation: int,
+    ) -> None:
+        if (
+            generation != self._transport_generation
+            or (
+                transport is not self.active_transport
+                and transport is not self._starting_transport
+            )
+            or event.transport != TransportType.BLUETOOTH
+        ):
+            return
+        self._record_transport_diagnostic(event)
         if self.on_ble_warning:
-            self.on_ble_warning(warning)
+            self.on_ble_warning(event)
 
     def _spawn_task(self, coro: Any) -> asyncio.Task[Any]:
         """Spawn background task and keep a reference until completion."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+
+        def _task_done(completed: asyncio.Task[Any]) -> None:
+            self._background_tasks.discard(completed)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None:
+                logger.error(
+                    "Coordinator background task failed",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+
+        task.add_done_callback(_task_done)
         return task
+
+    @property
+    def transport_generation(self) -> int:
+        """Return the generation used to reject callbacks from retired operations."""
+        return self._transport_generation
 
     @property
     def packet_deduplicator(self) -> PacketDeduplicator:
@@ -333,6 +435,49 @@ class SessionCoordinator:
         """Return True if the coordinator is active."""
         return self._is_running
 
+    def is_transport_starting(self, transport_name: str) -> bool:
+        """Return whether the named transport is in its initialization stage."""
+        return (
+            self._starting_transport is not None
+            and self._starting_transport.transport_type.value == transport_name
+        )
+
+    @property
+    def effective_active_transport_name(self) -> str:
+        """Return the transport that is actually running, or offline."""
+        if (
+            self.offline_mode
+            or not self._is_running
+            or not self.active_transport.is_running
+            or self.active_transport.state
+            in (
+                TransportState.UNAVAILABLE,
+                TransportState.DISABLED,
+                TransportState.ERROR,
+                TransportState.OFFLINE,
+                TransportState.CHECKING,
+            )
+            or (
+                self.active_transport_name == "bluetooth"
+                and self.ble_status in ("unavailable", "disabled", "error", "offline")
+            )
+            or (
+                self.active_transport_name == "lan"
+                and (
+                    not self.is_lan_available()
+                    or self.active_transport.state
+                    in (
+                        TransportState.UNAVAILABLE,
+                        TransportState.DISABLED,
+                        TransportState.ERROR,
+                        TransportState.OFFLINE,
+                    )
+                )
+            )
+        ):
+            return "offline"
+        return self.active_transport_name
+
     def get_or_create_session(self, remote_peer_id_hex: str) -> NoiseSession:
         """Get existing NoiseSession or initialize a new one for remote peer."""
         clean_remote = remote_peer_id_hex.strip().lower()
@@ -358,8 +503,106 @@ class SessionCoordinator:
         telem["local_nickname"] = self.nickname
         telem["local_peer_id"] = self.local_identity.peer_id_hex
         telem["local_fingerprint"] = self.local_identity.fingerprint
-        telem["active_transport"] = self.active_transport_name
+        telem["selected_transport"] = self.selected_transport_name
+        telem["active_transport"] = self.effective_active_transport_name
+        telem["last_successful_transport"] = self.last_successful_transport_name
+        telem["transport_switch_in_progress"] = self._retry_lock.locked()
+        telem["transport_switch_metrics"] = dict(self.last_transport_switch_metrics)
+        telem["transport_errors"] = {
+            transport.value: {
+                "operation": error.operation,
+                "operation_id": error.operation_id,
+                "stage": error.stage,
+                "occurred_at": error.occurred_at,
+                "message": error.message,
+                "original_error": error.original_error,
+                "native_error_code": error.native_error_code,
+                "hresult": error.hresult,
+            }
+            for transport, error in self.transport_errors.items()
+        }
+        telem["transport_diagnostics"] = {
+            transport.value: [
+                {
+                    "operation": event.operation,
+                    "operation_id": event.operation_id,
+                    "stage": event.stage,
+                    "occurred_at": event.occurred_at,
+                    "message": event.message,
+                    "original_error": event.original_error,
+                    "native_error_code": event.native_error_code,
+                    "hresult": event.hresult,
+                    "kind": "error" if isinstance(event, TransportError) else "warning",
+                }
+                for event in history
+            ]
+            for transport, history in self.transport_diagnostics.items()
+        }
         return telem
+
+    def _record_transport_diagnostic(
+        self, event: TransportError | TransportWarning
+    ) -> None:
+        """Retain a bounded per-transport history independent of active mode."""
+        history = self.transport_diagnostics.setdefault(event.transport, [])
+        if history and history[-1].operation_id == event.operation_id:
+            return
+        history.append(event)
+        if len(history) > 100:
+            del history[:-100]
+
+    def record_transport_indicator_update(self) -> None:
+        """Record elapsed time from state commit until the UI refreshes status."""
+        if not self.last_transport_switch_metrics:
+            return
+        if self._transport_state_committed_at is not None:
+            self.last_transport_switch_metrics["indicator_update_seconds"] = max(
+                0.0, perf_counter() - self._transport_state_committed_at
+            )
+
+    def _record_transport_switch_metrics(
+        self,
+        *,
+        started_at: float,
+        previous: str,
+        target: str,
+        cleanup_seconds: float,
+        initialization_seconds: float,
+        state_commit_seconds: float,
+        state_committed_at: float,
+        discovery_ready_at: float | None,
+        result: str,
+    ) -> None:
+        self._transport_state_committed_at = state_committed_at
+        self.last_transport_switch_metrics = {
+            "previous_transport": previous,
+            "requested_transport": target,
+            "active_transport": self.effective_active_transport_name,
+            "cleanup_seconds": cleanup_seconds,
+            "initialization_seconds": initialization_seconds,
+            "state_commit_seconds": state_commit_seconds,
+            "total_seconds": max(0.0, perf_counter() - started_at),
+            "indicator_update_seconds": None,
+            "discovery_ready_seconds": (
+                max(0.0, discovery_ready_at - started_at)
+                if discovery_ready_at is not None
+                else None
+            ),
+            "result": result,
+        }
+
+    @staticmethod
+    def _discovery_is_operational(transport: BaseTransport) -> bool:
+        """Check runtime discovery endpoints without inferring from selection."""
+        telemetry = transport.get_telemetry()
+        if transport.transport_type == TransportType.BLUETOOTH:
+            return telemetry.get("scanner_status") == "Active" or bool(
+                telemetry.get("advertising_active")
+            )
+        return bool(
+            telemetry.get("discovery_listening")
+            and telemetry.get("discovery_broadcasting")
+        )
 
     def resolve_peer_address(self, target: str) -> str | None:
         """Resolve nickname, peer ID prefix, or device to a transport address."""
@@ -407,15 +650,19 @@ class SessionCoordinator:
         async with self._retry_lock:
             if self._is_running:
                 return
-            if self.offline_mode:
+            if self.offline_mode or self.active_transport_name == "offline":
                 # The user chose to continue offline: only an explicit retry or
                 # transport switch may start networking again.
                 logger.info("Ignoring start(): offline mode is active")
                 return
 
             self._is_running = True
-            self.ble_status = "checking"
-            self.ble_error_message = None
+            if self.active_transport_name == "bluetooth":
+                self.ble_status = "checking"
+                self.ble_error_message = None
+            else:
+                self.lan_status = "checking"
+                self.lan_error_message = None
             self._notified_error = None
 
             if self.ble_server:
@@ -428,9 +675,20 @@ class SessionCoordinator:
 
             try:
                 await self.active_transport.start()
-                self.ble_status = self.active_transport.state.value
+                if not self._transport_is_operational():
+                    failure = (
+                        self.active_transport.get_telemetry().get("error_message")
+                        or f"{self.active_transport_name} transport is not operational"
+                    )
+                    raise RuntimeError(str(failure))
+                if self.active_transport_name == "bluetooth":
+                    self.ble_status = self.active_transport.state.value
+                elif self.active_transport_name == "lan":
+                    self.lan_status = self.active_transport.state.value
                 await self.send_announce()
                 self._start_prune_task()
+                self.selected_transport_name = self.active_transport_name
+                self.last_successful_transport_name = self.active_transport_name
             except Exception as e:
                 self._is_running = False
                 logger.warning(
@@ -445,19 +703,15 @@ class SessionCoordinator:
                 effective_state = self._preserve_failed_transport_state(
                     self.active_transport, failed_state, str(e)
                 )
-                self.ble_status = effective_state.value
-                self.ble_error_message = str(e)
-                error_to_notify = self.ble_error_message
+                if self.active_transport_name == "bluetooth":
+                    self.ble_status = effective_state.value
+                    self.ble_error_message = str(e)
+                else:
+                    self.lan_error_message = str(e)
+                error_to_notify = str(e)
 
         if error_to_notify is not None and error_to_notify != self._notified_error:
-            if self.active_transport_name == "lan":
-                if self.on_lan_error:
-                    self.on_lan_error(error_to_notify)
-                elif self.on_ble_error:
-                    self.on_ble_error(error_to_notify)
-            else:
-                if self.on_ble_error:
-                    self.on_ble_error(error_to_notify)
+            self.active_transport.report_error("start", error_to_notify)
 
     def _transport_is_operational(self) -> bool:
         """Return True only if the active transport is actually usable."""
@@ -470,6 +724,14 @@ class SessionCoordinator:
             TransportState.CHECKING,
         ):
             return False
+        if self.active_transport_name == "bluetooth" and not isinstance(
+            self.active_transport, BluetoothTransport
+        ):
+            return self.active_transport.is_running
+        if self.active_transport_name == "lan" and not isinstance(
+            self.active_transport, LANTransport
+        ):
+            return self.active_transport.is_running
         telem = self.active_transport.get_telemetry()
         if self.active_transport_name == "bluetooth":
             if telem.get("adapter_state") != "On":
@@ -549,8 +811,16 @@ class SessionCoordinator:
         concurrent restarts. Failed resources are released before returning.
         """
         async with self._retry_lock:
-            self.ble_status = "checking"
-            self.ble_error_message = None
+            if self.offline_mode or self.active_transport_name == "offline":
+                logger.info("Ignoring retry: offline mode is active")
+                return False
+            self._transport_generation += 1
+            self._wire_transport_callbacks(self.active_transport)
+            if self.active_transport_name == "bluetooth":
+                self.ble_status = "checking"
+                self.ble_error_message = None
+            else:
+                self.lan_error_message = None
             await self._stop_transport_safely(
                 self.active_transport_name, self.active_transport
             )
@@ -560,7 +830,8 @@ class SessionCoordinator:
                     timeout=TRANSPORT_RETRY_TIMEOUT_SECONDS,
                 )
                 self._is_running = True
-                self.ble_status = self.active_transport.state.value
+                if self.active_transport_name == "bluetooth":
+                    self.ble_status = self.active_transport.state.value
                 if not self._transport_is_operational():
                     failed_state = self.active_transport.state
                     failed_message = (
@@ -574,8 +845,11 @@ class SessionCoordinator:
                         self.active_transport, failed_state, str(failed_message)
                     )
                     self._is_running = False
-                    self.ble_status = effective_state.value
-                    self.ble_error_message = str(failed_message)
+                    if self.active_transport_name == "bluetooth":
+                        self.ble_status = effective_state.value
+                        self.ble_error_message = str(failed_message)
+                    else:
+                        self.lan_error_message = str(failed_message)
                     return False
                 self.offline_mode = False
                 await self.send_announce()
@@ -597,8 +871,11 @@ class SessionCoordinator:
                     self.active_transport, TransportState.UNAVAILABLE, err_msg
                 )
                 self._is_running = False
-                self.ble_status = "unavailable"
-                self.ble_error_message = err_msg
+                if self.active_transport_name == "bluetooth":
+                    self.ble_status = "unavailable"
+                    self.ble_error_message = err_msg
+                else:
+                    self.lan_error_message = err_msg
                 return False
             except Exception as e:
                 logger.warning("Retry active transport failed: %s", e)
@@ -610,16 +887,80 @@ class SessionCoordinator:
                     self.active_transport, failed_state, str(e)
                 )
                 self._is_running = False
-                self.ble_status = effective_state.value
-                self.ble_error_message = str(e)
+                if self.active_transport_name == "bluetooth":
+                    self.ble_status = effective_state.value
+                    self.ble_error_message = str(e)
+                else:
+                    self.lan_error_message = str(e)
                 return False
 
     async def retry_ble(self) -> bool:
         """Re-initialize the active Bluetooth transport after failure."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            logger.info("Ignoring retry_ble: offline mode is active")
+            return False
+        if self.active_transport_name != "bluetooth":
+            success, _ = await self.switch_transport("bluetooth")
+            return success
         return await self.retry_active_transport()
+
+    async def retry_ble_independent(self) -> bool:
+        """Retry BLE without changing or stopping the selected non-BLE transport."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            logger.info("Ignoring retry_ble_independent: offline mode is active")
+            return False
+        if self.active_transport_name == "bluetooth":
+            return await self.retry_active_transport()
+
+        retry_active_after_lock = False
+        async with self._retry_lock:
+            if self.active_transport_name == "bluetooth":
+                retry_active_after_lock = True
+            else:
+                transport = self._transports.get("bluetooth")
+                if transport is None:
+                    return False
+
+                previous_starting = self._starting_transport
+                self._starting_transport = transport
+                self._wire_transport_callbacks(transport)
+                try:
+                    if transport.is_running:
+                        await self._stop_transport_safely("bluetooth", transport)
+                    await asyncio.wait_for(
+                        transport.start(),
+                        timeout=TRANSPORT_RETRY_TIMEOUT_SECONDS,
+                    )
+                    return transport.is_running and transport.state not in {
+                        TransportState.ERROR,
+                        TransportState.UNAVAILABLE,
+                        TransportState.DISABLED,
+                        TransportState.OFFLINE,
+                    }
+                except TimeoutError:
+                    logger.warning(
+                        "Independent BLE retry timed out after %.0fs",
+                        TRANSPORT_RETRY_TIMEOUT_SECONDS,
+                    )
+                    return False
+                except Exception:
+                    logger.exception("Independent BLE retry failed")
+                    return False
+                finally:
+                    self._starting_transport = previous_starting
+
+        if retry_active_after_lock:
+            return await self.retry_active_transport()
+        return False
 
     async def retry_lan(self) -> bool:
         """Re-initialize the active LAN transport after failure."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            logger.info("Ignoring retry_lan: offline mode is active")
+            return False
+        if self.active_transport_name != "lan":
+            success, _ = await self.switch_transport("lan")
+            return success
         return await self.retry_active_transport()
 
     async def stop(self) -> None:
@@ -704,115 +1045,456 @@ class SessionCoordinator:
         Idempotent and safe after partial initialization.
         """
         async with self._retry_lock:
-            self.offline_mode = True
-            for name, transport in self._transports.items():
-                await self._stop_transport_safely(name, transport)
-            await self._reset_session_state()
-            self._is_running = False
-            self.ble_status = "offline"
-            self.ble_error_message = None
+            self._transport_generation += 1
+            await self._go_offline_locked()
+
+    async def _go_offline_locked(self) -> None:
+        """Internal helper for go_offline assuming _retry_lock is already held."""
+        self.offline_mode = True
+        if self.selected_transport_name == "offline":
+            self.active_transport_name = "offline"
+            if "offline" in self._transports:
+                self.active_transport = self._transports["offline"]
+
+        if self._prune_task and not self._prune_task.done():
+            self._prune_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._prune_task
+        self._prune_task = None
+
+        current_t = asyncio.current_task()
+        pending_bg = [
+            t for t in self._background_tasks if not t.done() and t is not current_t
+        ]
+        for t in pending_bg:
+            t.cancel()
+        if pending_bg:
+            await asyncio.gather(*pending_bg, return_exceptions=True)
+        self._background_tasks.clear()
+
+        for name, transport in list(self._transports.items()):
+            if hasattr(transport, "set_offline"):
+                transport.set_offline(True)
+            self._detach_transport_callbacks(transport)
+            await self._stop_transport_safely(name, transport)
+
+        await self._reset_session_state()
+        self._is_running = False
+        self.ble_status = "offline"
+        self.lan_status = "offline"
+        self.ble_error_message = None
+        self.lan_error_message = None
+        self.transport_errors.clear()
+
+        if self.on_peer_status_changed:
+            self.on_peer_status_changed("mesh", "offline")
 
     async def switch_transport(self, target_transport: str) -> tuple[bool, str]:
-        """Switch between Bluetooth and LAN with session teardown and fresh identity."""
-        target = target_transport.lower().strip()
-        if target in ("wifi", "wi-fi", "lan", "ethernet"):
-            target = "lan"
-        elif target in ("ble", "bluetooth", "bt"):
-            target = "bluetooth"
-        if target not in ("bluetooth", "lan"):
-            return False, f"Unknown transport: {target}"
+        """Switch between Bluetooth, LAN, and offline modes.
+
+        Guarantees verified state transitions and invariant cryptographic identity.
+        """
+        switch_started_at = perf_counter()
+        target = normalize_transport_name(target_transport)
+        if target is None:
+            return False, f"Unknown transport: {target_transport.strip()}"
 
         async with self._retry_lock:
+            prev_name = self.active_transport_name
+            current_id = self.local_identity.peer_id_hex
+
+            if target == "offline":
+                cleanup_started_at = perf_counter()
+                self._transport_generation += 1
+                self.selected_transport_name = "offline"
+                self.active_transport_name = "offline"
+                if "offline" in self._transports:
+                    self.active_transport = self._transports["offline"]
+                await self._go_offline_locked()
+                state_committed_at = perf_counter()
+                self._record_transport_switch_metrics(
+                    started_at=switch_started_at,
+                    previous=prev_name,
+                    target=target,
+                    cleanup_seconds=state_committed_at - cleanup_started_at,
+                    initialization_seconds=0.0,
+                    state_commit_seconds=0.0,
+                    state_committed_at=state_committed_at,
+                    discovery_ready_at=None,
+                    result="success",
+                )
+                log_transport_diagnostic(
+                    operation="transport_switch",
+                    stage="switch_complete",
+                    result="SUCCESS",
+                    requested_transport="offline",
+                    previous_transport=prev_name,
+                    active_transport="offline",
+                    details=(
+                        "Transport switched to offline mode; local identity preserved."
+                    ),
+                )
+                return (
+                    True,
+                    f"Switched transport to offline. Peer identity: {current_id[:12]}",
+                )
+
             if (
                 target == self.active_transport_name
                 and self.active_transport.is_running
             ):
+                self.selected_transport_name = target
+                state_committed_at = perf_counter()
+                self._record_transport_switch_metrics(
+                    started_at=switch_started_at,
+                    previous=prev_name,
+                    target=target,
+                    cleanup_seconds=0.0,
+                    initialization_seconds=0.0,
+                    state_commit_seconds=0.0,
+                    state_committed_at=state_committed_at,
+                    discovery_ready_at=(
+                        state_committed_at
+                        if self._discovery_is_operational(self.active_transport)
+                        else None
+                    ),
+                    result="already_active",
+                )
                 return True, f"Already active on {target} transport."
 
             if target == "bluetooth" and "bluetooth" not in self._transports:
                 # Validate before tearing anything down or rotating identity.
                 return False, "Bluetooth transport not available"
 
+            self._transport_generation += 1
             logger.info(
                 "Switching transport: %s -> %s", self.active_transport_name, target
+            )
+            log_transport_diagnostic(
+                operation="transport_switch",
+                stage="init",
+                result="STARTING",
+                requested_transport=target,
+                previous_transport=prev_name,
+                details=f"Initiating switch from {prev_name} to {target}",
             )
 
             # 1. Stop old transport completely and detach it from the coordinator
             old_transport = self.active_transport
-            await self._stop_transport_safely(self.active_transport_name, old_transport)
+            old_was_running = old_transport.is_running
+            cleanup_started_at = perf_counter()
             self._detach_transport_callbacks(old_transport)
+            await self._stop_transport_safely(self.active_transport_name, old_transport)
 
             # 2-3. Close active Noise sessions, clear peer tables and pending messages
             await self._reset_session_state()
 
             # 4. Preserve stable persistent identity across transport interfaces
-            current_id = self.local_identity.peer_id_hex
             for transport in self._transports.values():
                 transport.update_identity(current_id, self.nickname)
             logger.info(
                 "Transport switch (%s -> %s): preserved device identity %s",
-                self.active_transport_name,
+                prev_name,
                 target,
                 current_id,
             )
 
-            # 5. Switch active transport
+            # 5. Prepare candidate transport
             if target == "lan":
                 if "lan" not in self._transports:
                     self._transports["lan"] = LANTransport(
                         local_peer_id=current_id,
                         local_nickname=self.nickname,
                     )
-                self.active_transport = self._transports["lan"]
+                candidate_transport = self._transports["lan"]
             else:
-                self.active_transport = self._transports["bluetooth"]
+                candidate_transport = self._transports["bluetooth"]
 
-            self.active_transport_name = target
-            self._wire_transport_callbacks(self.active_transport)
+            if hasattr(candidate_transport, "set_offline"):
+                candidate_transport.set_offline(False)
+            candidate_error_before = candidate_transport.last_error
+            self._wire_transport_callbacks(candidate_transport)
 
-            # 6. Start new transport; report success only if it is really operational
+            # 6. Start candidate transport; update active_transport ONLY after success
+            initialization_started_at = perf_counter()
+            cleanup_seconds = initialization_started_at - cleanup_started_at
+            initialization_seconds = 0.0
+            discovery_ready_at: float | None = None
+            state_commit_seconds = 0.0
+            state_committed_at = perf_counter()
             try:
-                await self.active_transport.start()
-                if (
-                    not self.active_transport.is_running
-                    or self.active_transport.state
-                    in (
-                        TransportState.UNAVAILABLE,
-                        TransportState.DISABLED,
-                        TransportState.ERROR,
-                        TransportState.OFFLINE,
-                        TransportState.CHECKING,
-                    )
+                self._starting_transport = candidate_transport
+                try:
+                    await candidate_transport.start()
+                finally:
+                    self._starting_transport = None
+                if not candidate_transport.is_running or candidate_transport.state in (
+                    TransportState.UNAVAILABLE,
+                    TransportState.DISABLED,
+                    TransportState.ERROR,
+                    TransportState.OFFLINE,
+                    TransportState.CHECKING,
                 ):
                     failed_message = (
-                        self.active_transport.get_telemetry().get("error_message")
+                        candidate_transport.get_telemetry().get("error_message")
                         or f"{target} transport is not operational"
                     )
                     raise RuntimeError(failed_message)
-                self.ble_status = self.active_transport.state.value
-                self.ble_error_message = None
+
+                initialization_seconds = perf_counter() - initialization_started_at
+                if self._discovery_is_operational(candidate_transport):
+                    discovery_ready_at = perf_counter()
+
+                # SUCCESS! Update active transport state only after verification
+                state_commit_started_at = perf_counter()
+                self.active_transport = candidate_transport
+                self.active_transport_name = target
+                self.selected_transport_name = target
+                self.last_successful_transport_name = target
+                if target == "bluetooth":
+                    self.ble_status = candidate_transport.state.value
+                    self.ble_error_message = None
+                else:
+                    self.lan_status = candidate_transport.state.value
+                    self.lan_error_message = None
                 self.offline_mode = False
                 self._is_running = True
+                state_committed_at = perf_counter()
+                state_commit_seconds = state_committed_at - state_commit_started_at
                 await self.send_announce()
                 self._start_prune_task()
+                self._record_transport_switch_metrics(
+                    started_at=switch_started_at,
+                    previous=prev_name,
+                    target=target,
+                    cleanup_seconds=cleanup_seconds,
+                    initialization_seconds=initialization_seconds,
+                    state_commit_seconds=state_commit_seconds,
+                    state_committed_at=state_committed_at,
+                    discovery_ready_at=discovery_ready_at,
+                    result="success",
+                )
+
+                log_transport_diagnostic(
+                    operation="transport_switch",
+                    stage="switch_complete",
+                    result="SUCCESS",
+                    requested_transport=target,
+                    previous_transport=prev_name,
+                    active_transport=target,
+                    details=f"Transport switch to {target} succeeded.",
+                )
                 display_name = "LAN / Wi-Fi" if target == "lan" else "Bluetooth"
                 return True, (
                     f"Switched transport to {display_name}. "
                     f"New secure chat session created. "
                     f"Peer identity: {current_id[:12]}"
                 )
-            except Exception as e:
-                logger.error("Failed starting %s transport: %s", target, e)
-                failed_state = self.active_transport.state
-                # Release anything the failed start brought up (sockets, tasks).
-                await self._stop_transport_safely(target, self.active_transport)
-                effective_state = self._preserve_failed_transport_state(
-                    self.active_transport, failed_state, str(e)
+            except asyncio.CancelledError:
+                initialization_seconds = perf_counter() - initialization_started_at
+                if self.active_transport is candidate_transport:
+                    self._record_transport_switch_metrics(
+                        started_at=switch_started_at,
+                        previous=prev_name,
+                        target=target,
+                        cleanup_seconds=cleanup_seconds,
+                        initialization_seconds=initialization_seconds,
+                        state_commit_seconds=state_commit_seconds,
+                        state_committed_at=state_committed_at,
+                        discovery_ready_at=discovery_ready_at,
+                        result="cancelled_after_commit",
+                    )
+                    raise
+
+                self._detach_transport_callbacks(candidate_transport)
+                await self._stop_transport_safely(target, candidate_transport)
+                self.active_transport = old_transport
+                self.active_transport_name = prev_name
+                self._transport_generation += 1
+                self._wire_transport_callbacks(old_transport)
+                rollback_succeeded = False
+                if old_was_running:
+                    try:
+                        await asyncio.wait_for(
+                            old_transport.start(),
+                            timeout=TRANSPORT_RETRY_TIMEOUT_SECONDS,
+                        )
+                        rollback_succeeded = self._transport_is_operational()
+                    except Exception:
+                        logger.exception(
+                            "Failed restoring %s after cancelled transport switch",
+                            prev_name,
+                        )
+                self._is_running = rollback_succeeded
+                self.offline_mode = old_was_running and not rollback_succeeded
+                if rollback_succeeded:
+                    self._start_prune_task()
+                    with contextlib.suppress(Exception):
+                        await self.send_announce()
+                self._record_transport_switch_metrics(
+                    started_at=switch_started_at,
+                    previous=prev_name,
+                    target=target,
+                    cleanup_seconds=cleanup_seconds,
+                    initialization_seconds=initialization_seconds,
+                    state_commit_seconds=0.0,
+                    state_committed_at=perf_counter(),
+                    discovery_ready_at=None,
+                    result="cancelled",
                 )
-                self._is_running = False
-                self.ble_status = effective_state.value
-                self.ble_error_message = str(e)
-                return False, f"Failed starting {target} transport: {e}"
+                raise
+            except Exception as e:
+                initialization_seconds = perf_counter() - initialization_started_at
+                logger.error("Failed starting %s transport: %s", target, e)
+                # Cleanup candidate transport
+                self._detach_transport_callbacks(candidate_transport)
+                await self._stop_transport_safely(target, candidate_transport)
+                failed_state = candidate_transport.state
+                self._preserve_failed_transport_state(
+                    candidate_transport, failed_state, str(e)
+                )
+
+                self.active_transport = old_transport
+                self.active_transport_name = prev_name
+                self._transport_generation += 1
+                self._wire_transport_callbacks(self.active_transport)
+
+                if target == "bluetooth":
+                    self.ble_error_message = str(e)
+                else:
+                    self.lan_error_message = str(e)
+                candidate_error = candidate_transport.last_error
+                if candidate_error is None or candidate_error is candidate_error_before:
+                    error_code = getattr(e, "winerror", None) or getattr(
+                        e, "errno", None
+                    )
+                    candidate_error = candidate_transport.report_error(
+                        "transport_switch",
+                        str(e),
+                        stage=str(
+                            candidate_transport.get_telemetry().get("failed_stage")
+                            or "transport_start"
+                        ),
+                        original_error=e,
+                        native_error_code=error_code,
+                        hresult=(
+                            str(hresult_value)
+                            if (hresult_value := getattr(e, "hresult", None))
+                            is not None
+                            else None
+                        ),
+                    )
+                assert candidate_error is not None
+                self.transport_errors[candidate_transport.transport_type] = (
+                    candidate_error
+                )
+                self._record_transport_diagnostic(candidate_error)
+
+                rollback_error: Exception | None = None
+                rollback_succeeded = False
+                if old_was_running:
+                    try:
+                        await asyncio.wait_for(
+                            old_transport.start(),
+                            timeout=TRANSPORT_RETRY_TIMEOUT_SECONDS,
+                        )
+                        if not old_transport.is_running or old_transport.state in (
+                            TransportState.UNAVAILABLE,
+                            TransportState.DISABLED,
+                            TransportState.ERROR,
+                            TransportState.OFFLINE,
+                            TransportState.CHECKING,
+                        ):
+                            raise RuntimeError(f"{prev_name} transport did not recover")
+                        rollback_succeeded = True
+                    except Exception as rollback_exc:
+                        rollback_error = rollback_exc
+                        logger.error(
+                            "Failed restoring %s transport after switch failure: %s",
+                            prev_name,
+                            rollback_exc,
+                        )
+                        await self._stop_transport_safely(prev_name, old_transport)
+                        rollback_state = self._preserve_failed_transport_state(
+                            old_transport, old_transport.state, str(rollback_exc)
+                        )
+                        if prev_name == "bluetooth":
+                            self.ble_status = rollback_state.value
+                            self.ble_error_message = str(rollback_exc)
+                        else:
+                            self.lan_error_message = str(rollback_exc)
+
+                if prev_name == "offline":
+                    self.active_transport = self._transports["offline"]
+                    self.active_transport_name = "offline"
+                    self.selected_transport_name = "offline"
+                    self.offline_mode = True
+                    self._is_running = False
+                    self.ble_status = "offline"
+                else:
+                    self._is_running = rollback_succeeded
+                    self.offline_mode = old_was_running and not rollback_succeeded
+                if rollback_succeeded:
+                    if prev_name == "bluetooth":
+                        self.ble_status = old_transport.state.value
+                        self.ble_error_message = None
+                    else:
+                        self.lan_error_message = None
+                    try:
+                        await self.send_announce()
+                    except Exception:
+                        logger.exception(
+                            "Failed announcing after restoring %s transport",
+                            prev_name,
+                        )
+                    self._start_prune_task()
+                self._record_transport_switch_metrics(
+                    started_at=switch_started_at,
+                    previous=prev_name,
+                    target=target,
+                    cleanup_seconds=cleanup_seconds,
+                    initialization_seconds=initialization_seconds,
+                    state_commit_seconds=0.0,
+                    state_committed_at=perf_counter(),
+                    discovery_ready_at=None,
+                    result="failed_rollback_succeeded"
+                    if rollback_succeeded
+                    else "failed",
+                )
+
+                log_transport_diagnostic(
+                    operation="transport_switch",
+                    stage="target_start",
+                    result="FAILED",
+                    requested_transport=target,
+                    previous_transport=prev_name,
+                    active_transport=self.active_transport_name,
+                    cleanup_result=(
+                        "candidate_released_previous_transport_restored"
+                        if rollback_succeeded
+                        else "candidate_released_rollback_failed"
+                        if rollback_error
+                        else "candidate_released_previous_transport_was_stopped"
+                    ),
+                    details=(
+                        f"{e}; rollback failed: {rollback_error}"
+                        if rollback_error
+                        else str(e)
+                    ),
+                )
+                rollback_message = (
+                    f" {prev_name} transport restored."
+                    if rollback_succeeded
+                    else (
+                        f" Failed to restore {prev_name} transport: {rollback_error}"
+                        if rollback_error
+                        else ""
+                    )
+                )
+                return (
+                    False,
+                    f"Failed starting {target} transport: {e}.{rollback_message}",
+                )
 
     def set_nickname(self, nickname: str) -> None:
         """Update local nickname across active transports."""
@@ -832,6 +1514,9 @@ class SessionCoordinator:
 
     async def send_broadcast_message(self, text: str) -> None:
         """Send an unencrypted public message to all connected peers."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            logger.info("Cannot send broadcast message: offline mode is active")
+            return
         encoded = text.encode("utf-8")
         if len(encoded) > MAX_MESSAGE_SIZE:
             msg = f"Message payload exceeds maximum size ({MAX_MESSAGE_SIZE} bytes)"
@@ -845,6 +1530,9 @@ class SessionCoordinator:
 
     async def send_direct_message(self, target_peer_id_hex: str, text: str) -> None:
         """Send an encrypted message to a peer, establishing Noise XX if needed."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            logger.info("Cannot send direct message: offline mode is active")
+            return
         encoded = text.encode("utf-8")
         if len(encoded) > MAX_MESSAGE_SIZE:
             msg = f"Message payload exceeds maximum size ({MAX_MESSAGE_SIZE} bytes)"
@@ -903,6 +1591,8 @@ class SessionCoordinator:
         self, target_peer_id_hex: str | None, packet: BitchatPacket
     ) -> None:
         """Transmit packet via direct transport connection or broadcast."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            return
         self.mesh_router.deduplicator.record(packet)
 
         target_addr: str | None = None
@@ -923,6 +1613,8 @@ class SessionCoordinator:
         self, packet: BitchatPacket, exclude_peer: str | None = None
     ) -> None:
         """Broadcast packet across all active transport peers."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            return
         self.mesh_router.deduplicator.record(packet)
         await self.active_transport.broadcast_packet(
             packet, exclude_address=exclude_peer
@@ -965,6 +1657,8 @@ class SessionCoordinator:
         self, packet: BitchatPacket, peer_address: str | None = None
     ) -> None:
         """Route decoded incoming packet to mesh router and asynchronous processing."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            return
         decision = self.mesh_router.evaluate_incoming(
             packet, ingress_source=peer_address
         )
@@ -1272,6 +1966,8 @@ class SessionCoordinator:
 
     def _handle_peer_discovered(self, peer: Any) -> None:
         """Record a peer discovered by the active transport."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            return
         clean_pid = peer.peer_id.lower() if getattr(peer, "peer_id", None) else ""
         if clean_pid and clean_pid == self.local_identity.peer_id_hex.lower():
             logger.debug(
@@ -1327,6 +2023,8 @@ class SessionCoordinator:
 
     def _handle_peer_connected(self, peer_address: str) -> None:
         """Callback when a central connection to peer is established."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            return
         if self.on_peer_status_changed:
             self.on_peer_status_changed(peer_address, "Connected")
         self._spawn_task(self.send_announce())
@@ -1378,6 +2076,8 @@ class SessionCoordinator:
 
     async def connect_peer(self, target: str, timeout: float = 10.0) -> Any:
         """Establish connection to a target peer ID, nickname, or address."""
+        if self.offline_mode or self.active_transport_name == "offline":
+            raise RuntimeError("Cannot connect to peer: offline mode is active")
         resolved = self.resolve_peer_address(target) or target
         return await self.active_transport.connect_peer(resolved, timeout=timeout)
 

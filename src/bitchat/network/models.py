@@ -11,25 +11,128 @@ MAX_DISCOVERY_PACKET_SIZE: int = 1024
 
 
 @dataclass(frozen=True)
-class NetworkInfo:
-    """Represents real local network adapter, IP, and SSID telemetry."""
+class NetworkInterfaceInfo:
+    """Read-only details for one operating-system network interface."""
 
-    status: str = "Disconnected"  # "Connected", "Disconnected"
-    interface: str = "Unavailable"  # "Wi-Fi", "Ethernet", "Loopback", "Unavailable"
+    name: str
+    description: str = ""
+    kind: str = "Other"
+    operational_state: str = "Unknown"
+    ipv4_addresses: tuple[str, ...] = ()
+    ipv6_addresses: tuple[str, ...] = ()
+    subnet_prefixes: tuple[int, ...] = ()
+    gateways: tuple[str, ...] = ()
+    dns_servers: tuple[str, ...] = ()
+    ssid: str | None = None
+    connection_name: str | None = None
+    interface_id: str | None = None
+    interface_index: int | None = None
+    signal_strength_percent: int | None = None
+    signal_strength_dbm: int | None = None
+    link_speed: str | None = None
+    default_route: bool = False
+
+
+@dataclass(frozen=True)
+class NetworkInfo:
+    """Operating-system network state, independent of BitChat transport state."""
+
+    status: str = "Disconnected"  # "Connected", "Disconnected", "Unknown"
+    interface: str = "Unavailable"  # Connection type: Wi-Fi, Ethernet, Other
     ssid: str = "unavailable"
     local_ip: str = ""
     listening_address: str = "0.0.0.0"
     listening_port: int = 0
     discovery_active: bool = False
+    interface_name: str = "Unavailable"
+    interface_state: str = "Unknown"
+    ipv4_addresses: tuple[str, ...] = ()
+    ipv6_addresses: tuple[str, ...] = ()
+    subnet_prefixes: tuple[int, ...] = ()
+    default_gateway: str = "Unavailable"
+    dns_servers: tuple[str, ...] = ()
+    default_route_interface: str = "Unavailable"
+    connection_name: str = "Unavailable"
+    network_name_reason: str | None = None
+    interface_description: str = "Unavailable"
+    interface_id: str | None = None
+    interface_index: int | None = None
+    signal_strength_percent: int | None = None
+    signal_strength_dbm: int | None = None
+    interfaces: tuple[NetworkInterfaceInfo, ...] = ()
+    discovery_error: str | None = None
+    collected_at: float | None = None
+    provider_backend: str = "unknown"
+    field_availability: tuple[tuple[str, str], ...] = ()
+    collection_errors: tuple[str, ...] = ()
+
+    @property
+    def cache_age_seconds(self) -> float | None:
+        """Return the snapshot age, when its collection timestamp is known."""
+        return max(0.0, time.time() - self.collected_at) if self.collected_at else None
+
+    @property
+    def is_configured(self) -> bool:
+        """Whether a valid network interface has been identified and configured."""
+        return bool(self.interface_name and self.interface_name != "Unavailable")
+
+    @property
+    def is_detected(self) -> bool:
+        """Whether host network interfaces were successfully detected by the OS."""
+        return bool(self.interfaces)
+
+    @property
+    def is_administratively_enabled(self) -> bool:
+        """Whether any detected network interface is administratively enabled."""
+        if self.interfaces:
+            disabled = {"disabled", "administratively down"}
+            return any(
+                item.operational_state.lower() not in disabled
+                for item in self.interfaces
+            )
+        return self.status != "Disabled"
+
+    @property
+    def is_operational(self) -> bool:
+        """Whether the selected interface is in an operational UP / Connected state."""
+        st = self.interface_state.lower()
+        if st in {"up", "connected"}:
+            return True
+        if st in {
+            "down",
+            "disconnected",
+            "disabled",
+            "administratively down",
+            "no carrier",
+        }:
+            return False
+        return self.status == "Connected"
+
+    @property
+    def is_ip_assigned(self) -> bool:
+        """Whether the selected interface has at least one valid IPv4/IPv6 assigned."""
+        return bool(self.local_ip or self.ipv4_addresses or self.ipv6_addresses)
+
+    @property
+    def is_discovery_active(self) -> bool:
+        """Whether UDP peer discovery is actively running."""
+        return bool(self.discovery_active)
+
+    @property
+    def is_listener_bound(self) -> bool:
+        """Whether the TCP peer transport listener socket is bound to a valid port."""
+        return bool(self.listening_port > 0)
 
     @property
     def is_connected(self) -> bool:
+        """Whether an operational interface has a usable assigned address."""
         return (
-            self.status == "Connected"
-            and bool(self.local_ip)
-            and not self.local_ip.startswith("127.")
-            and self.local_ip not in ("0.0.0.0", "::1")
+            self.status == "Connected" and self.is_operational and self.is_ip_assigned
         )
+
+    @property
+    def has_ipv4(self) -> bool:
+        return bool(self.local_ip or self.ipv4_addresses)
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,7 @@ import logging
 import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -130,11 +131,96 @@ def setup_logging(
         disable_console_logging()
 
 
+def log_transport_diagnostic(
+    operation: str,
+    stage: str,
+    result: str,
+    *,
+    requested_transport: str | None = None,
+    previous_transport: str | None = None,
+    active_transport: str | None = None,
+    error_code: int | None = None,
+    hresult: str | None = None,
+    source: str | None = None,
+    cleanup_result: str | None = None,
+    details: str | None = None,
+) -> dict[str, Any]:
+    """Record a structured diagnostic log entry for transport lifecycle.
+
+    Tracks timestamp, OS, requested/previous/active transports, initialization stage,
+    result, error code/HRESULT, cleanup result, and technical diagnostics.
+    Never logs private keys, session tokens, or sensitive payloads.
+    """
+    import datetime
+    import platform
+    import sys
+
+    diag_entry: dict[str, Any] = {
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+        "os": f"{sys.platform} ({platform.platform()})",
+        "operation": operation,
+        "stage": stage,
+        "result": result,
+        "requested_transport": requested_transport,
+        "previous_transport": previous_transport,
+        "final_active_transport": active_transport,
+        "error_code": error_code,
+        "hresult": hresult,
+        "source": source,
+        "cleanup_result": cleanup_result,
+        "details": details,
+    }
+
+    diag_logger = logging.getLogger("bitchat.transport.diagnostic")
+    msg_parts = [
+        f"[{operation.upper()}] stage={stage} result={result}",
+        f"os={sys.platform}",
+    ]
+    if requested_transport:
+        msg_parts.append(f"requested={requested_transport}")
+    if previous_transport:
+        msg_parts.append(f"previous={previous_transport}")
+    if active_transport:
+        msg_parts.append(f"active={active_transport}")
+    if error_code is not None:
+        msg_parts.append(f"error_code={error_code}")
+    if hresult:
+        msg_parts.append(f"hresult={hresult}")
+    if source:
+        msg_parts.append(f"source={source}")
+    if cleanup_result:
+        msg_parts.append(f"cleanup={cleanup_result}")
+    if details:
+        msg_parts.append(f"details={details}")
+
+    log_msg = " | ".join(msg_parts)
+    if result in ("FAILED", "ERROR", "ABORTED"):
+        diag_logger.warning("DIAGNOSTIC: %s", log_msg)
+    else:
+        diag_logger.info("DIAGNOSTIC: %s", log_msg)
+
+    _RECENT_DIAGNOSTICS.append(diag_entry)
+    if len(_RECENT_DIAGNOSTICS) > 100:
+        _RECENT_DIAGNOSTICS.pop(0)
+
+    return diag_entry
+
+
+_RECENT_DIAGNOSTICS: list[dict[str, Any]] = []
+
+
+def get_recent_transport_diagnostics() -> list[dict[str, Any]]:
+    """Return a copy of recent structured transport diagnostics."""
+    return list(_RECENT_DIAGNOSTICS)
+
+
 __all__ = [
     "DEFAULT_BACKUP_COUNT",
     "DEFAULT_LOG_FILE_NAME",
     "DEFAULT_MAX_BYTES",
     "SensitiveDataFilter",
     "disable_console_logging",
+    "get_recent_transport_diagnostics",
+    "log_transport_diagnostic",
     "setup_logging",
 ]

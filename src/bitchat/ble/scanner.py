@@ -47,11 +47,28 @@ class BLEScanner:
         self._discovered_peers: dict[str, DiscoveredPeer] = {}
         self._is_scanning: bool = False
         self._lock = asyncio.Lock()
+        self._scan_started_at: float | None = None
+        self._last_successful_scan_at: float | None = None
+        self._last_scan_duration_seconds: float | None = None
 
     @property
     def is_scanning(self) -> bool:
         """Return True if scanning is currently active."""
         return self._is_scanning
+
+    @property
+    def scan_started_at(self) -> float | None:
+        return self._scan_started_at
+
+    @property
+    def last_successful_scan_at(self) -> float | None:
+        return self._last_successful_scan_at
+
+    @property
+    def scan_duration_seconds(self) -> float | None:
+        if self._is_scanning and self._scan_started_at is not None:
+            return max(0.0, time.time() - self._scan_started_at)
+        return self._last_scan_duration_seconds
 
     @property
     def discovered_peers(self) -> dict[str, DiscoveredPeer]:
@@ -228,6 +245,8 @@ class BLEScanner:
                 self._scanner = scanner
                 await scanner.start()
                 self._is_scanning = True
+                self._scan_started_at = time.time()
+                self._last_successful_scan_at = self._scan_started_at
                 logger.info("BLE scanning started for service %s", self.service_uuid)
             except Exception as e:
                 self._is_scanning = False
@@ -246,6 +265,10 @@ class BLEScanner:
             except Exception as e:
                 logger.warning("Error while stopping BLE scanner: %s", e)
             finally:
+                if self._scan_started_at is not None:
+                    self._last_scan_duration_seconds = max(
+                        0.0, time.time() - self._scan_started_at
+                    )
                 self._is_scanning = False
                 self._scanner = None
                 logger.info("BLE scanning stopped")

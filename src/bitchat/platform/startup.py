@@ -13,8 +13,9 @@ import os
 import shutil
 import subprocess
 import sys
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -184,45 +185,116 @@ def format_startup_status(startup_dir: Path | None = None) -> str:
 
 
 class SingleInstanceGuard:
-    """Per-user Windows named mutex guard preventing duplicate startup instances."""
+    """Per-user single-instance execution guard across Windows and POSIX platforms.
+
+    On Windows, uses a per-user session named mutex (Local\\...).
+    On POSIX platforms, uses atomic kernel advisory file locking (fcntl.flock).
+    """
 
     def __init__(self, mutex_name: str = APP_MUTEX_NAME) -> None:
         self.mutex_name = mutex_name
         self._handle: int | None = None
+        self._lock_fd: int | None = None
+        self._lock_file: Path | None = None
         self.already_running: bool = False
 
+    @property
+    def is_locked(self) -> bool:
+        """Return whether this instance owns the process lock."""
+        return not self.already_running and (
+            self._handle is not None or self._lock_fd is not None
+        )
+
     def acquire(self) -> bool:
-        """Acquire the per-user named mutex.
+        """Acquire the per-user process lock or named mutex.
 
         Returns True if this process is the primary instance, or False if another
-        instance already holds the mutex.
+        instance is already running.
         """
-        if sys.platform != "win32":
-            self.already_running = False
+        if sys.platform == "win32":
+            try:
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.CreateMutexW.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.c_bool,
+                    ctypes.c_wchar_p,
+                ]
+                kernel32.CreateMutexW.restype = ctypes.c_void_p
+
+                ctypes.set_last_error(0)
+                handle = kernel32.CreateMutexW(None, False, self.mutex_name)
+                last_err = ctypes.get_last_error()
+                if handle:
+                    self._handle = int(handle)
+                    self.already_running = last_err == ERROR_ALREADY_EXISTS
+                    return not self.already_running
+            except Exception:
+                self.already_running = False
             return True
+        else:
+            # POSIX platforms use a non-blocking advisory lock on a per-user file.
+            try:
+                import tempfile
+
+                runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+                uid = getattr(os, "getuid", lambda: 1000)()
+                clean_name = self.mutex_name.replace("\\", "_").replace("/", "_")
+                lock_path = Path(runtime_dir) / f"{clean_name}_{uid}.lock"
+                self._lock_file = lock_path
+
+                fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    fcntl: Any = import_module("fcntl")
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._lock_fd = fd
+                    self.already_running = False
+                    return True
+                except (BlockingIOError, OSError):
+                    os.close(fd)
+                    self.already_running = True
+                    return False
+            except Exception:
+                self.already_running = False
+                return True
+
+    def activate_existing_instance(self) -> bool:
+        """Bring the existing BitChat application window to the foreground."""
+        if sys.platform != "win32":
+            return False
 
         try:
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.CreateMutexW.argtypes = [
-                ctypes.c_void_p,
-                ctypes.c_bool,
-                ctypes.c_wchar_p,
-            ]
-            kernel32.CreateMutexW.restype = ctypes.c_void_p
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            found_hwnds: list[int] = []
 
-            ctypes.set_last_error(0)
-            handle = kernel32.CreateMutexW(None, False, self.mutex_name)
-            last_err = ctypes.get_last_error()
-            if handle:
-                self._handle = int(handle)
-                self.already_running = last_err == ERROR_ALREADY_EXISTS
-                return not self.already_running
+            wnd_enum_proc = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p
+            )
+
+            def enum_cb(hwnd: Any, _lparam: Any) -> bool:
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        title = buff.value
+                        if "bitchat" in title.lower():
+                            found_hwnds.append(int(hwnd))
+                return True
+
+            cb = wnd_enum_proc(enum_cb)
+            user32.EnumWindows(cb, 0)
+
+            for hwnd in found_hwnds:
+                # SW_RESTORE = 9
+                user32.ShowWindowAsync(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+                return True
         except Exception:
-            self.already_running = False
-        return True
+            pass
+        return False
 
     def release(self) -> None:
-        """Close the mutex handle when the process exits."""
+        """Release the mutex or process lock when the process exits."""
         if self._handle is not None and sys.platform == "win32":
             with contextlib.suppress(Exception):
                 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -230,7 +302,15 @@ class SingleInstanceGuard:
                 kernel32.CloseHandle.restype = ctypes.c_bool
                 kernel32.CloseHandle(ctypes.c_void_p(self._handle))
             self._handle = None
-            self.already_running = False
+
+        if self._lock_fd is not None:
+            with contextlib.suppress(Exception):
+                fcntl: Any = import_module("fcntl")
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                os.close(self._lock_fd)
+            self._lock_fd = None
+
+        self.already_running = False
 
     def __enter__(self) -> SingleInstanceGuard:
         self.acquire()
@@ -243,3 +323,8 @@ class SingleInstanceGuard:
         exc_tb: TracebackType | None,
     ) -> None:
         self.release()
+
+
+def activate_existing_instance() -> bool:
+    """Attempt to bring the existing BitChat application window to the foreground."""
+    return SingleInstanceGuard().activate_existing_instance()

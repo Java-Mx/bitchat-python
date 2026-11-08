@@ -16,12 +16,16 @@ from bitchat.exceptions import ConfigurationError, InvalidKeyError
 
 VALID_DENSITIES: frozenset[str] = frozenset({"comfortable", "compact"})
 VALID_ACCENTS: frozenset[str] = frozenset({"blue", "cyan", "emerald", "purple"})
-VALID_TRANSPORTS: frozenset[str] = frozenset({"bluetooth", "lan"})
+VALID_TRANSPORTS: frozenset[str] = frozenset({"bluetooth", "lan", "offline"})
+VALID_SECURITY_MODES: frozenset[str] = frozenset({"normal", "maximum"})
+DEFAULT_LAN_DISCOVERY_PORT = 41234
+DEFAULT_LAN_TCP_PORT = 41235
 
 DEFAULT_KEYBINDINGS: dict[str, str] = {
     "help": "f1",
     "edit_theme": "f2",
     "settings": "f3",
+    "peers": "f4",
     "clear_chat": "ctrl+l",
     "quit": "ctrl+q",
     "scroll_up": "pageup",
@@ -81,8 +85,11 @@ class AppConfig:
     show_timestamps: bool = True
     accent: str = "blue"
     transport: str = "bluetooth"
+    security_mode: str = "normal"
     max_hops: int = 3
     inter_fragment_delay_ms: int = 20
+    lan_discovery_port: int = DEFAULT_LAN_DISCOVERY_PORT
+    lan_tcp_port: int = DEFAULT_LAN_TCP_PORT
     keybindings: dict[str, str] = field(
         default_factory=lambda: DEFAULT_KEYBINDINGS.copy()
     )
@@ -95,6 +102,8 @@ class AppConfig:
             self.accent = "blue"
         if self.transport not in VALID_TRANSPORTS:
             self.transport = "bluetooth"
+        if self.security_mode not in VALID_SECURITY_MODES:
+            raise ValueError(f"Invalid security_mode: {self.security_mode!r}")
         try:
             self.max_hops = max(1, min(7, int(self.max_hops)))
         except (ValueError, TypeError):
@@ -105,6 +114,17 @@ class AppConfig:
             )
         except (ValueError, TypeError):
             self.inter_fragment_delay_ms = 20
+        for attr, default in (
+            ("lan_discovery_port", DEFAULT_LAN_DISCOVERY_PORT),
+            ("lan_tcp_port", DEFAULT_LAN_TCP_PORT),
+        ):
+            try:
+                port = int(getattr(self, attr))
+                if not 1024 <= port <= 65535:
+                    raise ValueError
+                setattr(self, attr, port)
+            except (ValueError, TypeError):
+                setattr(self, attr, default)
         if not isinstance(self.nickname, str) or not self.nickname.strip():
             self.nickname = "Anonymous"
         else:
@@ -198,6 +218,13 @@ class AppConfig:
         if transport not in VALID_TRANSPORTS:
             transport = "bluetooth"
 
+        sec_mode_val = data.get("security_mode", "normal")
+        security_mode = (
+            str(sec_mode_val).lower().strip() if isinstance(sec_mode_val, str) else ""
+        )
+        if security_mode not in VALID_SECURITY_MODES:
+            raise ValueError(f"Invalid security_mode: {sec_mode_val!r}")
+
         try:
             hops = int(data.get("max_hops", 3))
             max_hops = max(1, min(7, hops))
@@ -230,8 +257,13 @@ class AppConfig:
             show_timestamps=show_timestamps,
             accent=accent,
             transport=transport,
+            security_mode=security_mode,
             max_hops=max_hops,
             inter_fragment_delay_ms=inter_fragment_delay_ms,
+            lan_discovery_port=data.get(
+                "lan_discovery_port", DEFAULT_LAN_DISCOVERY_PORT
+            ),
+            lan_tcp_port=data.get("lan_tcp_port", DEFAULT_LAN_TCP_PORT),
             keybindings=keybindings,
             contacts=contacts,
         )
@@ -612,7 +644,12 @@ class FileConfigStorage(StorageInterface):
                 raise ConfigurationError(
                     f"Invalid configuration file format: {self.config_path}"
                 )
-            return AppConfig.from_dict(data)
+            try:
+                return AppConfig.from_dict(data)
+            except ValueError as e:
+                raise ConfigurationError(
+                    f"Invalid configuration in {self.config_path}: {e}"
+                ) from e
         except (json.JSONDecodeError, OSError) as e:
             raise ConfigurationError(
                 f"Failed to read configuration from {self.config_path}: {e}"

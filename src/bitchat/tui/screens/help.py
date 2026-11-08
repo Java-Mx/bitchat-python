@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Label
 
-from bitchat.commands.parser import COMMAND_REGISTRY
+from bitchat.commands.parser import COMMAND_REGISTRY, CONFIGURE_SPEC
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -41,7 +41,7 @@ class HelpScreen(ModalScreen[None]):
     def on_mount(self) -> None:
         table = self.query_one("#help-table", DataTable)
         table.add_columns("Command", "Category", "Description")
-        for spec in COMMAND_REGISTRY:
+        for spec in (*COMMAND_REGISTRY, CONFIGURE_SPEC):
             table.add_row(spec.usage, spec.category, spec.description)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

@@ -113,8 +113,10 @@ class ChatView(Widget):
 
                 if record.is_encrypted:
                     type_tag = ("[🔒 DM]", "bold #bc8cff")
-                else:
+                elif record.is_self:
                     type_tag = ("[Public]", "dim #57606a")
+                else:
+                    type_tag = ("[Unverified]", "bold #d29922")
 
                 header = Text()
                 header.append(sender_name, style=f"bold {sender_color}")

@@ -86,11 +86,15 @@ def main() -> None:
     from bitchat.platform.startup import SingleInstanceGuard
 
     with SingleInstanceGuard() as instance_guard:
-        if args.startup_launch and instance_guard.already_running:
-            print(
-                "BitChat is already running for the current user; "
-                "skipping duplicate startup launch."
-            )
+        if instance_guard.already_running:
+            if args.startup_launch:
+                print(
+                    "BitChat is already running for the current user; "
+                    "skipping duplicate startup launch."
+                )
+            else:
+                instance_guard.activate_existing_instance()
+                print("BitChat is already running for this user.")
             sys.exit(0)
 
         use_cli = args.cli or (not args.tui and not sys.stdin.isatty())
@@ -103,12 +107,19 @@ def main() -> None:
             from bitchat.app.session_coordinator import SessionCoordinator
             from bitchat.ble.manager import BLEManager
             from bitchat.ble.server import BLEServer
+            from bitchat.crypto.identity import LocalIdentity
             from bitchat.storage.config import FileConfigStorage
             from bitchat.tui.app import BitChatApp
 
             storage = FileConfigStorage()
             config = storage.load_config()
-            identity = storage.load_or_create_identity()
+            if config.security_mode == "maximum":
+                # Maximum Security: Generate a fresh advertised session peer ID
+                # and ephemeral keys on each fresh application launch.
+                # The persistent identity.json on disk is preserved intact.
+                identity = LocalIdentity.generate()
+            else:
+                identity = storage.load_or_create_identity()
 
             server = BLEServer()
             manager = BLEManager(sender_id=identity.peer_id)
@@ -118,9 +129,16 @@ def main() -> None:
                 ble_server=server,
                 storage=storage,
                 nickname=config.nickname,
+                initial_transport=config.transport,
+                lan_tcp_port=config.lan_tcp_port,
+                lan_discovery_port=config.lan_discovery_port,
             )
 
-            tui_app = BitChatApp(coordinator=coordinator, storage=storage)
+            tui_app = BitChatApp(
+                coordinator=coordinator,
+                storage=storage,
+                initial_screen="home",
+            )
             tui_app.run()
             sys.exit(0)
 

@@ -6,6 +6,7 @@ import pytest
 
 from bitchat.app.application import Application
 from bitchat.commands.parser import CommandParser
+from bitchat.crypto.identity import LocalIdentity
 from bitchat.exceptions import ApplicationError, ConfigurationError
 from bitchat.storage.config import AppConfig, InMemoryStorage
 
@@ -143,6 +144,34 @@ class TestApplication:
         assert "Warning: Failed to load configuration" in output
         assert app.config is not None
         assert app.config.nickname == "Anonymous"
+
+    def test_maximum_security_cli_identity_is_ephemeral(self) -> None:
+        """CLI startup selects a fresh identity without replacing the stored key."""
+        persistent_identity = LocalIdentity.generate()
+        storage = InMemoryStorage(
+            initial_config=AppConfig(security_mode="maximum"),
+            initial_identity=persistent_identity,
+        )
+        app = Application(
+            storage=storage,
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            enable_ble=True,
+        )
+        app.startup()
+        session_identity = app._load_runtime_identity()
+
+        assert session_identity.peer_id != persistent_identity.peer_id
+        assert storage.load_identity() == persistent_identity
+
+    def test_normal_security_cli_identity_uses_persisted_key(self) -> None:
+        persistent_identity = LocalIdentity.generate()
+        storage = InMemoryStorage(initial_identity=persistent_identity)
+        app = Application(storage=storage, stdout=io.StringIO())
+        app.startup()
+        runtime_identity = app._load_runtime_identity()
+
+        assert runtime_identity is persistent_identity
 
     def test_custom_command_parser_injection(self) -> None:
         """Custom command parser instances can be injected."""

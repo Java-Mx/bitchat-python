@@ -91,7 +91,10 @@ class BLEAdapterManager:
         return info
 
     async def start_monitoring(
-        self, callback: Callable[[AdapterInfo], None] | None = None
+        self,
+        callback: Callable[[AdapterInfo], None] | None = None,
+        *,
+        refresh: bool = True,
     ) -> None:
         """Begin event-driven and periodic monitoring of adapter radio state."""
         async with self._lock:
@@ -104,8 +107,8 @@ class BLEAdapterManager:
             self._loop = asyncio.get_running_loop()
             self._is_monitoring = True
 
-            # Initial check
-            await self.check_adapter()
+            if refresh:
+                await self.check_adapter()
 
             # Start event listener on Windows
             if is_windows() and self._custom_backend is None:

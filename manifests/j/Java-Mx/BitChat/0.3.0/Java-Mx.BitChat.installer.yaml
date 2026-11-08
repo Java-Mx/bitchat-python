@@ -1,0 +1,22 @@
+# Created using BitChat automated packaging workflow
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+PackageIdentifier: Java-Mx.BitChat
+PackageVersion: 0.3.0
+InstallerLocale: en-US
+InstallerType: inno
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+Commands:
+  - bitchat
+ReleaseDate: 2026-11-08
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.0/BitChat-0.3.0-windows-x64.exe
+    InstallerSha256: 113CCCB198580D84C82583527B48E2F4591E3776E3AA678F23F685FEB510E02B
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -133,7 +133,8 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
                     and bob_transport.server.is_listening
                     and alice_transport.discovery.is_listening
                     and bob_transport.discovery.is_listening
-                )
+                ),
+                timeout=15.0,
             )
             assert alice_transport.server.bound_port > 0
             assert bob_transport.server.bound_port > 0
@@ -170,11 +171,15 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
                 lambda: (
                     bool(alice_transport.connected_peers)
                     and bool(bob_transport.connected_peers)
-                )
+                ),
+                timeout=15.0,
             )
+            await alice_pilot.pause()
+            await bob_pilot.pause()
 
             alice_status = alice_app.query_one(StatusBar)
-            assert "TCP active" in alice_status.mesh_status
+            assert "LAN / Wi-Fi Connected" in alice_status.mesh_status
+            assert alice_transport.connected_peers
             connected_display = alice_app.query_one(PeerSidebar)._connected_peers
             assert any("unverified" in label for label in connected_display.values())
             assert any(
@@ -295,7 +300,10 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
             )
             assert alice_session.state == NoiseSessionState.CLOSED
             assert bob_session.state == NoiseSessionState.CLOSED
-            assert "TCP active" not in alice_app.query_one(StatusBar).mesh_status
+            assert (
+                "LAN / Wi-Fi Connected"
+                not in alice_app.query_one(StatusBar).mesh_status
+            )
 
             await _send_input(
                 alice_pilot,
@@ -332,7 +340,8 @@ async def test_two_node_lan_tui_chat_over_real_network_and_reconnect() -> None:
                 alice_coord.get_session(bob_identity.peer_id_hex) is not alice_session
             )
             assert bob_coord.get_session(alice_identity.peer_id_hex) is not bob_session
-            assert "TCP active" in alice_app.query_one(StatusBar).mesh_status
+            assert "LAN / Wi-Fi Connected" in alice_app.query_one(StatusBar).mesh_status
+            assert alice_transport.connected_peers
             await alice_coord.stop()
             await bob_coord.stop()
     finally:

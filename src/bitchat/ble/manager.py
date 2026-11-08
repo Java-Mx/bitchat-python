@@ -159,7 +159,6 @@ class BLEManager:
             if self._state in (
                 BLEState.BLUETOOTH_DISABLED,
                 BLEState.BLUETOOTH_UNAVAILABLE,
-                BLEState.OFFLINE,
             ):
                 self._state = BLEState.READY
 
@@ -174,11 +173,15 @@ class BLEManager:
         logger.warning("Reconciling BLE state after adapter loss")
         with contextlib.suppress(Exception):
             await self.scanner.stop()
-        transports = list(self._transports.values())
+        self.scanner.clear()
+        transports = list(self._transports.items())
         self._transports.clear()
-        for t in transports:
+        for addr, t in transports:
             with contextlib.suppress(Exception):
                 await t.stop()
+            if self.on_peer_disconnected:
+                with contextlib.suppress(Exception):
+                    self.on_peer_disconnected(addr)
 
     def _handle_peer_discovered(self, peer: DiscoveredPeer) -> None:
         """Forward peer discovery events to listeners."""

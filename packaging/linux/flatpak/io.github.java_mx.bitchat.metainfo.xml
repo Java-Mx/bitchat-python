@@ -28,6 +28,11 @@
     <binary>bitchat</binary>
   </provides>
   <releases>
+    <release version="0.3.0" date="2026-11-08">
+      <description>
+        <p>Phase 0 production release: Home Screen navigation, full offline mode support, strict 2:2:2 Peer Grid layout, connection management, telemetry diagnostics, and transport lifecycle hardening.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-31">
       <description>
         <p>Device identity hardening with self-connection prevention, rotating redacted diagnostic logging, TUI shutdown fixes and a working Linux and Windows CI matrix.</p>

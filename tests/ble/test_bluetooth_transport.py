@@ -9,7 +9,7 @@ from bitchat.ble.adapter import AdapterInfo, BLEAdapterManager
 from bitchat.ble.manager import BLEManager
 from bitchat.ble.server import BLEServer
 from bitchat.exceptions import BLEError
-from bitchat.transport.base import TransportState
+from bitchat.transport.base import TransportError, TransportState, TransportWarning
 from bitchat.transport.bluetooth import BluetoothTransport
 
 
@@ -95,7 +95,7 @@ async def test_adapter_missing_or_radio_off_does_not_start_ble_roles(
 @pytest.mark.asyncio
 async def test_adapter_without_either_ble_role_is_not_reported_as_radio_off() -> None:
     transport, backend = make_transport(adapter_info(central=False, peripheral=False))
-    errors: list[str] = []
+    errors: list[TransportError] = []
     transport.on_error = errors.append
 
     with pytest.raises(RuntimeError, match="neither BLE central nor peripheral"):
@@ -108,7 +108,7 @@ async def test_adapter_without_either_ble_role_is_not_reported_as_radio_off() ->
     assert telemetry["peripheral_supported"] is False
     assert backend.start_attempts == 0
     assert not transport.is_scanning
-    assert errors == [
+    assert [error.message for error in errors] == [
         "Bluetooth adapter supports neither BLE central nor peripheral operation"
     ]
 
@@ -118,7 +118,7 @@ async def test_adapter_without_either_ble_role_is_not_reported_as_radio_off() ->
 @pytest.mark.asyncio
 async def test_central_scanning_remains_available_without_peripheral_role() -> None:
     transport, backend = make_transport(adapter_info(peripheral=False))
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     transport.on_warning = warnings.append
 
     await transport.start()
@@ -134,7 +134,7 @@ async def test_central_scanning_remains_available_without_peripheral_role() -> N
     assert telemetry["advertisement_offload_supported"] is False
     assert telemetry["advertising_active"] is False
     assert telemetry["gatt_server_status"] == "Unsupported"
-    assert warnings == ["BLE peripheral role is not supported by the adapter"]
+    assert warnings == []
 
     await transport.stop()
 
@@ -165,8 +165,8 @@ async def test_gatt_status_three_preserves_central_mode_and_diagnostic() -> None
         BLEError("GATT service advertising failed with status 3")
     )
     transport, _ = make_transport(adapter_info(), backend)
-    warnings: list[str] = []
-    errors: list[str] = []
+    warnings: list[TransportWarning] = []
+    errors: list[TransportError] = []
     transport.on_warning = warnings.append
     transport.on_error = errors.append
 
@@ -179,7 +179,7 @@ async def test_gatt_status_three_preserves_central_mode_and_diagnostic() -> None
     assert telemetry["advertising_active"] is False
     assert telemetry["gatt_server_status"] == "Failed"
     assert "status 3" in telemetry["peripheral_error"]
-    assert warnings == [telemetry["peripheral_error"]]
+    assert [warning.message for warning in warnings] == [telemetry["peripheral_error"]]
     assert errors == []
     assert backend.is_started is False
     assert backend.stop_attempts == 1
@@ -237,7 +237,7 @@ async def test_windows_gatt_abort_fallback_records_peripheral_error() -> None:
         )
 
     transport.ble_server.start = abort_without_raising  # type: ignore[method-assign]
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     transport.on_warning = warnings.append
 
     await transport.start()
@@ -246,6 +246,6 @@ async def test_windows_gatt_abort_fallback_records_peripheral_error() -> None:
     assert telemetry["advertising_active"] is False
     assert telemetry["gatt_server_status"] == "Failed"
     assert "status 3" in telemetry["peripheral_error"]
-    assert warnings == [telemetry["peripheral_error"]]
+    assert [warning.message for warning in warnings] == [telemetry["peripheral_error"]]
 
     await transport.stop()

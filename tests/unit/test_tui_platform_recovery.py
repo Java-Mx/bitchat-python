@@ -72,6 +72,7 @@ async def test_gatt_failure_dialog_guidance_matches_platform(
             BLEErrorModal(
                 error_message="GATT failed",
                 bluetooth_available=True,
+                peripheral_failure=True,
                 peripheral_supported=True,
             )
         )
@@ -130,7 +131,7 @@ def _make_test_coordinator(
 
 async def test_status_bar_supported_peripheral_capability_active() -> None:
     """When both Central and Peripheral roles are supported and active,
-    the status bar accurately reports '● Bluetooth Ready • BLE Central + Peripheral'.
+    the status bar accurately reports active Bluetooth central and peripheral roles.
     """
     info = AdapterInfo(
         is_available=True,
@@ -143,9 +144,13 @@ async def test_status_bar_supported_peripheral_capability_active() -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         status_bar = app.query_one(StatusBar)
-        assert status_bar.mesh_status == "● Bluetooth Ready • BLE Central + Peripheral"
+        assert status_bar.mesh_status == (
+            "● Bluetooth Active • BLE Central Scanning • "
+            "BLE Peripheral Advertising Active"
+        )
         assert (
-            status_bar.status_message == "● Bluetooth Ready • BLE Central + Peripheral"
+            status_bar.status_message == "● Bluetooth Active • BLE Central Scanning • "
+            "BLE Peripheral Advertising Active"
         )
         assert not any(isinstance(s, BLEErrorModal) for s in app._screen_stack)
     await coord.stop()
@@ -153,7 +158,7 @@ async def test_status_bar_supported_peripheral_capability_active() -> None:
 
 async def test_status_bar_supported_peripheral_capability_idle() -> None:
     """When peripheral role is supported but peripheral is not currently advertising,
-    the status bar accurately reports '● Bluetooth Available • BLE Central Mode'.
+    the status bar distinguishes an active central from radio availability.
     """
     info = AdapterInfo(
         is_available=True,
@@ -172,8 +177,9 @@ async def test_status_bar_supported_peripheral_capability_idle() -> None:
         coord.ble_server._is_advertising = False
         app._refresh_peer_lists()
         status_bar = app.query_one(StatusBar)
-        assert status_bar.mesh_status == "● Bluetooth Available • BLE Central Mode"
-        assert status_bar.status_message == "● Bluetooth Available • BLE Central Mode"
+        expected = "● Bluetooth Active • BLE Central Scanning • BLE Peripheral Inactive"
+        assert status_bar.mesh_status == expected
+        assert status_bar.status_message == expected
     await coord.stop()
 
 
@@ -182,7 +188,7 @@ async def test_status_bar_unsupported_peripheral_when_backend_not_implemented(
 ) -> None:
     """When peripheral role is unsupported by BitChat's backend (e.g. Darwin),
     Central mode is preserved and the status bar accurately reports:
-    '● Bluetooth Available • BLE Central Mode • Peripheral Unsupported'.
+    active central mode and unsupported peripheral mode.
     """
     monkeypatch.setattr(sys, "platform", "darwin")
     info = AdapterInfo(
@@ -200,14 +206,11 @@ async def test_status_bar_unsupported_peripheral_when_backend_not_implemented(
     async with app.run_test() as pilot:
         await pilot.pause()
         status_bar = app.query_one(StatusBar)
-        assert (
-            status_bar.mesh_status
-            == "● Bluetooth Available • BLE Central Mode • Peripheral Unsupported"
+        expected = (
+            "● Bluetooth Active • BLE Central Scanning • BLE Peripheral Unsupported"
         )
-        assert (
-            status_bar.status_message
-            == "● Bluetooth Available • BLE Central Mode • Peripheral Unsupported"
-        )
+        assert status_bar.mesh_status == expected
+        assert status_bar.status_message == expected
 
         # Truthful telemetry and preserved Central-mode functionality
         telemetry = coord.active_transport.get_telemetry()
@@ -227,9 +230,7 @@ async def test_status_bar_unsupported_peripheral_when_backend_not_implemented(
 
 async def test_status_bar_adapter_hardware_unsupported_peripheral() -> None:
     """When the Bluetooth adapter hardware itself does not support peripheral role,
-    the status bar reports
-    '● Bluetooth Available • BLE Central Mode • Peripheral Unsupported'
-    and the 3-choice recovery modal is presented explaining the adapter limitation.
+    the status bar reports active central mode and no recovery dialog is presented.
     """
     info = AdapterInfo(
         is_available=True,
@@ -244,25 +245,20 @@ async def test_status_bar_adapter_hardware_unsupported_peripheral() -> None:
         status_bar = app.query_one(StatusBar)
         assert (
             status_bar.mesh_status
-            == "● Bluetooth Available • BLE Central Mode • Peripheral Unsupported"
+            == "● Bluetooth Active • BLE Central Scanning • BLE Peripheral Unsupported"
         )
         assert (
             status_bar.status_message
-            == "● Bluetooth Available • BLE Central Mode • Peripheral Unsupported"
+            == "● Bluetooth Active • BLE Central Scanning • BLE Peripheral Unsupported"
         )
-        assert isinstance(app.screen, BLEErrorModal)
-        assert _button_labels(app) == [
-            "Retry Adapter",
-            "Continue Wi-Fi/LAN",
-            "Continue Offline",
-        ]
+        assert not any(isinstance(s, BLEErrorModal) for s in app._screen_stack)
     await coord.stop()
 
 
 async def test_status_bar_peripheral_startup_failure_shows_warning_and_modal() -> None:
     """When peripheral advertising fails on startup, the status bar reports
-    'Peripheral Advertising Failed', central scanning remains active,
-    and the 3-choice recovery modal is presented.
+    peripheral failure remains distinct from active central scanning; the
+    initial warning is acknowledged before recovery choices are available.
     """
     info = AdapterInfo(
         is_available=True,
@@ -282,26 +278,23 @@ async def test_status_bar_peripheral_startup_failure_shows_warning_and_modal() -
         await pilot.pause()
         status_bar = app.query_one(StatusBar)
         expected_status = (
-            "● Bluetooth Available • BLE Central Mode • Peripheral Advertising Failed"
+            "● Bluetooth Active • BLE Central Scanning • BLE Peripheral Failed"
         )
         assert status_bar.mesh_status == expected_status
         assert status_bar.status_message == expected_status
         assert isinstance(coord.active_transport, BluetoothTransport)
         assert coord.active_transport.is_scanning is True
 
-        # Recovery modal is presented with the existing three choices unchanged
+        # The first warning is acknowledged before the recovery options.
         assert isinstance(app.screen, BLEErrorModal)
-        assert _button_labels(app) == [
-            "Retry Adapter",
-            "Continue Wi-Fi/LAN",
-            "Continue Offline",
-        ]
+        assert app.screen.acknowledgement_mode
+        assert _button_labels(app) == ["Okay, I understand"]
     await coord.stop()
 
 
 async def test_status_bar_ble_startup_error_with_radio_on() -> None:
     """When adapter radio is ON but BLE transport startup fails completely,
-    the status bar reports '● BLE Error • Bluetooth Available' and shows the
+    the status bar reports inactive Bluetooth without claiming activation and shows the
     recovery modal.
     """
     info = AdapterInfo(
@@ -315,21 +308,17 @@ async def test_status_bar_ble_startup_error_with_radio_on() -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         status_bar = app.query_one(StatusBar)
-        assert status_bar.mesh_status == "● BLE Error • Bluetooth Available"
-        assert status_bar.status_message == "● BLE Error • Bluetooth Available"
+        expected_status = "✕ Bluetooth Inactive (error) • Bluetooth Available"
+        assert status_bar.mesh_status == expected_status
+        assert status_bar.status_message == expected_status
         assert isinstance(app.screen, BLEErrorModal)
-        assert _button_labels(app) == [
-            "Retry Adapter",
-            "Continue Wi-Fi/LAN",
-            "Continue Offline",
-        ]
+        assert _button_labels(app) == ["Okay, I understand"]
     await coord.stop()
 
 
 async def test_status_bar_bluetooth_disabled_and_unavailable() -> None:
     """When Bluetooth is disabled (radio Off) or unavailable, the status bar
-    reports '✕ BLE Offline • Bluetooth Disabled' or
-    '✕ BLE Offline • Bluetooth Unavailable'.
+    reports inactive Bluetooth and the radio's actual availability.
     """
     # Radio Off
     info_off = AdapterInfo(is_available=True, radio_state="off")
@@ -338,14 +327,11 @@ async def test_status_bar_bluetooth_disabled_and_unavailable() -> None:
     async with app_off.run_test() as pilot:
         await pilot.pause()
         status_bar = app_off.query_one(StatusBar)
-        assert status_bar.mesh_status == "✕ BLE Offline • Bluetooth Disabled"
-        assert status_bar.status_message == "✕ BLE Offline • Bluetooth Disabled"
+        assert "Bluetooth Inactive" in status_bar.mesh_status
+        assert "Bluetooth Unavailable" in status_bar.mesh_status
+        assert status_bar.status_message == status_bar.mesh_status
         assert isinstance(app_off.screen, BLEErrorModal)
-        assert _button_labels(app_off) == [
-            "Retry Adapter",
-            "Continue Wi-Fi/LAN",
-            "Continue Offline",
-        ]
+        assert _button_labels(app_off) == ["Okay, I understand"]
     await coord_off.stop()
 
     # Radio Unavailable
@@ -355,12 +341,9 @@ async def test_status_bar_bluetooth_disabled_and_unavailable() -> None:
     async with app_unavail.run_test() as pilot:
         await pilot.pause()
         status_bar = app_unavail.query_one(StatusBar)
-        assert status_bar.mesh_status == "✕ BLE Offline • Bluetooth Unavailable"
-        assert status_bar.status_message == "✕ BLE Offline • Bluetooth Unavailable"
+        assert "Bluetooth Inactive" in status_bar.mesh_status
+        assert "Bluetooth Unavailable" in status_bar.mesh_status
+        assert status_bar.status_message == status_bar.mesh_status
         assert isinstance(app_unavail.screen, BLEErrorModal)
-        assert _button_labels(app_unavail) == [
-            "Retry Adapter",
-            "Continue Wi-Fi/LAN",
-            "Continue Offline",
-        ]
+        assert _button_labels(app_unavail) == ["Okay, I understand"]
     await coord_unavail.stop()

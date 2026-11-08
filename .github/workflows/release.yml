@@ -211,7 +211,7 @@ jobs:
           name: windows-distributables
           path: dist-win/
 
-      - name: Organize Artifacts
+      - name: Organize & Verify Artifacts
         run: |
           mkdir -p packaging/windows/winget/
           cp -r dist-win/BitChat* dist/ 2>/dev/null || true
@@ -222,6 +222,13 @@ jobs:
             cp dist-win/Java-Mx.BitChat.yaml packaging/windows/winget/
           fi
           ls -la dist/
+          echo "Verifying mandatory release artifacts exist..."
+          ls dist/BitChat-*-windows-x64.exe || { echo "ERROR: Missing Windows .exe!"; exit 1; }
+          ls dist/BitChat-*-windows-x64.exe.sha256 || { echo "ERROR: Missing Windows checksum!"; exit 1; }
+          ls dist/*.deb || { echo "ERROR: Missing Debian .deb!"; exit 1; }
+          ls dist/*.deb.sha256 || { echo "ERROR: Missing Debian checksum!"; exit 1; }
+          ls dist/*.whl || { echo "ERROR: Missing Python wheel!"; exit 1; }
+          ls dist/*.tar.gz || { echo "ERROR: Missing Python sdist!"; exit 1; }
 
       - name: Create GitHub Release & Upload All Assets
         uses: softprops/action-gh-release@v3

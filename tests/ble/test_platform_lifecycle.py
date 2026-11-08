@@ -32,7 +32,7 @@ from bitchat.crypto.identity import LocalIdentity
 from bitchat.exceptions import BLEError
 from bitchat.network.models import NetworkInfo
 from bitchat.storage.config import AppConfig, FileConfigStorage
-from bitchat.transport.base import TransportState
+from bitchat.transport.base import TransportError, TransportState, TransportWarning
 from bitchat.transport.bluetooth import BluetoothTransport
 
 if TYPE_CHECKING:
@@ -380,7 +380,7 @@ async def test_windows_advertising_failure_keeps_central_and_recovers_on_retry(
 ) -> None:
     windows.provider_status = STATUS_ABORTED
     transport = make_transport(MutableAdapterBackend(hardware()), BLEServer())
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     transport.on_warning = warnings.append
 
     await transport.start()
@@ -426,7 +426,7 @@ async def test_linux_advertising_failure_keeps_central_and_recovers_on_retry(
 ) -> None:
     bluez.register_adv_error = "org.bluez.Error.Failed"
     transport = make_transport(MutableAdapterBackend(hardware()), BLEServer())
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     transport.on_warning = warnings.append
 
     await transport.start()
@@ -458,7 +458,7 @@ async def test_darwin_transport_runs_central_only_without_warning(
     # The adapter hardware claims peripheral support, but BitChat has no Darwin
     # GATT server, so the transport must report central-only truthfully.
     transport = make_transport(MutableAdapterBackend(hardware()), BLEServer())
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     transport.on_warning = warnings.append
 
     await transport.start()
@@ -482,7 +482,7 @@ async def test_linux_transport_hardware_unsupported_peripheral(
     transport = make_transport(
         MutableAdapterBackend(hardware(peripheral=False)), BLEServer()
     )
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     transport.on_warning = warnings.append
 
     await transport.start()
@@ -493,8 +493,8 @@ async def test_linux_transport_hardware_unsupported_peripheral(
     assert telemetry["peripheral_supported"] is False
     assert telemetry["advertising_active"] is False
     assert telemetry["gatt_server_status"] == "Unsupported"
-    assert telemetry["peripheral_error"] is not None
-    assert len(warnings) == 1
+    assert telemetry["peripheral_error"] is None
+    assert warnings == []
     await transport.stop()
 
 
@@ -538,6 +538,7 @@ async def test_repeated_transport_cycles_do_not_leak_tasks_or_handlers(
         assert len(fake_bluez.registered_applications) == 0
         assert len(fake_bluez.registered_advertisements) == 0
         assert not manager.scanner.is_scanning
+    assert adapter.checks == 3
 
 
 # ---------------------------------------------------------------------------
@@ -591,13 +592,13 @@ async def test_retry_fails_without_hardware_then_succeeds_and_cleans_up(
 ) -> None:
     adapter = MutableAdapterBackend(hardware(available=False))
     coordinator = make_coordinator(identity, storage, adapter)
-    errors: list[str] = []
+    errors: list[TransportError] = []
     coordinator.on_ble_error = errors.append
     manager = coordinator.ble_manager
 
     await coordinator.start()
     assert coordinator.is_running is False
-    assert errors == ["Bluetooth unavailable"]
+    assert [error.message for error in errors] == ["Bluetooth unavailable"]
 
     # Still no hardware: a real retry runs, fails, and leaves nothing running.
     assert await coordinator.retry_active_transport() is False
@@ -649,7 +650,7 @@ async def test_gatt_failure_retry_recovers_with_real_windows_server(
     windows.create_error = 3
     adapter = MutableAdapterBackend(hardware())
     coordinator = make_coordinator(identity, storage, adapter, BLEServer())
-    warnings: list[str] = []
+    warnings: list[TransportWarning] = []
     coordinator.on_ble_warning = warnings.append
 
     await coordinator.start()
@@ -709,10 +710,12 @@ async def test_lan_fallback_failure_is_reported_and_releases_sockets(
     with patch("bitchat.network.adapter.detect_network_info", return_value=NO_NETWORK):
         ok, message = await coordinator.switch_transport("lan")
 
-    lan: Any = coordinator.active_transport
+    lan: Any = coordinator._transports.get("lan")
     assert ok is False
     assert "Failed starting lan transport" in message
     assert coordinator.is_running is False
+    assert coordinator.active_transport_name != "lan"
+    assert lan is not None
     assert lan.is_running is False
     assert lan.server.is_listening is False
     assert lan.discovery.is_running is False

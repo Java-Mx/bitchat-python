@@ -25,6 +25,7 @@ class CommandType(StrEnum):
     PUBLIC = "public"
     TRANSPORT = "transport"
     CONFIGURE = "configure"
+    HOME = "home"
     EMPTY = "empty"
     UNKNOWN = "unknown"
 
@@ -88,8 +89,8 @@ COMMAND_REGISTRY: list[CommandSpec] = [
     ),
     CommandSpec(
         name="/transport",
-        usage="/transport [bluetooth|lan]",
-        description="Switch active transport medium (bluetooth or lan)",
+        usage="/transport [bluetooth|lan|offline]",
+        description="Switch active transport medium (bluetooth, lan, or offline)",
         category="Network",
         arg_type="transport_medium",
     ),
@@ -145,6 +146,12 @@ COMMAND_REGISTRY: list[CommandSpec] = [
         category="System",
     ),
     CommandSpec(
+        name="/home",
+        usage="/home",
+        description="Return to the BitChat dashboard home screen",
+        category="Navigation",
+    ),
+    CommandSpec(
         name="/exit",
         usage="/exit",
         description="Exit BitChat",
@@ -154,9 +161,10 @@ COMMAND_REGISTRY: list[CommandSpec] = [
 
 CONFIGURE_SPEC = CommandSpec(
     name="/configure",
-    usage="/configure",
-    description="Run system configuration and hardware diagnostics",
+    usage="/configure [general|network|bluetooth|appearance]",
+    description=("Run system diagnostics, or open a settings category when specified"),
     category="System",
+    arg_type="category",
 )
 
 
@@ -266,6 +274,13 @@ class CommandParser:
         if first_token in ("exit", "quit", "/exit", "/quit"):
             return Command(
                 command_type=CommandType.EXIT,
+                raw_input=text,
+                args=tokens[1:],
+            )
+
+        if first_token in ("home", "/home", "dashboard", "/dashboard"):
+            return Command(
+                command_type=CommandType.HOME,
                 raw_input=text,
                 args=tokens[1:],
             )

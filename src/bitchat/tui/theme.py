@@ -24,7 +24,7 @@ COLOR_TEXT_DIM = "#57606a"
 # ==============================================================================
 COLOR_BLUE_ACCENT = "#58a6ff"
 COLOR_BLUE_INTERACTIVE = "#388bfd"
-COLOR_BLUE_ACTIVE = "#1f6feb"
+COLOR_BLUE_ACTIVE = "#388bfd"
 COLOR_BLUE_SURFACE = "#152238"
 COLOR_BORDER_FOCUS = "#388bfd"
 COLOR_BORDER_FOCUS_SUBTLE = "#28334e"
@@ -60,14 +60,110 @@ COLOR_STATUS_WARNING = "#d29922"  # Connecting, scanning, warning
 COLOR_STATUS_ERROR = "#f85149"  # Disconnected, handshake error, failure
 
 # ==============================================================================
-# 6. Accent Themes (Strict 5-Family Preserving Accent Profiles)
+# 6. Centralized Design Token System across All 4 Advertised Themes
 # ==============================================================================
+THEME_TOKENS: dict[str, dict[str, str]] = {
+    "blue": {
+        "name": "Midnight Blue",
+        "app_bg": "#080a0f",
+        "primary_surface": "#0f121c",
+        "secondary_surface": "#161b26",
+        "primary_text": "#e6edf3",
+        "secondary_text": "#c9d1d9",
+        "muted_text": "#8b949e",
+        "accent": "#58a6ff",
+        "button_bg": "#161b22",
+        "button_fg": "#e6edf3",
+        "button_hover": "#21262d",
+        "input_bg": "#121624",
+        "input_fg": "#e6edf3",
+        "border": "#22283a",
+        "selection": "#1e2438",
+        "success": "#3fb950",
+        "warning": "#d29922",
+        "error": "#f85149",
+    },
+    "cyan": {
+        "name": "Cyber Cyan",
+        "app_bg": "#060d10",
+        "primary_surface": "#0a161c",
+        "secondary_surface": "#0f2028",
+        "primary_text": "#e0f7fa",
+        "secondary_text": "#b2ebf2",
+        "muted_text": "#70979e",
+        "accent": "#39c5cf",
+        "button_bg": "#0e222a",
+        "button_fg": "#e0f7fa",
+        "button_hover": "#14303c",
+        "input_bg": "#0c1b22",
+        "input_fg": "#e0f7fa",
+        "border": "#1d3840",
+        "selection": "#10262e",
+        "success": "#3fb950",
+        "warning": "#d29922",
+        "error": "#f85149",
+    },
+    "emerald": {
+        "name": "Terminal Emerald",
+        "app_bg": "#060f09",
+        "primary_surface": "#0a180f",
+        "secondary_surface": "#0f2416",
+        "primary_text": "#e8f5e9",
+        "secondary_text": "#c8e6c9",
+        "muted_text": "#6e9674",
+        "accent": "#56d364",
+        "button_bg": "#0e2414",
+        "button_fg": "#e8f5e9",
+        "button_hover": "#15331c",
+        "input_bg": "#0c1d10",
+        "input_fg": "#e8f5e9",
+        "border": "#1d3a24",
+        "selection": "#13261a",
+        "success": "#56d364",
+        "warning": "#d29922",
+        "error": "#f85149",
+    },
+    "purple": {
+        "name": "Amethyst Purple",
+        "app_bg": "#0c0812",
+        "primary_surface": "#140d1f",
+        "secondary_surface": "#1c122c",
+        "primary_text": "#f3e8fd",
+        "secondary_text": "#e1bee7",
+        "muted_text": "#8e7a9e",
+        "accent": "#bc8cff",
+        "button_bg": "#1e1330",
+        "button_fg": "#f3e8fd",
+        "button_hover": "#2a1b42",
+        "input_bg": "#160e24",
+        "input_fg": "#f3e8fd",
+        "border": "#392557",
+        "selection": "#271b3d",
+        "success": "#3fb950",
+        "warning": "#d29922",
+        "error": "#f85149",
+    },
+}
+
+# Aliases for theme keys
+THEME_TOKENS["midnight-blue"] = THEME_TOKENS["blue"]
+THEME_TOKENS["cyber-cyan"] = THEME_TOKENS["cyan"]
+THEME_TOKENS["terminal-emerald"] = THEME_TOKENS["emerald"]
+THEME_TOKENS["amethyst-purple"] = THEME_TOKENS["purple"]
+
+
+def get_theme_tokens(accent: str | None = None) -> dict[str, str]:
+    """Retrieve the complete token map for a named theme accent."""
+    key = (accent or "blue").lower().strip()
+    return THEME_TOKENS.get(key, THEME_TOKENS["blue"])
+
+
 ACCENT_THEMES: dict[str, dict[str, str]] = {
     "blue": {
         "name": "Midnight Blue",
         "primary": "#58a6ff",
         "interactive": "#388bfd",
-        "active": "#1f6feb",
+        "active": "#388bfd",
         "surface": "#152238",
         "border_focus": "#388bfd",
         "border_subtle": "#28334e",
@@ -76,7 +172,7 @@ ACCENT_THEMES: dict[str, dict[str, str]] = {
         "name": "Cyber Cyan",
         "primary": "#39c5cf",
         "interactive": "#388bfd",
-        "active": "#1f6feb",
+        "active": "#39c5cf",
         "surface": "#10262e",
         "border_focus": "#39c5cf",
         "border_subtle": "#1d3840",

@@ -169,7 +169,7 @@ class Application:
             return self.coordinator
 
         if self.local_identity is None:
-            self.local_identity = self.storage.load_or_create_identity()
+            self.local_identity = self._load_runtime_identity()
 
         if self.ble_server is None:
             from bitchat.ble.server import BLEServer
@@ -194,6 +194,16 @@ class Application:
             on_handshake_completed=self._on_handshake_completed,
         )
         return self.coordinator
+
+    def _load_runtime_identity(self) -> LocalIdentity:
+        """Select a persistent or per-launch identity from the loaded config."""
+        if self.local_identity is not None:
+            return self.local_identity
+        if self.config is not None and self.config.security_mode == "maximum":
+            from bitchat.crypto.identity import LocalIdentity
+
+            return LocalIdentity.generate()
+        return self.storage.load_or_create_identity()
 
     def _on_message_received(
         self, sender_id: str, text: str, is_encrypted: bool

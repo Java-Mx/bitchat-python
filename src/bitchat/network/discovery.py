@@ -55,6 +55,8 @@ class LANDiscovery:
         self._listen_task: asyncio.Task[Any] | None = None
         self._listen_sock: socket.socket | None = None
         self._send_sock: socket.socket | None = None
+        self.last_broadcast_at: float | None = None
+        self.last_error: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -63,6 +65,10 @@ class LANDiscovery:
     @property
     def is_listening(self) -> bool:
         return self._is_running and self._listen_sock is not None
+
+    @property
+    def is_broadcasting(self) -> bool:
+        return self._is_running and self._send_sock is not None
 
     @property
     def discovered_peers(self) -> dict[str, LANDiscoveredPeer]:
@@ -87,6 +93,9 @@ class LANDiscovery:
         """Initialize sockets and launch UDP listen and broadcast loops."""
         if self._is_running:
             return
+        if not 0 <= self.discovery_port <= 65535:
+            raise ValueError("UDP discovery port must be between 0 and 65535")
+        self.last_error = None
 
         # 1. Setup send socket
         try:
@@ -95,7 +104,9 @@ class LANDiscovery:
             send_sock.setblocking(False)
             self._send_sock = send_sock
         except Exception as e:
+            self.last_error = f"UDP send socket failed: {e}"
             logger.warning("Failed creating UDP discovery send socket: %s", e)
+            raise RuntimeError(self.last_error) from e
 
         # 2. Setup listen socket (required for real discovery)
         try:
@@ -104,6 +115,7 @@ class LANDiscovery:
             listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             listen_sock.setblocking(False)
             listen_sock.bind(("0.0.0.0", self.discovery_port))
+            self.discovery_port = int(listen_sock.getsockname()[1])
             self._listen_sock = listen_sock
         except Exception as e:
             if self._send_sock:
@@ -129,10 +141,6 @@ class LANDiscovery:
 
     async def stop(self) -> None:
         """Stop discovery loops and release sockets."""
-        if not self._is_running:
-            self._discovered_peers.clear()
-            return
-
         self._is_running = False
         self._discovered_peers.clear()
 
@@ -160,7 +168,7 @@ class LANDiscovery:
 
     async def send_broadcast_now(self) -> None:
         """Transmit an immediate discovery broadcast beacon."""
-        if not self._send_sock or self.listening_port <= 0:
+        if not self._is_running or not self._send_sock or self.listening_port <= 0:
             return
 
         try:
@@ -179,12 +187,23 @@ class LANDiscovery:
                 parts = local_ip.split(".")
                 if len(parts) == 4:
                     targets.append(f"{parts[0]}.{parts[1]}.{parts[2]}.255")
+            sent = 0
             for target_ip in dict.fromkeys(targets):
-                with contextlib.suppress(Exception):
+                try:
                     await loop.sock_sendto(
                         self._send_sock, raw, (target_ip, self.discovery_port)
                     )
+                    sent += 1
+                except OSError as e:
+                    self.last_error = f"UDP beacon send failed: {e}"
+                    logger.debug("Failed sending UDP discovery to %s: %s", target_ip, e)
+            if sent:
+                self.last_broadcast_at = time.time()
+                self.last_error = None
+            elif self.last_error is None:
+                self.last_error = "No UDP discovery broadcast target was available."
         except Exception as e:
+            self.last_error = f"UDP discovery beacon failed: {e}"
             logger.debug("Failed sending discovery broadcast: %s", e)
 
     async def _broadcast_loop(self) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from rich.markup import escape
 from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.message import Message
@@ -78,16 +79,13 @@ class PeerSidebar(Widget):
         self._addr_to_name: dict[str, str] = {}
 
     def watch_active_transport(self, new_val: str) -> None:
-        self.border_title = (
-            "Peers (LAN / Wi-Fi)" if new_val == "lan" else "Peers (BLE Mesh)"
-        )
+        self.border_title = {
+            "lan": "Peers (LAN / Wi-Fi)",
+            "bluetooth": "Peers (BLE Mesh)",
+        }.get(new_val, "Peers (Offline)")
 
     def on_mount(self) -> None:
-        self.border_title = (
-            "Peers (LAN / Wi-Fi)"
-            if self.active_transport == "lan"
-            else "Peers (BLE Mesh)"
-        )
+        self.watch_active_transport(self.active_transport)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="identity-card"):
@@ -109,7 +107,7 @@ class PeerSidebar(Widget):
         short_fp = self.fingerprint[:16] + "..." if self.fingerprint else "N/A"
         self_color = get_peer_color(self.nickname)
         return (
-            f"[bold {self_color}]{self.nickname}[/bold {self_color}]\n"
+            f"[bold {self_color}]{escape(self.nickname)}[/bold {self_color}]\n"
             f"[dim]ID:[/dim]  [dim #8b949e]{short_id}[/dim #8b949e]\n"
             f"[dim]FP:[/dim]  [dim #8b949e]{short_fp}[/dim #8b949e]"
         )
@@ -156,9 +154,10 @@ class PeerSidebar(Widget):
                     )
                     self._addr_to_name[addr] = clean_name
                     color = get_peer_color(clean_name)
+                    display_name = escape(clean_name)
                     item = PeerListItem(
                         Label(
-                            f"[bold {color}]● {clean_name}[/bold {color}]\n"
+                            f"[bold {color}]● {display_name}[/bold {color}]\n"
                             f"  [dim #8b949e]{connection_label} • {connection_state}"
                             "[/dim #8b949e]"
                         ),
@@ -215,22 +214,26 @@ class PeerSidebar(Widget):
             view.clear()
             if is_offline:
                 unavail = (
-                    "LAN (offline)" if transport == "lan" else "Bluetooth Unavailable"
+                    "LAN (offline)"
+                    if transport == "lan"
+                    else "Offline"
+                    if transport == "offline"
+                    else "Bluetooth Unavailable"
                 )
                 view.append(ListItem(Label(f"[dim red]{unavail}[/dim red]")))
             elif not self._discovered_peers:
                 if is_scanning:
                     scanning_msg = (
-                        "Searching local network for peers..."
+                        "Searching local network\nfor peers..."
                         if transport == "lan"
-                        else "Scanning for BitChat peers..."
+                        else "Scanning for BitChat\npeers..."
                     )
                     view.append(ListItem(Label(f"[dim]{scanning_msg}[/dim]")))
                 else:
                     no_peers_msg = (
-                        "No BitChat peers on local network"
+                        "No BitChat peers\non local network"
                         if transport == "lan"
-                        else "No BitChat peers discovered"
+                        else "No BitChat peers\ndiscovered"
                     )
                     view.append(ListItem(Label(f"[dim]{no_peers_msg}[/dim]")))
             else:
@@ -244,7 +247,7 @@ class PeerSidebar(Widget):
                     name = p_name or (f"Peer {p_id[:8]}" if p_id else "BitChat Node")
                     color = get_peer_color(name)
                     id_line = (
-                        f"  [dim #8b949e]ID: {p_id[:12]}[/dim #8b949e]\n"
+                        f"  [dim #8b949e]ID: {escape(str(p_id[:12]))}[/dim #8b949e]\n"
                         if p_id
                         else ""
                     )
@@ -263,9 +266,11 @@ class PeerSidebar(Widget):
                         net_str = f"Network: {clean_ssid} • " if clean_ssid else ""
                         item = PeerListItem(
                             Label(
-                                f"[{color}]○ {name}[/{color}]\n"
+                                f"[{color}]○ {escape(str(name))}[/{color}]\n"
                                 f"{id_line}"
-                                f"  [dim #8b949e]{net_str}{ip_port}[/dim #8b949e]"
+                                f"  [dim #8b949e]"
+                                f"{escape(str(net_str))}{escape(str(ip_port))}"
+                                "[/dim #8b949e]"
                             ),
                             peer_address=addr,
                             peer_name=name,
@@ -277,9 +282,11 @@ class PeerSidebar(Widget):
                         )
                         item = PeerListItem(
                             Label(
-                                f"[{color}]○ {name}[/{color}]\n"
+                                f"[{color}]○ {escape(str(name))}[/{color}]\n"
                                 f"{id_line}"
-                                f"  [dim #8b949e]{rssi_str} • {addr}[/dim #8b949e]"
+                                f"  [dim #8b949e]"
+                                f"{escape(str(rssi_str))} • {escape(str(addr))}"
+                                "[/dim #8b949e]"
                             ),
                             peer_address=addr,
                             peer_name=name,

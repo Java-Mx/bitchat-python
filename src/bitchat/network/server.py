@@ -80,12 +80,16 @@ class LANServer:
 
     async def stop(self) -> None:
         """Stop listening and close all accepted incoming connections."""
-        if not self._is_listening:
-            return
-
         self._is_listening = False
 
-        # Close active client connections first so server sockets can release
+        if self._server:
+            self._server.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._server.wait_closed(), timeout=1.0)
+            self._server = None
+        self._bound_port = 0
+
+        # Close active client connections
         async with self._lock:
             conns = list(self._connections.values())
             self._connections.clear()
@@ -94,16 +98,16 @@ class LANServer:
             with contextlib.suppress(Exception):
                 await conn.close()
 
-        if self._server:
-            self._server.close()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(self._server.wait_closed(), timeout=1.0)
-            self._server = None
-
     async def _handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         """Process incoming client socket connection."""
+        if not self._is_listening or self._server is None:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return
+
         remote_addr = writer.get_extra_info("peername")
         if not remote_addr:
             writer.close()
@@ -113,11 +117,10 @@ class LANServer:
         peer_addr = f"{host}:{port}"
 
         async with self._lock:
-            if len(self._connections) >= self.max_connections:
+            if not self._is_listening or len(self._connections) >= self.max_connections:
                 logger.warning(
-                    "Rejecting connection from %s: max connection limit (%d) reached",
+                    "Rejecting connection from %s: server stopped or limit reached",
                     peer_addr,
-                    self.max_connections,
                 )
                 writer.close()
                 with contextlib.suppress(Exception):
