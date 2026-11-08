@@ -250,9 +250,12 @@ def test_virtual_host_only_adapter_not_marked_connected() -> None:
         default_route=False,
     )
 
-    with patch(
-        "bitchat.network.provider._discover_windows",
-        return_value=((vbox_adapter,), ""),
+    with (
+        patch("sys.platform", "win32"),
+        patch(
+            "bitchat.network.provider._discover_windows",
+            return_value=((vbox_adapter,), ""),
+        ),
     ):
         info = discover_network_info()
         assert info.status == "Disconnected"
