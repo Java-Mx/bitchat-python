@@ -16,16 +16,12 @@ cleanup:
   - /share/man
 
 modules:
-  - name: python3-dependencies
-    buildsystem: simple
-    build-commands:
-      - pip3 install --prefix=/app --no-build-isolation hatchling "textual>=8.2.8" "bleak>=3.0.2" "cryptography>=50.0.1"
-    sources: []
-
   - name: bitchat
     buildsystem: simple
     build-commands:
-      - pip3 install --prefix=/app --no-deps --no-build-isolation .
+      - mkdir -p /app/lib/bitchat /app/bin
+      - cp -a dist/bitchat/. /app/lib/bitchat/
+      - ln -sf /app/lib/bitchat/bitchat /app/bin/bitchat
       - install -Dm644 packaging/linux/flatpak/io.github.java_mx.bitchat.desktop /app/share/applications/io.github.java_mx.bitchat.desktop
       - install -Dm644 packaging/linux/flatpak/io.github.java_mx.bitchat.metainfo.xml /app/share/metainfo/io.github.java_mx.bitchat.metainfo.xml
     sources:

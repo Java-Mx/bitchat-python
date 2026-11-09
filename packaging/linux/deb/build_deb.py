@@ -226,6 +226,13 @@ exec /usr/lib/bitchat/bitchat "$@"
         with contextlib.suppress(Exception):
             dest.chmod(0o755)
 
+    postrm_src = DEB_PKG_DIR / "postrm"
+    if postrm_src.is_file():
+        dest = debian_dir / "postrm"
+        shutil.copy2(postrm_src, dest)
+        with contextlib.suppress(Exception):
+            dest.chmod(0o755)
+
     deb_filename = f"bitchat_{version}_amd64.deb"
     output_deb = out_dir / deb_filename
     if output_deb.exists():

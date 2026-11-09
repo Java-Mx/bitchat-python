@@ -226,9 +226,9 @@ def build_flatpak_bundle(output_dir: Path | None = None) -> Path | None:
 
     builder_cmd = [
         flatpak_builder,
+        "--user",
         "--force-clean",
         "--repo=" + str(repo_dir),
-        "--share=network",
         str(build_dir),
         str(manifest_file),
     ]

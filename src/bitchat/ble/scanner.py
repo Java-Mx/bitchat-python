@@ -36,6 +36,11 @@ class BLEScanner:
         local_adapter_address: str | None = None,
     ) -> None:
         self.service_uuid = service_uuid.lower()
+        self._norm_service_uuid = self.service_uuid.replace("-", "")
+        try:
+            self._mfg_prefix: bytes | None = b"BC" + uuid.UUID(self.service_uuid).bytes
+        except ValueError:
+            self._mfg_prefix = None
         self.on_peer_discovered = on_peer_discovered
         self.on_peer_expired = on_peer_expired
         self.local_peer_id = local_peer_id.lower() if local_peer_id else None
@@ -102,7 +107,7 @@ class BLEScanner:
     ) -> None:
         """Handle incoming BLE advertisement detection with strict BitChat filtering."""
         adv_uuids = [str(u).lower() for u in (advertisement_data.service_uuids or [])]
-        norm_target = self.service_uuid.lower().replace("-", "")
+        norm_target = self._norm_service_uuid
 
         is_bitchat = False
         extracted_peer_id: str | None = None
@@ -127,11 +132,13 @@ class BLEScanner:
         # 3. Match BitChat manufacturer signature in manufacturer_data
         mfg_data = getattr(advertisement_data, "manufacturer_data", None)
         if mfg_data and (not is_bitchat or extracted_peer_id is None):
+            mfg_prefix = self._mfg_prefix
+            if mfg_prefix is None:
+                mfg_prefix = b"BC" + uuid.UUID(self.service_uuid).bytes
             for company_id, m_payload in mfg_data.items():
                 if company_id in (0xFFFF, 0x0000):
                     raw = bytes(m_payload)
-                    srv_bytes = uuid.UUID(self.service_uuid).bytes
-                    if raw.startswith(b"BC" + srv_bytes):
+                    if raw.startswith(mfg_prefix):
                         is_bitchat = True
                         rest = raw[18:]
                         if rest:

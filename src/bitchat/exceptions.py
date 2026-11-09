@@ -49,6 +49,10 @@ class CorruptPaddingError(PacketDecodingError):
     """Raised when padding length delimiter is inconsistent with packet size."""
 
 
+class FramingError(ProtocolError):
+    """Raised when framing magic is invalid or frame size exceeds safety bounds."""
+
+
 # ---------------------------------------------------------------------------
 # Fragmentation error hierarchy
 # ---------------------------------------------------------------------------

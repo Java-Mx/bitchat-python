@@ -2,6 +2,7 @@
 
 import struct
 
+from bitchat._native import HAS_NATIVE_CORE, _core, raise_mapped_error
 from bitchat.exceptions import (
     InvalidPacketError,
     PacketDecodingError,
@@ -23,18 +24,8 @@ from bitchat.protocol.constants import (
 from bitchat.protocol.packet import BitchatPacket
 
 
-def unpad_packet_data(data: bytes) -> bytes:
-    """Remove BitChat random block padding (PKCS#7-style length delimiter).
-
-    The final byte indicates the count of padding bytes to remove (1..255).
-    If padding length is 0, exceeds data length, or exceeds 255, returns data unchanged.
-
-    Note:
-        Reference behavior parity: Like the Rust reference `unpad_message`, this helper
-        permissively strips trailing bytes based solely on the final delimiter byte.
-        In contrast, `decode_packet` performs strict padding-length consistency
-        validation.
-    """
+def py_unpad_packet_data(data: bytes) -> bytes:
+    """Pure-Python reference implementation of unpad_packet_data."""
     if not isinstance(data, (bytes, bytearray)):
         raise PacketDecodingError(f"Expected bytes-like object, got {type(data)}")
     if not data:
@@ -51,31 +42,17 @@ def unpad_packet_data(data: bytes) -> bytes:
     return bytes(data[:-padding_length])
 
 
-def decode_packet(data: bytes) -> BitchatPacket:
-    """Decode raw binary data into a BitchatPacket with defensive validation.
+def unpad_packet_data(data: bytes) -> bytes:
+    """Remove BitChat random block padding (PKCS#7-style length delimiter)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise PacketDecodingError(f"Expected bytes-like object, got {type(data)}")
+    if HAS_NATIVE_CORE:
+        return _core.unpad_packet_data(data if type(data) is bytes else bytes(data))
+    return py_unpad_packet_data(data)
 
-    Defensive Parsing Architecture:
-    - Rust reference parser: permissive padding removal based solely on final byte.
-    - Python implementation: strict padding-length consistency validation.
-    - Reason: Reject malformed, truncated, corrupted, or ambiguous packets instead
-      of silently accepting corrupted data.
 
-    Validation steps:
-    1. Validates input type is bytes or bytearray (rejects non-bytes).
-    2. Validates minimum wire length (22 bytes: 14 header + 8 sender ID).
-    3. Parses the 14-byte fixed header BEFORE SenderID.
-    4. Validates protocol version equals CURRENT_PROTOCOL_VERSION (1).
-    5. Validates message type against known MessageType enum.
-    6. Computes exact expected unpadded packet length.
-    7. Validates and removes trailing block padding (verifying last_byte == needed).
-    8. Extracts SenderID, optional RecipientID, Payload, and Signature slices.
-    9. Returns the validated, immutable BitchatPacket instance.
-
-    Raises:
-        PacketDecodingError: If data is truncated, malformed, or has invalid padding.
-        UnsupportedProtocolVersionError: If protocol version is unsupported.
-        UnknownMessageTypeError: If message type is unrecognized.
-    """
+def py_decode_packet(data: bytes) -> BitchatPacket:
+    """Pure-Python reference implementation of decode_packet."""
     if not isinstance(data, (bytes, bytearray)):
         raise PacketDecodingError(
             f"Packet data must be a bytes-like object, got {type(data)}"
@@ -87,7 +64,6 @@ def decode_packet(data: bytes) -> BitchatPacket:
             f"minimum required is {MINIMUM_PACKET_SIZE} bytes"
         )
 
-    # 1. Parse fixed 14-byte header BEFORE SenderID:
     try:
         version, msg_type_raw, ttl, timestamp, flags, payload_len = struct.unpack(
             ">BBBQBH", data[:FIXED_HEADER_SIZE]
@@ -97,14 +73,12 @@ def decode_packet(data: bytes) -> BitchatPacket:
             f"Failed to unpack {FIXED_HEADER_SIZE}-byte packet header: {e}"
         ) from e
 
-    # 2. Validate protocol version
     if version != CURRENT_PROTOCOL_VERSION:
         raise UnsupportedProtocolVersionError(
             f"Unsupported protocol version: {version}. "
             f"Expected version {CURRENT_PROTOCOL_VERSION}."
         )
 
-    # 3. Validate message type
     try:
         message_type = MessageType(msg_type_raw)
     except ValueError as e:
@@ -112,11 +86,9 @@ def decode_packet(data: bytes) -> BitchatPacket:
             f"Unknown message type: 0x{msg_type_raw:02X} ({msg_type_raw})"
         ) from e
 
-    # 4. Check header flags
     has_recipient = bool(flags & FLAG_HAS_RECIPIENT)
     has_signature = bool(flags & FLAG_HAS_SIGNATURE)
 
-    # 5. Compute exact expected unpadded size
     expected_unpadded_size = (
         FIXED_HEADER_SIZE
         + SENDER_ID_SIZE
@@ -125,7 +97,6 @@ def decode_packet(data: bytes) -> BitchatPacket:
         + (SIGNATURE_SIZE if has_signature else 0)
     )
 
-    # 6. Validate wire length and handle padding
     if len(data) < expected_unpadded_size:
         raise PacketDecodingError(
             f"Packet data shorter than expected: got {len(data)} bytes, "
@@ -133,10 +104,8 @@ def decode_packet(data: bytes) -> BitchatPacket:
         )
 
     if len(data) == expected_unpadded_size:
-        # Unpadded packet
         unpadded = bytes(data)
     else:
-        # Padded packet: validate trailing padding
         padding_needed = len(data) - expected_unpadded_size
         last_byte = data[-1]
         if (
@@ -150,30 +119,23 @@ def decode_packet(data: bytes) -> BitchatPacket:
             )
         unpadded = bytes(data[:expected_unpadded_size])
 
-    # 7. Extract variable fields
     offset = FIXED_HEADER_SIZE
-
-    # Sender ID (8 bytes)
     sender_id = unpadded[offset : offset + SENDER_ID_SIZE]
     offset += SENDER_ID_SIZE
 
-    # Recipient ID (8 bytes if present)
     recipient_id: bytes | None = None
     if has_recipient:
         recipient_id = unpadded[offset : offset + RECIPIENT_ID_SIZE]
         offset += RECIPIENT_ID_SIZE
 
-    # Payload (payload_len bytes)
     payload = unpadded[offset : offset + payload_len]
     offset += payload_len
 
-    # Signature (64 bytes if present)
     signature: bytes | None = None
     if has_signature:
         signature = unpadded[offset : offset + SIGNATURE_SIZE]
         offset += SIGNATURE_SIZE
 
-    # 8. Return constructed packet
     try:
         return BitchatPacket(
             version=version,
@@ -188,3 +150,39 @@ def decode_packet(data: bytes) -> BitchatPacket:
         )
     except InvalidPacketError as e:
         raise PacketDecodingError(f"Decoded packet failed validation: {e}") from e
+
+
+def decode_packet(data: bytes) -> BitchatPacket:
+    """Decode raw binary data into a BitchatPacket with defensive validation."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise PacketDecodingError(
+            f"Packet data must be a bytes-like object, got {type(data)}"
+        )
+    if HAS_NATIVE_CORE:
+        raw = data if type(data) is bytes else bytes(data)
+        try:
+            (
+                version,
+                msg_type_raw,
+                ttl,
+                timestamp,
+                flags,
+                sender_id,
+                recipient_id,
+                payload,
+                signature,
+            ) = _core.decode_packet_raw(raw)
+            return BitchatPacket._from_trusted(
+                version=version,
+                message_type=MessageType(msg_type_raw),
+                ttl=ttl,
+                timestamp=timestamp,
+                flags=flags,
+                sender_id=sender_id,
+                recipient_id=recipient_id,
+                payload=payload,
+                signature=signature,
+            )
+        except ValueError as exc:
+            raise_mapped_error(exc)
+    return py_decode_packet(data)

@@ -94,7 +94,7 @@ BitChat provides dedicated distribution channels tailored for each platform:
 
 > [!NOTE]
 > **Status:** WinGet submission: pending Microsoft review ([microsoft/winget-pkgs#443445](https://github.com/microsoft/winget-pkgs/pull/443445)).
-> Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.3.0/`](manifests/j/Java-Mx/BitChat/0.3.0/).
+> Official WinGet manifests are prepared and validated in the repository at [`manifests/j/Java-Mx/BitChat/0.3.1/`](manifests/j/Java-Mx/BitChat/0.3.1/).
 > The public command `winget install Java-Mx.BitChat` becomes available once the manifest pull request is merged into Microsoft's community repository ([microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)).
 > Until upstream review is complete, use the **GitHub Release Installer** below or install directly from the local repository manifest.
 
@@ -105,7 +105,7 @@ winget install Java-Mx.BitChat
 
 To test or install directly from this repository's local manifest:
 ```powershell
-winget install --manifest manifests/j/Java-Mx/BitChat/0.3.0/
+winget install --manifest manifests/j/Java-Mx/BitChat/0.3.1/
 ```
 
 **Upgrade:**
@@ -125,7 +125,7 @@ The self-contained Windows executable installer (`BitChat-<version>-windows-x64.
 1. Download `BitChat-<version>-windows-x64.exe` and `BitChat-<version>-windows-x64.exe.sha256` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) (see [`docs/DOWNLOAD.md`](docs/DOWNLOAD.md) and [`docs/platform/WINDOWS.md`](docs/platform/WINDOWS.md)).
 2. Verify the SHA-256 checksum in PowerShell:
    ```powershell
-   Get-FileHash .\BitChat-0.3.0-windows-x64.exe -Algorithm SHA256
+   Get-FileHash .\BitChat-0.3.1-windows-x64.exe -Algorithm SHA256
    ```
 3. Run the installer. The 7-screen setup wizard presents the [Terms of Use](TERMS_OF_USE.md) and [Privacy Policy](PRIVACY_POLICY.md), defaults to user-scope installation (`%LOCALAPPDATA%\Programs\BitChat`), and lets you configure Desktop/Start Menu shortcuts, user `PATH` integration, post-install launch, and optional per-user Windows sign-in startup.
 4. Open a **new** PowerShell or Command Prompt terminal (existing terminals must be reopened to pick up `PATH` changes) and launch:

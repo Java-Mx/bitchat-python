@@ -1,0 +1,16 @@
+[package]
+name = "bitchat-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "High-performance Rust native core for BitChat protocol, fragmentation, framing, and mesh routing"
+
+[lib]
+name = "_bitchat_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["abi3-py312"] }
+rand = "0.8"
+sha2 = "0.10"

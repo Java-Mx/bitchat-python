@@ -24,7 +24,7 @@ if tcss_file.exists():
     datas.append((str(tcss_file), "bitchat/tui/styles"))
 
 # Collect submodules to prevent dynamic import omissions
-hiddenimports = []
+hiddenimports = ["bitchat._bitchat_core"]
 hiddenimports += collect_submodules("bitchat")
 hiddenimports += collect_submodules("bleak")
 hiddenimports += collect_submodules("cryptography")

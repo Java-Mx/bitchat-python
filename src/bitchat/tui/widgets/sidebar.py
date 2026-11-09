@@ -77,6 +77,8 @@ class PeerSidebar(Widget):
         self._connected_peers: dict[str, str] = {}  # addr -> label
         self._discovered_peers: dict[str, str] = {}  # addr -> label
         self._addr_to_name: dict[str, str] = {}
+        self._last_connected_snapshot: tuple[Any, ...] | None = None
+        self._last_discovered_snapshot: tuple[Any, ...] | None = None
 
     def watch_active_transport(self, new_val: str) -> None:
         self.border_title = {
@@ -129,42 +131,83 @@ class PeerSidebar(Widget):
         except Exception as e:
             logger.debug("Failed updating identity box: %s", e)
 
+    def _apply_peer_items(
+        self,
+        view: ListView,
+        items_spec: list[tuple[str, str, str]],
+        empty_markup: str | None,
+    ) -> None:
+        """Update ``view`` in-place when possible to avoid expensive DOM clear/remount."""
+        if empty_markup is not None:
+            if len(view.children) == 1 and not isinstance(
+                view.children[0], PeerListItem
+            ):
+                with self.app.batch_update():
+                    lbl = view.children[0].query_one(Label)
+                    lbl.update(empty_markup)
+                return
+            view.clear()
+            view.append(ListItem(Label(empty_markup)))
+            return
+
+        if len(view.children) == len(items_spec) and all(
+            isinstance(child, PeerListItem) for child in view.children
+        ):
+            for child, (addr, clean_name, markup) in zip(
+                view.children, items_spec, strict=False
+            ):
+                assert isinstance(child, PeerListItem)
+                child.peer_address = addr
+                child.peer_name = clean_name
+                lbl = child.query_one(Label)
+                lbl.update(markup)
+            return
+
+        view.clear()
+        for addr, clean_name, markup in items_spec:
+            view.append(
+                PeerListItem(
+                    Label(markup),
+                    peer_address=addr,
+                    peer_name=clean_name,
+                )
+            )
+
     def set_connected_peers(self, peers: dict[str, str]) -> None:
         """Update connected peers list (mapping address -> display string)."""
         self._connected_peers = dict(peers)
         self._addr_to_name.clear()
+
+        items_spec: list[tuple[str, str, str]] = []
+        connection_label = (
+            "TCP Connected" if self.active_transport == "lan" else "Connected"
+        )
+        for addr, label in self._connected_peers.items():
+            name = label.split(" (")[0].strip()
+            clean_name = name.split(" • ", 1)[0].strip()
+            connection_state = (
+                "Noise XX authenticated"
+                if "🔒 authenticated" in name
+                else "Noise session not established"
+            )
+            self._addr_to_name[addr] = clean_name
+            color = get_peer_color(clean_name)
+            display_name = escape(clean_name)
+            markup = (
+                f"[bold {color}]● {display_name}[/bold {color}]\n"
+                f"  [dim #8b949e]{connection_label} • {connection_state}"
+                "[/dim #8b949e]"
+            )
+            items_spec.append((addr, clean_name, markup))
+
+        snapshot = (self.active_transport, tuple(items_spec))
         try:
             view = self.query_one("#connected-peers-list", ListView)
-            view.clear()
-            if not self._connected_peers:
-                view.append(ListItem(Label("[dim]No peers connected[/dim]")))
-            else:
-                for addr, label in self._connected_peers.items():
-                    name = label.split(" (")[0].strip()
-                    clean_name = name.split(" • ", 1)[0].strip()
-                    connection_state = (
-                        "Noise XX authenticated"
-                        if "🔒 authenticated" in name
-                        else "Noise session not established"
-                    )
-                    connection_label = (
-                        "TCP Connected"
-                        if self.active_transport == "lan"
-                        else "Connected"
-                    )
-                    self._addr_to_name[addr] = clean_name
-                    color = get_peer_color(clean_name)
-                    display_name = escape(clean_name)
-                    item = PeerListItem(
-                        Label(
-                            f"[bold {color}]● {display_name}[/bold {color}]\n"
-                            f"  [dim #8b949e]{connection_label} • {connection_state}"
-                            "[/dim #8b949e]"
-                        ),
-                        peer_address=addr,
-                        peer_name=clean_name,
-                    )
-                    view.append(item)
+            if snapshot == self._last_connected_snapshot and len(view.children) > 0:
+                return
+            self._last_connected_snapshot = snapshot
+            empty_markup = "[dim]No peers connected[/dim]" if not items_spec else None
+            self._apply_peer_items(view, items_spec, empty_markup)
         except NoMatches:
             pass
         except Exception as e:
@@ -209,89 +252,86 @@ class PeerSidebar(Widget):
                 rssi_str = getattr(p, "rssi", "")
                 self._discovered_peers[addr] = f"{p_name} ({rssi_str} dBm)"
 
+        empty_markup: str | None = None
+        items_spec: list[tuple[str, str, str]] = []
+
+        if is_offline:
+            unavail = (
+                "LAN (offline)"
+                if transport == "lan"
+                else "Offline"
+                if transport == "offline"
+                else "Bluetooth Unavailable"
+            )
+            empty_markup = f"[dim red]{unavail}[/dim red]"
+        elif not self._discovered_peers:
+            if is_scanning:
+                scanning_msg = (
+                    "Searching local network\nfor peers..."
+                    if transport == "lan"
+                    else "Scanning for BitChat\npeers..."
+                )
+                empty_markup = f"[dim]{scanning_msg}[/dim]"
+            else:
+                no_peers_msg = (
+                    "No BitChat peers\non local network"
+                    if transport == "lan"
+                    else "No BitChat peers\ndiscovered"
+                )
+                empty_markup = f"[dim]{no_peers_msg}[/dim]"
+        else:
+            for addr, p in deduped_peers.items():
+                is_lan = (
+                    getattr(p, "transport", "bluetooth") == "lan" or transport == "lan"
+                )
+                p_id = getattr(p, "peer_id", None)
+                p_name = getattr(p, "nickname", None) or getattr(p, "name", None)
+                name = str(
+                    p_name or (f"Peer {str(p_id)[:8]}" if p_id else "BitChat Node")
+                )
+                color = get_peer_color(name)
+                id_line = (
+                    f"  [dim #8b949e]ID: {escape(str(p_id)[:12])}[/dim #8b949e]\n"
+                    if p_id
+                    else ""
+                )
+                if is_lan:
+                    ip_val = getattr(p, "ip", "")
+                    port_val = getattr(p, "port", "")
+                    ip_port = f"{ip_val}:{port_val}" if ip_val and port_val else addr
+                    ssid = getattr(p, "ssid", None)
+                    clean_ssid = (
+                        ssid
+                        if ssid and str(ssid).strip().lower() != "unavailable"
+                        else None
+                    )
+                    net_str = f"Network: {clean_ssid} • " if clean_ssid else ""
+                    markup = (
+                        f"[{color}]○ {escape(str(name))}[/{color}]\n"
+                        f"{id_line}"
+                        f"  [dim #8b949e]"
+                        f"{escape(str(net_str))}{escape(str(ip_port))}"
+                        "[/dim #8b949e]"
+                    )
+                else:
+                    rssi_val = getattr(p, "rssi", None)
+                    rssi_str = f"{rssi_val} dBm" if rssi_val is not None else "Nearby"
+                    markup = (
+                        f"[{color}]○ {escape(str(name))}[/{color}]\n"
+                        f"{id_line}"
+                        f"  [dim #8b949e]"
+                        f"{escape(str(rssi_str))} • {escape(str(addr))}"
+                        "[/dim #8b949e]"
+                    )
+                items_spec.append((addr, str(name), markup))
+
+        snapshot = (is_offline, is_scanning, transport, empty_markup, tuple(items_spec))
         try:
             view = self.query_one("#discovered-peers-list", ListView)
-            view.clear()
-            if is_offline:
-                unavail = (
-                    "LAN (offline)"
-                    if transport == "lan"
-                    else "Offline"
-                    if transport == "offline"
-                    else "Bluetooth Unavailable"
-                )
-                view.append(ListItem(Label(f"[dim red]{unavail}[/dim red]")))
-            elif not self._discovered_peers:
-                if is_scanning:
-                    scanning_msg = (
-                        "Searching local network\nfor peers..."
-                        if transport == "lan"
-                        else "Scanning for BitChat\npeers..."
-                    )
-                    view.append(ListItem(Label(f"[dim]{scanning_msg}[/dim]")))
-                else:
-                    no_peers_msg = (
-                        "No BitChat peers\non local network"
-                        if transport == "lan"
-                        else "No BitChat peers\ndiscovered"
-                    )
-                    view.append(ListItem(Label(f"[dim]{no_peers_msg}[/dim]")))
-            else:
-                for addr, p in deduped_peers.items():
-                    is_lan = (
-                        getattr(p, "transport", "bluetooth") == "lan"
-                        or transport == "lan"
-                    )
-                    p_id = getattr(p, "peer_id", None)
-                    p_name = getattr(p, "nickname", None) or getattr(p, "name", None)
-                    name = p_name or (f"Peer {p_id[:8]}" if p_id else "BitChat Node")
-                    color = get_peer_color(name)
-                    id_line = (
-                        f"  [dim #8b949e]ID: {escape(str(p_id[:12]))}[/dim #8b949e]\n"
-                        if p_id
-                        else ""
-                    )
-                    if is_lan:
-                        ip_val = getattr(p, "ip", "")
-                        port_val = getattr(p, "port", "")
-                        ip_port = (
-                            f"{ip_val}:{port_val}" if ip_val and port_val else addr
-                        )
-                        ssid = getattr(p, "ssid", None)
-                        clean_ssid = (
-                            ssid
-                            if ssid and str(ssid).strip().lower() != "unavailable"
-                            else None
-                        )
-                        net_str = f"Network: {clean_ssid} • " if clean_ssid else ""
-                        item = PeerListItem(
-                            Label(
-                                f"[{color}]○ {escape(str(name))}[/{color}]\n"
-                                f"{id_line}"
-                                f"  [dim #8b949e]"
-                                f"{escape(str(net_str))}{escape(str(ip_port))}"
-                                "[/dim #8b949e]"
-                            ),
-                            peer_address=addr,
-                            peer_name=name,
-                        )
-                    else:
-                        rssi_val = getattr(p, "rssi", None)
-                        rssi_str = (
-                            f"{rssi_val} dBm" if rssi_val is not None else "Nearby"
-                        )
-                        item = PeerListItem(
-                            Label(
-                                f"[{color}]○ {escape(str(name))}[/{color}]\n"
-                                f"{id_line}"
-                                f"  [dim #8b949e]"
-                                f"{escape(str(rssi_str))} • {escape(str(addr))}"
-                                "[/dim #8b949e]"
-                            ),
-                            peer_address=addr,
-                            peer_name=name,
-                        )
-                    view.append(item)
+            if snapshot == self._last_discovered_snapshot and len(view.children) > 0:
+                return
+            self._last_discovered_snapshot = snapshot
+            self._apply_peer_items(view, items_spec, empty_markup)
         except NoMatches:
             pass
         except Exception as e:

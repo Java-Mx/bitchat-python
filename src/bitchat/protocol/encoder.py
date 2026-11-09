@@ -3,6 +3,7 @@
 import os
 import struct
 
+from bitchat._native import HAS_NATIVE_CORE, _core, raise_mapped_error
 from bitchat.exceptions import PacketEncodingError
 from bitchat.protocol.constants import (
     BLOCK_SIZES,
@@ -14,12 +15,8 @@ from bitchat.protocol.constants import (
 from bitchat.protocol.packet import BitchatPacket
 
 
-def get_optimal_block_size(unpadded_size: int) -> int:
-    """Find the smallest block size in BLOCK_SIZES that fits data plus overhead.
-
-    Accounts for 16 bytes of encryption overhead. For messages larger than
-    2048 - 16 bytes, returns unpadded_size (no padding applied).
-    """
+def py_get_optimal_block_size(unpadded_size: int) -> int:
+    """Pure-Python reference implementation of get_optimal_block_size."""
     total_size = unpadded_size + PADDING_OVERHEAD_ESTIMATE
     for block_size in BLOCK_SIZES:
         if total_size <= block_size:
@@ -27,21 +24,25 @@ def get_optimal_block_size(unpadded_size: int) -> int:
     return unpadded_size
 
 
-def pad_packet_data(data: bytes, target_size: int | None = None) -> bytes:
-    """Apply BitChat random block padding (PKCS#7-style length delimiter).
+def get_optimal_block_size(unpadded_size: int) -> int:
+    """Find the smallest block size in BLOCK_SIZES that fits data plus overhead.
 
-    Target sizes are selected from BLOCK_SIZES (256, 512, 1024, 2048) by accounting
-    for 16 bytes of encryption overhead.
-    Structure: [data][(padding_needed - 1) random bytes][padding_needed byte]
-    If data.len() >= target_size, returns data unchanged.
-    If padding_needed > 255, returns data unchanged (u8 delimiter limit).
+    Accounts for 16 bytes of encryption overhead. For messages larger than
+    2048 - 16 bytes, returns unpadded_size (no padding applied).
     """
+    if HAS_NATIVE_CORE and unpadded_size >= 0:
+        return _core.get_optimal_block_size(unpadded_size)
+    return py_get_optimal_block_size(unpadded_size)
+
+
+def py_pad_packet_data(data: bytes, target_size: int | None = None) -> bytes:
+    """Pure-Python reference implementation of pad_packet_data."""
     if not isinstance(data, (bytes, bytearray)):
         raise PacketEncodingError(f"Expected bytes-like object, got {type(data)}")
     data_bytes = bytes(data)
 
     if target_size is None:
-        target_size = get_optimal_block_size(len(data_bytes))
+        target_size = py_get_optimal_block_size(len(data_bytes))
 
     if len(data_bytes) >= target_size:
         return data_bytes
@@ -54,30 +55,31 @@ def pad_packet_data(data: bytes, target_size: int | None = None) -> bytes:
     return data_bytes + random_bytes + bytes([padding_needed])
 
 
-def encode_packet(packet: BitchatPacket, add_padding: bool = True) -> bytes:
-    """Encode a BitchatPacket into its wire binary representation.
+def pad_packet_data(data: bytes, target_size: int | None = None) -> bytes:
+    """Apply BitChat random block padding (PKCS#7-style length delimiter)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise PacketEncodingError(f"Expected bytes-like object, got {type(data)}")
+    data_bytes = data if type(data) is bytes else bytes(data)
 
-    Exact wire layout:
-    - Version: 1 byte (u8)
-    - MessageType: 1 byte (u8)
-    - TTL: 1 byte (u8)
-    - Timestamp: 8 bytes (big-endian u64)
-    - Flags: 1 byte (u8)
-    - PayloadLength: 2 bytes (big-endian u16)
-    - SenderID: 8 bytes
-    - RecipientID: 8 bytes (present iff has_recipient is True)
-    - Payload: PayloadLength bytes
-    - Signature: 64 bytes (present iff has_signature is True; wire placement
-      implemented, signing semantics verified in crypto phase)
-    - Padding: variable (if add_padding=True, using BitChat random block padding)
-    """
+    if target_size is None:
+        target_size = get_optimal_block_size(len(data_bytes))
+
+    if target_size <= 0 or len(data_bytes) >= target_size:
+        return data_bytes
+
+    if HAS_NATIVE_CORE:
+        return _core.pad_packet_data(data_bytes, target_size)
+    return py_pad_packet_data(data_bytes, target_size)
+
+
+def py_encode_packet(packet: BitchatPacket, add_padding: bool = True) -> bytes:
+    """Pure-Python reference implementation of encode_packet."""
     if not isinstance(packet, BitchatPacket):
         raise PacketEncodingError(
             f"Expected BitchatPacket instance, got {type(packet)}"
         )
 
     try:
-        # Fixed 14-byte header BEFORE SenderID:
         header = struct.pack(
             ">BBBQBH",
             packet.version,
@@ -111,5 +113,30 @@ def encode_packet(packet: BitchatPacket, add_padding: bool = True) -> bytes:
     raw_unpadded = b"".join(parts)
 
     if add_padding:
-        return pad_packet_data(raw_unpadded)
+        return py_pad_packet_data(raw_unpadded)
     return raw_unpadded
+
+
+def encode_packet(packet: BitchatPacket, add_padding: bool = True) -> bytes:
+    """Encode a BitchatPacket into its wire binary representation."""
+    if not isinstance(packet, BitchatPacket):
+        raise PacketEncodingError(
+            f"Expected BitchatPacket instance, got {type(packet)}"
+        )
+    if HAS_NATIVE_CORE:
+        try:
+            return _core.encode_packet_raw(
+                packet.version,
+                int(packet.message_type),
+                packet.ttl,
+                packet.timestamp,
+                packet.flags,
+                packet.sender_id,
+                packet.recipient_id,
+                packet.payload,
+                packet.signature,
+                add_padding,
+            )
+        except ValueError as exc:
+            raise_mapped_error(exc)
+    return py_encode_packet(packet, add_padding=add_padding)

@@ -4,8 +4,12 @@ __pycache__/
 *$py.class
 *.so
 
-# C extensions
+# C / Rust extensions and build artifacts
 *.so
+*.pyd
+*.pdb
+/target/
+rust/**/target/
 
 # Distribution / packaging
 build/

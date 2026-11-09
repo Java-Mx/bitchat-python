@@ -43,7 +43,72 @@ def main() -> None:
         action="store_true",
         help="Internal flag for Windows Startup shortcut to prevent duplicates",
     )
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help=(
+            "Uninstall BitChat binaries, console-script launchers, "
+            "shortcuts, and PATH entries"
+        ),
+    )
+    parser.add_argument(
+        "--remove-user-data",
+        "--purge",
+        dest="remove_user_data",
+        action="store_true",
+        help=(
+            "Also delete BitChat user data, identity keys, configuration, "
+            "and caches (~/.bitchat)"
+        ),
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help=(
+            "Confirm uninstallation (and user data deletion when combined "
+            "with --remove-user-data)"
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview uninstallation actions without modifying the system",
+    )
     args = parser.parse_args()
+
+    if args.uninstall:
+        from bitchat.platform.uninstaller import (
+            format_uninstall_report,
+            run_uninstaller,
+        )
+
+        if args.remove_user_data and not args.yes and not args.dry_run:
+            if not sys.stdin.isatty():
+                print(
+                    "Error: Deleting user data (--remove-user-data / --purge) in "
+                    "non-interactive mode requires explicit confirmation via --yes.",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            reply = (
+                input(
+                    "WARNING: This will permanently delete your BitChat identity keys, "
+                    "configuration, and history in ~/.bitchat. Continue? [y/N]: "
+                )
+                .strip()
+                .lower()
+            )
+            if reply not in {"y", "yes"}:
+                print("Uninstallation cancelled; user data was not modified.")
+                sys.exit(1)
+
+        report = run_uninstaller(
+            remove_user_data=bool(args.remove_user_data),
+            dry_run=bool(args.dry_run),
+        )
+        print(format_uninstall_report(report))
+        sys.exit(0 if report.succeeded else 1)
 
     if args.startup:
         from bitchat.platform.startup import (

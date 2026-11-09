@@ -6,6 +6,7 @@ import os
 import struct
 import time
 
+from bitchat._native import HAS_NATIVE_CORE, _core, raise_mapped_error
 from bitchat.exceptions import (
     FragmentLimitExceededError,
     FragmentPayloadError,
@@ -31,11 +32,17 @@ def should_fragment(packet_or_bytes: BitchatPacket | bytes) -> bool:
     if isinstance(packet_or_bytes, BitchatPacket):
         data = encode_packet(packet_or_bytes)
     elif isinstance(packet_or_bytes, (bytes, bytearray)):
-        data = bytes(packet_or_bytes)
+        data = (
+            packet_or_bytes
+            if type(packet_or_bytes) is bytes
+            else bytes(packet_or_bytes)
+        )
     else:
         raise TypeError(
             f"Expected BitchatPacket or bytes, got {type(packet_or_bytes).__name__}"
         )
+    if HAS_NATIVE_CORE:
+        return _core.should_fragment_bytes(data, FRAGMENTATION_THRESHOLD)
     return len(data) > FRAGMENTATION_THRESHOLD
 
 
@@ -44,8 +51,8 @@ def generate_fragment_id() -> bytes:
     return os.urandom(FRAGMENT_ID_SIZE)
 
 
-def split_chunks(data: bytes, chunk_size: int = FRAGMENT_CHUNK_SIZE) -> list[bytes]:
-    """Split data into chunks of chunk_size."""
+def py_split_chunks(data: bytes, chunk_size: int = FRAGMENT_CHUNK_SIZE) -> list[bytes]:
+    """Pure-Python reference implementation of split_chunks."""
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError(f"Expected bytes, got {type(data).__name__}")
     if chunk_size < 1:
@@ -71,14 +78,35 @@ def split_chunks(data: bytes, chunk_size: int = FRAGMENT_CHUNK_SIZE) -> list[byt
     return chunks
 
 
-def create_fragment_payload(
+def split_chunks(data: bytes, chunk_size: int = FRAGMENT_CHUNK_SIZE) -> list[bytes]:
+    """Split data into chunks of chunk_size."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError(f"Expected bytes, got {type(data).__name__}")
+    if chunk_size < 1:
+        raise ValueError(f"chunk_size must be >= 1, got {chunk_size}")
+    if not data:
+        return []
+    total_chunks = (len(data) + chunk_size - 1) // chunk_size
+    if total_chunks > MAX_FRAGMENTS_PER_ASSEMBLY:
+        msg = (
+            f"Data requires {total_chunks} chunks, "
+            f"exceeding max {MAX_FRAGMENTS_PER_ASSEMBLY}"
+        )
+        raise FragmentLimitExceededError(msg)
+    if HAS_NATIVE_CORE:
+        raw = data if type(data) is bytes else bytes(data)
+        return _core.split_chunks(raw, chunk_size)
+    return py_split_chunks(data, chunk_size)
+
+
+def py_create_fragment_payload(
     fragment_id: bytes,
     index: int,
     total: int,
     original_message_type: int | MessageType,
     chunk_data: bytes,
 ) -> bytes:
-    """Create a 13-byte fragment metadata header and append chunk data."""
+    """Pure-Python reference implementation of create_fragment_payload."""
     if not isinstance(fragment_id, (bytes, bytearray)):
         raise InvalidFragmentError("fragment_id must be bytes")
     if len(fragment_id) != FRAGMENT_ID_SIZE:
@@ -117,8 +145,42 @@ def create_fragment_payload(
     return header + bytes(chunk_data)
 
 
-def parse_fragment_payload(payload: bytes) -> tuple[bytes, int, int, int, bytes]:
-    """Parse 13-byte fragment header returning (id, index, total, orig_type, data)."""
+def create_fragment_payload(
+    fragment_id: bytes,
+    index: int,
+    total: int,
+    original_message_type: int | MessageType,
+    chunk_data: bytes,
+) -> bytes:
+    """Create a 13-byte fragment metadata header and append chunk data."""
+    if not isinstance(fragment_id, (bytes, bytearray)):
+        raise InvalidFragmentError("fragment_id must be bytes")
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise InvalidFragmentError("index must be an integer")
+    if not isinstance(total, int) or isinstance(total, bool):
+        raise InvalidFragmentError("total must be an integer")
+    if not isinstance(chunk_data, (bytes, bytearray)):
+        raise InvalidFragmentError("chunk_data must be bytes")
+    if HAS_NATIVE_CORE:
+        fid_b = fragment_id if type(fragment_id) is bytes else bytes(fragment_id)
+        chunk_b = chunk_data if type(chunk_data) is bytes else bytes(chunk_data)
+        try:
+            return _core.create_fragment_payload(
+                fid_b,
+                index,
+                total,
+                int(original_message_type),
+                chunk_b,
+            )
+        except ValueError as exc:
+            raise_mapped_error(exc)
+    return py_create_fragment_payload(
+        fragment_id, index, total, original_message_type, chunk_data
+    )
+
+
+def py_parse_fragment_payload(payload: bytes) -> tuple[bytes, int, int, int, bytes]:
+    """Pure-Python reference implementation of parse_fragment_payload."""
     if not isinstance(payload, (bytes, bytearray)):
         raise FragmentPayloadError(f"Expected bytes, got {type(payload).__name__}")
     if len(payload) < FRAGMENT_HEADER_SIZE:
@@ -149,7 +211,20 @@ def parse_fragment_payload(payload: bytes) -> tuple[bytes, int, int, int, bytes]
     return fragment_id, index, total, orig_type, bytes(payload[FRAGMENT_HEADER_SIZE:])
 
 
-def fragment_encoded_packet(
+def parse_fragment_payload(payload: bytes) -> tuple[bytes, int, int, int, bytes]:
+    """Parse 13-byte fragment header returning (id, index, total, orig_type, data)."""
+    if not isinstance(payload, (bytes, bytearray)):
+        raise FragmentPayloadError(f"Expected bytes, got {type(payload).__name__}")
+    if HAS_NATIVE_CORE:
+        raw = payload if type(payload) is bytes else bytes(payload)
+        try:
+            return _core.parse_fragment_payload(raw)
+        except ValueError as exc:
+            raise_mapped_error(exc)
+    return py_parse_fragment_payload(payload)
+
+
+def py_fragment_encoded_packet(
     encoded_packet: bytes,
     sender_id: bytes,
     original_message_type: int | MessageType,
@@ -157,12 +232,12 @@ def fragment_encoded_packet(
     ttl: int = 7,
     timestamp: int | None = None,
 ) -> list[BitchatPacket]:
-    """Split an encoded packet into ordered fragment packets."""
+    """Pure-Python reference implementation of fragment_encoded_packet."""
     if not isinstance(encoded_packet, (bytes, bytearray)):
         raise PacketEncodingError("encoded_packet must be bytes")
     encoded_bytes = bytes(encoded_packet)
 
-    if not should_fragment(encoded_bytes):
+    if len(encoded_bytes) <= FRAGMENTATION_THRESHOLD:
         return []
 
     if (
@@ -175,7 +250,7 @@ def fragment_encoded_packet(
     if len(frag_id) != FRAGMENT_ID_SIZE:
         raise InvalidFragmentError(f"fragment_id must be {FRAGMENT_ID_SIZE} bytes")
 
-    chunks = split_chunks(encoded_bytes, FRAGMENT_CHUNK_SIZE)
+    chunks = py_split_chunks(encoded_bytes, FRAGMENT_CHUNK_SIZE)
     total = len(chunks)
     ts = int(time.time() * 1000) if timestamp is None else timestamp
     orig_type_int = int(original_message_type)
@@ -189,7 +264,9 @@ def fragment_encoded_packet(
         else:
             frag_type = MessageType.FragmentContinue
 
-        payload = create_fragment_payload(frag_id, index, total, orig_type_int, chunk)
+        payload = py_create_fragment_payload(
+            frag_id, index, total, orig_type_int, chunk
+        )
         frag_packet = BitchatPacket(
             version=CURRENT_PROTOCOL_VERSION,
             message_type=frag_type,
@@ -206,6 +283,84 @@ def fragment_encoded_packet(
     return fragments
 
 
+def fragment_encoded_packet(
+    encoded_packet: bytes,
+    sender_id: bytes,
+    original_message_type: int | MessageType,
+    fragment_id: bytes | None = None,
+    ttl: int = 7,
+    timestamp: int | None = None,
+) -> list[BitchatPacket]:
+    """Split an encoded packet into ordered fragment packets."""
+    if not isinstance(encoded_packet, (bytes, bytearray)):
+        raise PacketEncodingError("encoded_packet must be bytes")
+    encoded_bytes = (
+        encoded_packet if type(encoded_packet) is bytes else bytes(encoded_packet)
+    )
+
+    if len(encoded_bytes) <= FRAGMENTATION_THRESHOLD:
+        return []
+
+    if (
+        not isinstance(sender_id, (bytes, bytearray))
+        or len(sender_id) != SENDER_ID_SIZE
+    ):
+        raise PacketEncodingError(f"sender_id must be {SENDER_ID_SIZE} bytes")
+
+    if fragment_id is not None and (
+        not isinstance(fragment_id, (bytes, bytearray))
+        or len(fragment_id) != FRAGMENT_ID_SIZE
+    ):
+        raise InvalidFragmentError(f"fragment_id must be {FRAGMENT_ID_SIZE} bytes")
+
+    if (
+        HAS_NATIVE_CORE
+        and type(ttl) is int
+        and (timestamp is None or type(timestamp) is int)
+    ):
+        sender_b = sender_id if type(sender_id) is bytes else bytes(sender_id)
+        fid_b = (
+            None
+            if fragment_id is None
+            else (fragment_id if type(fragment_id) is bytes else bytes(fragment_id))
+        )
+        try:
+            raw_frags = _core.fragment_encoded_packet_raw(
+                encoded_bytes,
+                sender_b,
+                int(original_message_type),
+                ttl,
+                timestamp,
+                FRAGMENT_CHUNK_SIZE,
+                fid_b,
+            )
+            return [
+                BitchatPacket._from_trusted(
+                    version=ver,
+                    message_type=MessageType(mtype),
+                    ttl=fttl,
+                    timestamp=fts,
+                    flags=fflags,
+                    sender_id=fsender,
+                    recipient_id=None,
+                    payload=fpayload,
+                    signature=None,
+                )
+                for (ver, mtype, fttl, fts, fflags, fsender, fpayload) in raw_frags
+            ]
+        except ValueError as exc:
+            raise_mapped_error(exc)
+
+    return py_fragment_encoded_packet(
+        encoded_packet=encoded_bytes,
+        sender_id=sender_id,
+        original_message_type=original_message_type,
+        fragment_id=fragment_id,
+        ttl=ttl,
+        timestamp=timestamp,
+    )
+
+
 def fragment_packet(
     packet: BitchatPacket, fragment_id: bytes | None = None
 ) -> list[BitchatPacket]:
@@ -215,7 +370,7 @@ def fragment_packet(
             f"Expected BitchatPacket, got {type(packet).__name__}"
         )
     encoded = encode_packet(packet)
-    if not should_fragment(encoded):
+    if len(encoded) <= FRAGMENTATION_THRESHOLD:
         return []
     return fragment_encoded_packet(
         encoded_packet=encoded,

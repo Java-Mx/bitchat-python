@@ -502,23 +502,6 @@ class BitChatApp(App[None]):
             transport=trans_name,
         )
 
-        # Determine Bluetooth availability independently for BLE states:
-        bt_trans = (
-            self.coordinator._transports.get("bluetooth")
-            if self.coordinator and hasattr(self.coordinator, "_transports")
-            else None
-        )
-        bt_available = False
-        if bt_trans:
-            bt_telem = bt_trans.get_telemetry()
-            adapter_state = bt_telem.get("adapter_state")
-            bt_available = adapter_state == "On" or (
-                adapter_state not in ("Off", "Unavailable")
-                and bool(bt_telem.get("adapter_available"))
-            )
-        elif self.coordinator and self.coordinator.is_ble_available():
-            bt_available = True
-
         # Update header-channel to match active transport
         with contextlib.suppress(Exception):
             chan_lbl = self.query_one("#header-channel", Label)
@@ -544,6 +527,21 @@ class BitChatApp(App[None]):
         ):
             status_bar.mesh_status = "OFFLINE MODE"
         elif trans_name == "offline":
+            bt_trans = (
+                self.coordinator._transports.get("bluetooth")
+                if self.coordinator and hasattr(self.coordinator, "_transports")
+                else None
+            )
+            bt_available = False
+            if bt_trans:
+                bt_telem = bt_trans.get_telemetry()
+                adapter_state = bt_telem.get("adapter_state")
+                bt_available = adapter_state == "On" or (
+                    adapter_state not in ("Off", "Unavailable")
+                    and bool(bt_telem.get("adapter_available"))
+                )
+            elif self.coordinator and self.coordinator.is_ble_available():
+                bt_available = True
             bt_label = (
                 "Bluetooth Available" if bt_available else "Bluetooth Unavailable"
             )

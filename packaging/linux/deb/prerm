@@ -1,7 +1,12 @@
 #!/bin/sh
 set -e
 
-if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
+if [ "$1" = "remove" ] || [ "$1" = "upgrade" ] || [ "$1" = "deconfigure" ]; then
+    # Stop any running BitChat instances installed under /usr/lib/bitchat
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -f "/usr/lib/bitchat/bitchat" 2>/dev/null || true
+    fi
+
     if [ -x /usr/bin/update-desktop-database ]; then
         update-desktop-database -q /usr/share/applications 2>/dev/null || true
     fi

@@ -28,6 +28,11 @@
     <binary>bitchat</binary>
   </provides>
   <releases>
+    <release version="0.3.1" date="2026-11-09">
+      <description>
+        <p>Phase 1 release: Rust/PyO3/Maturin native core acceleration (_bitchat_core), Textual UI in-place rendering and event-loop optimizations, and complete cross-platform uninstaller.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-08">
       <description>
         <p>Phase 0 production release: Home Screen navigation, full offline mode support, strict 2:2:2 Peer Grid layout, connection management, telemetry diagnostics, and transport lifecycle hardening.</p>

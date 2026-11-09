@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-09
+
+### Performance
+- **PeerSidebar In-Place Updates & Render Caching (`src/bitchat/tui/widgets/sidebar.py`):** Replaced full container DOM teardown (`remove_children()`) with structural snapshot diffing and in-place `PeerEntry.update_peer_data` updates, reducing 10-peer sidebar refresh latency from 70.3 ms to 0.28 ms at P50 (248x faster) and 252.3 ms to 0.76 ms at P99 (331x faster).
+- **Coalesced Peer & Transport Status Updates (`src/bitchat/tui/app.py`):** Added status-bar state signature deduplication (`_last_status_bar_signature`) and debounced peer-list refresh scheduling (`_schedule_peer_ui_refresh`), reducing keyboard input latency under sustained multi-peer load by 4.69x at P99.
+- **Batched Chat Message Rendering (`src/bitchat/tui/widgets/chat_view.py`):** Wrapped message overflow pruning and widget mounting inside `app.batch_update()` and coalesced viewport scrolling via `call_after_refresh` (`_schedule_scroll_end`), cutting P99 chat render spikes by 5.58x.
+- **BLE Advertisement Filtering Improvements (`src/bitchat/ble/scanner.py`):** Added fast-path advertisement pre-filtering and RSSI hysteresis (`< 3 dBm` within `2.0s`) in `BLEScanner._detection_callback` to eliminate redundant allocations on non-matching or unchanged BLE advertisements.
+- **Reduced Mesh Packet-Processing Overhead (`src/bitchat/mesh/router.py`):** Computed deterministic SHA-256 packet IDs once per hop and passed precomputed IDs through deduplication checks and recordings.
+
+### Rust Acceleration
+- **Rust / PyO3 / Maturin Architecture (`rust/bitchat-core/`, `bitchat._bitchat_core`):** Introduced a compiled Rust native extension crate built with `maturin` (`abi3-py312`) and `pyo3 0.24`, with full PEP 484 type stubs (`src/bitchat/_bitchat_core.pyi`) and runtime fallback loader (`src/bitchat/_native.py`).
+- **Native Protocol Encoding & Decoding (`rust/bitchat-core/src/protocol.rs`):** Accelerated binary wire packet serialization, header/routing/signature unpacking, peer ID hex conversion, and PKCS#7 optimal block padding (`encode_packet_raw`, `decode_packet_raw`, `pad_packet_data`, `unpad_packet_data`).
+- **Fragmentation & Reassembly (`rust/bitchat-core/src/fragmentation.rs`):** Accelerated payload chunk splitting, fragment header encoding/parsing, and stateful concurrent fragment reassembly (`NativeFragmentReassembler`).
+- **TCP Stream Framing (`rust/bitchat-core/src/framing.rs`):** Implemented zero-copy cursor-indexed TCP length-prefixed framing (`NativeStreamFramer` and `encode_frame_bytes`), delivering a 27.4x throughput increase on burst frame extraction.
+- **Mesh Packet Identification, Deduplication & Rate Limiting (`rust/bitchat-core/src/mesh.rs`):** Implemented native SHA-256 packet ID computation (`compute_packet_id_raw`), O(1) FIFO/LRU ring deduplication with monotonic TTL expiration (`NativePacketDeduplicator`), and per-peer token-bucket rate limiting (`NativePeerRateLimiter`).
+- **Python Reference Implementations (`py_*` / `Py*`):** Retained pure-Python reference implementations across `encoder.py`, `decoder.py`, `packet.py`, `fragmentation.py`, `reassembly.py`, `framing.py`, and `dedup.py` for fallback and differential verification.
+
+### Uninstaller
+- **Unified Windows & Linux Uninstallation (`src/bitchat/platform/uninstaller.py`, `bitchat --uninstall`):** Added a comprehensive cross-platform uninstaller supporting `--uninstall`, `--remove-user-data` (`--purge`), `--keep-user-data`, `--dry-run`, and `--yes`.
+- **Python, pip, uv & pipx Launcher Cleanup:** Automatically discovers and removes residual `bitchat.exe`, `bitchat-script.py`, `bitchat.cmd`, `bitchat.ps1`, and `bitchat` console-script wrappers and `bitchat*.dist-info` metadata across active, user-base, multi-version `Programs\Python\Python3*\Scripts` (including `Python314\Scripts\bitchat.exe`), `uv` tools, and `pipx` environments without modifying shared parent directories.
+- **PATH & Packaging Lifecycle Cleanup:** Cleans BitChat-specific user `PATH` entries (`HKCU\Environment\Path`), shortcuts, caches, and running `bitchat` processes across Windows Inno Setup (`packaging/windows/bitchat.iss`) and Debian maintainer scripts (`packaging/linux/deb/prerm`, `packaging/linux/deb/postrm`).
+- **User-Data Preservation vs. Explicit Complete Removal:** Preserves `~/.bitchat` (identity keys, SQLite history, known peers, and configuration) by default during standard uninstallation, and removes `~/.bitchat` only when explicitly requested via `--remove-user-data` / `--purge` / `/REMOVEUSERDATA` or interactive confirmation.
+
+### Compatibility and Security
+- **Wire Compatibility Preserved:** 100% byte-for-byte wire compatibility verified between the Rust native core and pure-Python reference implementations across all packet types, flags, fragmentation headers, and TCP frames.
+- **Existing Noise XX & Identity Implementations Retained:** Cryptographic Noise XX handshakes, X25519/Ed25519 identity management, and SQLite persistence remain intact.
+- **Existing BLE, LAN & Offline Mode Behavior Preserved:** Full compatibility with BLE GATT/Scanner, LAN UDP discovery/TCP transport, `HomeScreen`, strict 2:2:2 Peer Grid layout, and `OFFLINE MODE` isolation.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

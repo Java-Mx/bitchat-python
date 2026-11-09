@@ -3,6 +3,7 @@
 import time
 from dataclasses import dataclass
 
+from bitchat._native import HAS_NATIVE_CORE, _core, raise_mapped_error
 from bitchat.exceptions import InvalidPacketError
 from bitchat.protocol.constants import (
     CURRENT_PROTOCOL_VERSION,
@@ -16,8 +17,8 @@ from bitchat.protocol.constants import (
 )
 
 
-def peer_id_to_hex(peer_id: bytes) -> str:
-    """Convert an 8-byte binary peer ID to a 16-character hexadecimal string."""
+def py_peer_id_to_hex(peer_id: bytes) -> str:
+    """Pure-Python reference implementation of peer_id_to_hex."""
     if not isinstance(peer_id, (bytes, bytearray)):
         raise InvalidPacketError(
             f"Peer ID must be a bytes-like object, got {type(peer_id)}"
@@ -29,8 +30,8 @@ def peer_id_to_hex(peer_id: bytes) -> str:
     return bytes(peer_id).hex()
 
 
-def peer_id_from_hex(hex_str: str) -> bytes:
-    """Convert a 16-character hexadecimal string to an 8-byte binary peer ID."""
+def py_peer_id_from_hex(hex_str: str) -> bytes:
+    """Pure-Python reference implementation of peer_id_from_hex."""
     if not isinstance(hex_str, str):
         raise InvalidPacketError(
             f"Hexadecimal peer ID must be a str, got {type(hex_str)}"
@@ -45,6 +46,34 @@ def peer_id_from_hex(hex_str: str) -> bytes:
             f"(16 hex chars), got {len(raw)}"
         )
     return raw
+
+
+def peer_id_to_hex(peer_id: bytes) -> str:
+    """Convert an 8-byte binary peer ID to a 16-character hexadecimal string."""
+    if not isinstance(peer_id, (bytes, bytearray)):
+        raise InvalidPacketError(
+            f"Peer ID must be a bytes-like object, got {type(peer_id)}"
+        )
+    if HAS_NATIVE_CORE:
+        try:
+            return _core.peer_id_to_hex(bytes(peer_id))
+        except ValueError as exc:
+            raise_mapped_error(exc)
+    return py_peer_id_to_hex(peer_id)
+
+
+def peer_id_from_hex(hex_str: str) -> bytes:
+    """Convert a 16-character hexadecimal string to an 8-byte binary peer ID."""
+    if not isinstance(hex_str, str):
+        raise InvalidPacketError(
+            f"Hexadecimal peer ID must be a str, got {type(hex_str)}"
+        )
+    if HAS_NATIVE_CORE and " " not in hex_str.strip():
+        try:
+            return _core.peer_id_from_hex(hex_str)
+        except ValueError as exc:
+            raise_mapped_error(exc)
+    return py_peer_id_from_hex(hex_str)
 
 
 @dataclass(frozen=True)
@@ -101,7 +130,9 @@ class BitchatPacket:
             raise InvalidPacketError(
                 f"Sender ID must be bytes, got {type(self.sender_id)}"
             )
-        normalized_sender = bytes(self.sender_id)
+        normalized_sender = (
+            self.sender_id if type(self.sender_id) is bytes else bytes(self.sender_id)
+        )
         if len(normalized_sender) != SENDER_ID_SIZE:
             raise InvalidPacketError(
                 f"Sender ID must be exactly {SENDER_ID_SIZE} bytes, "
@@ -116,7 +147,11 @@ class BitchatPacket:
                     f"Recipient ID must be bytes when present, "
                     f"got {type(self.recipient_id)}"
                 )
-            normalized_recipient = bytes(self.recipient_id)
+            normalized_recipient = (
+                self.recipient_id
+                if type(self.recipient_id) is bytes
+                else bytes(self.recipient_id)
+            )
             if len(normalized_recipient) != RECIPIENT_ID_SIZE:
                 raise InvalidPacketError(
                     f"Recipient ID must be exactly {RECIPIENT_ID_SIZE} bytes "
@@ -136,7 +171,9 @@ class BitchatPacket:
         # 3. Normalize and validate payload to immutable bytes
         if not isinstance(self.payload, (bytes, bytearray)):
             raise InvalidPacketError(f"Payload must be bytes, got {type(self.payload)}")
-        normalized_payload = bytes(self.payload)
+        normalized_payload = (
+            self.payload if type(self.payload) is bytes else bytes(self.payload)
+        )
         if len(normalized_payload) > 65535:
             raise InvalidPacketError(
                 f"Payload length exceeds maximum 16-bit uint (65535), "
@@ -150,7 +187,11 @@ class BitchatPacket:
                 raise InvalidPacketError(
                     f"Signature must be bytes when present, got {type(self.signature)}"
                 )
-            normalized_signature = bytes(self.signature)
+            normalized_signature = (
+                self.signature
+                if type(self.signature) is bytes
+                else bytes(self.signature)
+            )
             if len(normalized_signature) != SIGNATURE_SIZE:
                 raise InvalidPacketError(
                     f"Signature must be exactly {SIGNATURE_SIZE} bytes "
@@ -167,6 +208,32 @@ class BitchatPacket:
                     "FLAG_HAS_SIGNATURE must not be set when signature is None"
                 )
 
+    @classmethod
+    def _from_trusted(
+        cls,
+        version: int,
+        message_type: MessageType,
+        ttl: int,
+        timestamp: int,
+        flags: int,
+        sender_id: bytes,
+        recipient_id: bytes | None,
+        payload: bytes,
+        signature: bytes | None,
+    ) -> "BitchatPacket":
+        """Fast-path constructor for packets already validated by the Rust core."""
+        obj = object.__new__(cls)
+        object.__setattr__(obj, "version", version)
+        object.__setattr__(obj, "message_type", message_type)
+        object.__setattr__(obj, "ttl", ttl)
+        object.__setattr__(obj, "timestamp", timestamp)
+        object.__setattr__(obj, "flags", flags)
+        object.__setattr__(obj, "sender_id", sender_id)
+        object.__setattr__(obj, "recipient_id", recipient_id)
+        object.__setattr__(obj, "payload", payload)
+        object.__setattr__(obj, "signature", signature)
+        return obj
+
     @property
     def has_recipient(self) -> bool:
         """Return True if the packet carries a recipient ID."""
@@ -174,11 +241,7 @@ class BitchatPacket:
 
     @property
     def has_signature(self) -> bool:
-        """Return True if the packet carries an optional wire signature.
-
-        Note: Signature wire placement is implemented; cryptographic signing semantics
-        are verified during the cryptographic interoperability phase.
-        """
+        """Return True if the packet carries an optional wire signature."""
         return bool(self.flags & FLAG_HAS_SIGNATURE)
 
     @property

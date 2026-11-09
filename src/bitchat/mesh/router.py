@@ -6,15 +6,12 @@ import logging
 import random
 import time
 from collections import defaultdict
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 from bitchat.mesh.dedup import PacketDeduplicator
 from bitchat.mesh.store_forward import StoreAndForwardQueue
 from bitchat.protocol.constants import BROADCAST_RECIPIENT
-
-if TYPE_CHECKING:
-    from bitchat.protocol.packet import BitchatPacket
+from bitchat.protocol.packet import BitchatPacket
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +82,11 @@ class MeshRouter:
     def prune_rate_limiter(self, max_age: float = 1.0, now: float | None = None) -> int:
         """Prune empty or expired peer entries from rate limiter dict."""
         current_time = time.time() if now is None else now
+        cutoff = current_time - max_age
         to_delete = [
             peer
             for peer, timestamps in self._rate_limiter.items()
-            if not timestamps or (current_time - max(timestamps) > max_age)
+            if not timestamps or timestamps[-1] < cutoff
         ]
         for peer in to_delete:
             self._rate_limiter.pop(peer, None)
@@ -101,22 +99,28 @@ class MeshRouter:
             self.prune_rate_limiter(now=current_time)
 
         timestamps = self._rate_limiter.get(sender_hex)
-        if timestamps is None:
+        if not timestamps:
             self._rate_limiter[sender_hex] = [current_time]
             return False
 
-        # Filter out timestamps older than 1 second
-        valid = [t for t in timestamps if current_time - t <= 1.0]
-        if not valid:
-            self._rate_limiter[sender_hex] = [current_time]
+        cutoff = current_time - 1.0
+        if timestamps[-1] < cutoff:
+            timestamps.clear()
+            timestamps.append(current_time)
             return False
 
-        if len(valid) >= self.rate_limit_per_peer:
-            self._rate_limiter[sender_hex] = valid
+        if timestamps[0] < cutoff:
+            # Drop expired prefix in-place
+            idx = 0
+            n = len(timestamps)
+            while idx < n and timestamps[idx] < cutoff:
+                idx += 1
+            del timestamps[:idx]
+
+        if len(timestamps) >= self.rate_limit_per_peer:
             return True
 
-        valid.append(current_time)
-        self._rate_limiter[sender_hex] = valid
+        timestamps.append(current_time)
         return False
 
     @property
@@ -136,7 +140,18 @@ class MeshRouter:
         next_hop_str = _normalize_route_key(next_hop)
         current_time = time.time() if now is None else now
 
-        # Prune if table exceeds capacity
+        existing = self._routes.get(dest_key)
+        if existing is not None:
+            if (
+                current_time - existing.updated_at <= self.route_ttl_seconds
+                and existing.hop_count < hop_count
+            ):
+                return
+            existing.next_hop = next_hop_str
+            existing.hop_count = hop_count
+            existing.updated_at = current_time
+            return
+
         if len(self._routes) >= self.max_routes:
             self.prune_routes(now=current_time)
             if len(self._routes) >= self.max_routes:
@@ -144,15 +159,6 @@ class MeshRouter:
                     self._routes.keys(), key=lambda k: self._routes[k].updated_at
                 )
                 self._routes.pop(oldest_dest, None)
-
-        existing = self._routes.get(dest_key)
-        # If existing route is valid and has strictly lower hop count, keep it
-        if (
-            existing is not None
-            and (current_time - existing.updated_at <= self.route_ttl_seconds)
-            and existing.hop_count < hop_count
-        ):
-            return
 
         self._routes[dest_key] = RouteEntry(
             next_hop=next_hop_str,
@@ -204,15 +210,7 @@ class MeshRouter:
         ingress_source: str | None = None,
         now: float | None = None,
     ) -> RoutingDecision:
-        """Evaluate an incoming packet and determine local processing and relay actions.
-
-        Enforces:
-        1. Drop packets from local peer ID (loop prevention).
-        2. Ingress rate-limiting per peer.
-        3. TTL validation (drop TTL=0).
-        4. Deduplication suppression.
-        5. Forwarding with decremented TTL if TTL > 1.
-        """
+        """Evaluate an incoming packet and determine local and relay actions."""
         current_time = time.time() if now is None else now
 
         # 1. Loop prevention: ignore packets we originated
@@ -241,7 +239,7 @@ class MeshRouter:
                 drop_reason="Invalid or expired TTL (<= 0)",
             )
 
-        # 4. Deduplication
+        # 4. Deduplication (TTL-invariant key covers original and decremented packet)
         if self.deduplicator.check_and_record(packet, now=current_time):
             return RoutingDecision(
                 should_process_locally=False,
@@ -259,30 +257,35 @@ class MeshRouter:
             )
 
         # 6. Determine destination
-        is_broadcast = (
-            packet.recipient_id is None or packet.recipient_id == BROADCAST_RECIPIENT
-        )
-        is_for_us = is_broadcast or (packet.recipient_id == self.local_peer_id)
+        rcpt = packet.recipient_id
+        is_broadcast = rcpt is None or rcpt == BROADCAST_RECIPIENT
+        is_for_us = is_broadcast or (rcpt == self.local_peer_id)
 
         # 7. Determine relay action
         packet_to_relay: BitchatPacket | None = None
         target_peer_id_hex: str | None = None
 
-        if not is_for_us:
-            # Unicast packet destined for another node
-            target_peer_id_hex = (
-                packet.recipient_id.hex() if packet.recipient_id else None
-            )
+        if not is_for_us and rcpt is not None:
+            target_peer_id_hex = rcpt.hex()
 
         # Relay if TTL > 1 and this node is not the exclusive destination
-        if packet.ttl > 1 and not (not is_broadcast and is_for_us):
-            # Clamp TTL to safety ceiling and decrement by 1
-            clamped_ttl = min(packet.ttl, self.max_relay_ttl)
+        if packet.ttl > 1 and (is_broadcast or not is_for_us):
+            clamped_ttl = (
+                packet.ttl if packet.ttl <= self.max_relay_ttl else self.max_relay_ttl
+            )
             decremented_ttl = clamped_ttl - 1
             if decremented_ttl >= 1:
-                packet_to_relay = replace(packet, ttl=decremented_ttl)
-                # Record the decremented packet in dedup cache as well
-                self.deduplicator.record(packet_to_relay, now=current_time)
+                packet_to_relay = BitchatPacket._from_trusted(
+                    version=packet.version,
+                    message_type=packet.message_type,
+                    ttl=decremented_ttl,
+                    timestamp=packet.timestamp,
+                    flags=packet.flags,
+                    sender_id=packet.sender_id,
+                    recipient_id=rcpt,
+                    payload=packet.payload,
+                    signature=packet.signature,
+                )
 
         return RoutingDecision(
             should_process_locally=is_for_us,

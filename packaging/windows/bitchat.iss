@@ -5,11 +5,11 @@
 ; =============================================================================
 
 #ifndef MyAppVersion
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.3.1"
 #endif
 
 #ifndef MyOutputBaseFilename
-#define MyOutputBaseFilename "BitChat-0.3.0-windows-x64"
+#define MyOutputBaseFilename "BitChat-0.3.1-windows-x64"
 #endif
 
 #define MyAppName "BitChat"
@@ -124,6 +124,7 @@ Name: "{code:GetStartupFolder}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}";
 Type: files; Name: "{code:GetStartupFolder}\{#MyAppName}.lnk"
 Type: files; Name: "{autodesktop}\{#MyAppName}.lnk"
 Type: filesandordirs; Name: "{group}"
+Type: filesandordirs; Name: "{app}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
@@ -716,25 +717,14 @@ begin
             (Pos(';' + UpperCase(NormParam) + '\;', ';' + UpperCase(OrigPath) + ';') = 0);
 end;
 
-procedure RemoveDirFromPathIfAddedByInstaller(const AppDir: string);
+procedure RemoveSpecificDirFromPathValue(const RootKey: Integer; const PathKey: string; const DirToRemove: string);
 var
-  RootKey: Integer;
-  PathKey: string;
-  OrigPath, NormDir, CleanPath, RecordedDir: string;
+  OrigPath, NormDir, CleanPath: string;
   P: Integer;
 begin
-  RecordedDir := '';
-  if not RegQueryStringValue(HKEY_CURRENT_USER, '{#MyAppRegKey}', 'PathAddedByInstaller', RecordedDir) then
-  begin
-    { Do not remove PATH entries that were not added by the BitChat installer }
+  NormDir := NormalizeDirPath(DirToRemove);
+  if NormDir = '' then
     exit;
-  end;
-
-  RootKey := GetEnvironmentRootKey();
-  PathKey := GetEnvironmentSubKey();
-  NormDir := NormalizeDirPath(AppDir);
-  if RecordedDir <> '' then
-    NormDir := NormalizeDirPath(RecordedDir);
 
   if RegQueryStringValue(RootKey, PathKey, 'Path', OrigPath) then
   begin
@@ -754,7 +744,8 @@ begin
       P := Pos(';' + UpperCase(NormDir) + ';', UpperCase(CleanPath));
     end;
 
-    StringChange(CleanPath, ';;', ';');
+    while Pos(';;', CleanPath) > 0 do
+      StringChange(CleanPath, ';;', ';');
 
     if (Length(CleanPath) > 0) and (CleanPath[1] = ';') then
       Delete(CleanPath, 1, 1);
@@ -763,8 +754,74 @@ begin
 
     RegWriteExpandStringValue(RootKey, PathKey, 'Path', CleanPath);
   end;
+end;
+
+procedure RemoveDirFromPathIfAddedByInstaller(const AppDir: string);
+var
+  RootKey: Integer;
+  PathKey: string;
+  RecordedDir: string;
+begin
+  RootKey := GetEnvironmentRootKey();
+  PathKey := GetEnvironmentSubKey();
+
+  RecordedDir := '';
+  RegQueryStringValue(HKEY_CURRENT_USER, '{#MyAppRegKey}', 'PathAddedByInstaller', RecordedDir);
+
+  if AppDir <> '' then
+    RemoveSpecificDirFromPathValue(RootKey, PathKey, AppDir);
+  if (RecordedDir <> '') and (UpperCase(NormalizeDirPath(RecordedDir)) <> UpperCase(NormalizeDirPath(AppDir))) then
+    RemoveSpecificDirFromPathValue(RootKey, PathKey, RecordedDir);
 
   RegDeleteValue(HKEY_CURRENT_USER, '{#MyAppRegKey}', 'PathAddedByInstaller');
+end;
+
+procedure StopAllRunningBitChatProcesses();
+var
+  ResultCode: Integer;
+  PsCmd: string;
+begin
+  PsCmd :=
+    'Get-Process -Name bitchat -ErrorAction SilentlyContinue | ForEach-Object { ' +
+    '  try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {} ' +
+    '}; Start-Sleep -Milliseconds 300';
+  Exec('powershell.exe', '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + PsCmd + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure RemovePythonScriptLaunchersAndShims();
+var
+  ResultCode: Integer;
+  PsCmd: string;
+begin
+  { Clean console-script launchers (e.g., Python314\Scripts\bitchat.exe) across Python/uv/pipx dirs }
+  PsCmd :=
+    '$patterns = @(' +
+    '  "$env:LOCALAPPDATA\Programs\Python\Python*\Scripts",' +
+    '  "$env:APPDATA\Python\Python*\Scripts",' +
+    '  "$env:ProgramFiles\Python*\Scripts",' +
+    '  "${env:ProgramFiles(x86)}\Python*\Scripts",' +
+    '  "C:\Python*\Scripts",' +
+    '  "$env:USERPROFILE\.local\bin",' +
+    '  "$env:LOCALAPPDATA\uv\tools\bitchat\Scripts",' +
+    '  "$env:APPDATA\uv\tools\bitchat\Scripts",' +
+    '  "$env:USERPROFILE\.local\pipx\venvs\bitchat\Scripts"' +
+    '); ' +
+    'if ($env:BITCHAT_EXTRA_SCRIPTS_DIRS) { $patterns += ($env:BITCHAT_EXTRA_SCRIPTS_DIRS -split ";") }; ' +
+    'foreach ($pat in $patterns) { ' +
+    '  if (-not $pat) { continue }; ' +
+    '  Get-Item -Path $pat -ErrorAction SilentlyContinue | ForEach-Object { ' +
+    '    $dir = $_.FullName; ' +
+    '    foreach ($fn in @("bitchat.exe","bitchat-script.py","bitchat.cmd","bitchat.bat","bitchat.ps1")) { ' +
+    '      $target = Join-Path $dir $fn; ' +
+    '      if (Test-Path -LiteralPath $target) { ' +
+    '        Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue ' +
+    '      } ' +
+    '    } ' +
+    '  } ' +
+    '}';
+  Exec('powershell.exe', '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + PsCmd + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure AddDirToPath(const AppDir: string);
@@ -881,6 +938,7 @@ function InitializeUninstall(): Boolean;
 begin
   Result := True;
   StopRunningBitChatInDir(ExpandConstant('{app}'));
+  StopAllRunningBitChatProcesses();
 end;
 
 function ShouldRemoveUserDataOnUninstall(): Boolean;
@@ -948,19 +1006,26 @@ begin
   begin
     AppDir := NormalizeDirPath(ExpandConstant('{app}'));
 
-    { 1. Remove PATH entry only if it was added by the BitChat installer }
+    { 1. Remove PATH entry added for BitChat }
     RemoveDirFromPathIfAddedByInstaller(AppDir);
 
-    { 2. Remove per-user Windows Startup shortcut if present }
+    { 2. Remove stale Python Scripts\bitchat.exe launchers so 'bitchat' does not remain on PATH }
+    RemovePythonScriptLaunchersAndShims();
+
+    { 3. Remove per-user Windows Startup shortcut if present }
     StartupLnk := AddBackslash(GetStartupFolder('')) + '{#MyAppName}.lnk';
     if FileExists(StartupLnk) then
       DeleteFile(StartupLnk);
 
-    { 3. Clean up BitChat installer metadata registry key }
+    { 4. Clean up BitChat installer metadata registry key }
     RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, '{#MyAppRegKey}');
 
-    { 4. Preserve user data by default, or remove if explicitly requested }
+    { 5. Preserve user data by default, or remove if explicitly requested }
     if ShouldRemoveUserDataOnUninstall() then
       SafeRemoveUserDataDir();
+
+    { 6. Ensure installation directory is completely removed if empty or leftover }
+    if DirExists(AppDir) then
+      DelTree(AppDir, True, True, True);
   end;
 end;

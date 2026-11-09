@@ -51,10 +51,15 @@ class ChatView(Widget):
         self.channel_name = channel_name
         self._message_history: list[ChatMessageRecord] = []
         self._mounted = False
+        self._rich_log_cache: RichLog | None = None
 
     def on_mount(self) -> None:
         self.border_title = f"Conversation ({self.channel_name})"
         self._mounted = True
+        try:
+            self._rich_log_cache = self.query_one("#chat-log", RichLog)
+        except NoMatches:
+            self._rich_log_cache = None
 
     def on_resize(self, event: events.Resize) -> None:
         if self._mounted and self._message_history:
@@ -83,7 +88,11 @@ class ChatView(Widget):
     @property
     def rich_log(self) -> RichLog:
         """Return the underlying RichLog widget."""
-        return self.query_one("#chat-log", RichLog)
+        if self._rich_log_cache is not None:
+            return self._rich_log_cache
+        log = self.query_one("#chat-log", RichLog)
+        self._rich_log_cache = log
+        return log
 
     def re_render_all(self) -> None:
         """Clear and re-render all messages with active density and timestamps."""
@@ -101,6 +110,7 @@ class ChatView(Widget):
 
     def _render_record(self, record: ChatMessageRecord) -> None:
         """Render a single message record to the RichLog."""
+        log = self.rich_log
         ts_str = time.strftime("%H:%M", time.localtime(record.timestamp))
         match record.kind:
             case "chat":
@@ -125,8 +135,25 @@ class ChatView(Widget):
                 if self.show_timestamps:
                     header.append(f" • {ts_str}", style="dim #57606a")
 
-                width = max(1, self.rich_log.scrollable_content_region.width - 1)
+                width = max(1, log.scrollable_content_region.width - 1)
                 prefix_width = header.cell_len + 2
+
+                # Fast path for single-line ASCII messages that fit on a single line
+                if (
+                    "\n" not in record.text
+                    and prefix_width + len(record.text) < width
+                    and record.text.isascii()
+                ):
+                    aligned_message = Text(
+                        justify="right" if record.is_self else "left",
+                        overflow="fold",
+                    )
+                    aligned_message.append_text(header)
+                    aligned_message.append(": ")
+                    aligned_message.append(record.text)
+                    log.write(aligned_message, width=width)
+                    return
+
                 header_wraps = prefix_width >= width
                 continuation_indent = " " * min(
                     2 if header_wraps else prefix_width, width - 1
@@ -165,7 +192,7 @@ class ChatView(Widget):
                     if index:
                         aligned_message.append("\n")
                     aligned_message.append_text(line)
-                self.rich_log.write(aligned_message, width=width)
+                log.write(aligned_message, width=width)
 
             case "system":
                 ts_part = (
@@ -177,7 +204,7 @@ class ChatView(Widget):
                     f"{ts_part}[bold #58a6ff]●[/bold #58a6ff] "
                     f"[#8b949e]{record.text}[/#8b949e]"
                 )
-                self.rich_log.write(line)
+                log.write(line)
 
             case "security":
                 ts_part = (
@@ -190,7 +217,7 @@ class ChatView(Widget):
                     f"[bold #bc8cff]Security:[/bold #bc8cff] "
                     f"[#8b949e]{record.text}[/#8b949e]"
                 )
-                self.rich_log.write(line)
+                log.write(line)
 
             case "error":
                 ts_part = (
@@ -202,14 +229,14 @@ class ChatView(Widget):
                     f"{ts_part}[bold #f85149]![/bold #f85149] "
                     f"[#f85149]{record.text}[/#f85149]"
                 )
-                self.rich_log.write(line)
+                log.write(line)
 
     def _append_record(self, record: ChatMessageRecord) -> None:
         if self._message_history:
             self.rich_log.write(Text(" "))
         self._message_history.append(record)
         if len(self._message_history) > self.MAX_HISTORY:
-            self._message_history.pop(0)
+            del self._message_history[: len(self._message_history) - self.MAX_HISTORY]
         self._render_record(record)
 
     def add_chat_message(
