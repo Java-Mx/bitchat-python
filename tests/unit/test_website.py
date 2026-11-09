@@ -69,9 +69,11 @@ REQUIRED_ASSETS = [
     "assets/img/brand/bitchat.ico",
     "assets/img/diagrams/architecture.svg",
     "assets/img/diagrams/noise-flow.svg",
-    "assets/img/screenshots/chat-interface.png",
-    "assets/img/screenshots/transport-status.png",
-    "assets/img/screenshots/main-interface.png",
+    "assets/img/screenshots/06_lan_active_chat.svg",
+    "assets/img/screenshots/04_peers_screen.svg",
+    "assets/img/screenshots/22_telemetry_screen.svg",
+    "assets/img/screenshots/01_home_screen.svg",
+    "assets/img/screenshots/21_commands_help.svg",
 ]
 
 

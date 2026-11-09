@@ -11,7 +11,7 @@
   <meta property="og:title" content="BitChat — Encrypted Peer-to-Peer Mesh Chat for Terminals" />
   <meta property="og:description" content="Decentralized mesh chat over Bluetooth Low Energy and LAN. Noise XX encryption, zero servers, zero telemetry, Rust-accelerated core." />
   <meta property="og:url" content="https://java-mx.github.io/bitchat-python/" />
-  <meta property="og:image" content="assets/img/screenshots/chat-interface.png" />
+  <meta property="og:image" content="assets/img/screenshots/06_lan_active_chat.svg" />
 
   <link rel="icon" type="image/svg+xml" href="assets/img/brand/Bitchat-Icon-Framed.svg" />
   <link rel="alternate icon" type="image/x-icon" href="assets/img/brand/bitchat.ico" />
@@ -135,17 +135,18 @@
               <span class="terminal-dot"></span>
             </div>
             <div>
-              <button class="terminal-tab-btn active" data-img="assets/img/screenshots/chat-interface.png" data-caption="Verified BitChat ChatView &amp; Broadcast Dispatch in Terminal UI">Chat</button>
-              <button class="terminal-tab-btn" data-img="assets/img/screenshots/transport-status.png" data-caption="Diagnostic System &amp; Transport Capability Evaluation (/configure)">Diagnostics</button>
-              <button class="terminal-tab-btn" data-img="assets/img/screenshots/main-interface.png" data-caption="Main TUI Layout with Reactive Peer Sidebar &amp; Telemetry">Interface</button>
+              <button class="terminal-tab-btn active" data-img="assets/img/screenshots/06_lan_active_chat.svg" data-caption="Verified BitChat Active ChatView &amp; Broadcast Dispatch over LAN Mesh">Chat</button>
+              <button class="terminal-tab-btn" data-img="assets/img/screenshots/04_peers_screen.svg" data-caption="Reactive Peer Grid with Transport Indicators &amp; Signal Telemetry">Peers</button>
+              <button class="terminal-tab-btn" data-img="assets/img/screenshots/22_telemetry_screen.svg" data-caption="Real-Time System Diagnostics, Bluetooth &amp; Socket Status (/configure)">Diagnostics</button>
+              <button class="terminal-tab-btn" data-img="assets/img/screenshots/01_home_screen.svg" data-caption="BitChat Home Screen with Direct Connect &amp; Channel Navigation">Home</button>
             </div>
           </div>
           <div class="terminal-screenshot-container">
-            <img src="assets/img/screenshots/chat-interface.png" alt="BitChat Chat View in Terminal" class="terminal-screenshot" />
+            <img src="assets/img/screenshots/06_lan_active_chat.svg" alt="BitChat Active Terminal Chat View" class="terminal-screenshot" />
           </div>
           <div class="terminal-caption">
-            <span class="screenshot-caption-text">Verified BitChat ChatView &amp; Broadcast Dispatch in Terminal UI</span>
-            <span>Ubuntu Linux / Windows WinRT</span>
+            <span class="screenshot-caption-text">Verified BitChat Active ChatView &amp; Broadcast Dispatch over LAN Mesh</span>
+            <span>Vector Textual Capture</span>
           </div>
         </div>
       </div>
@@ -391,6 +392,61 @@
           <div class="diagram-wrapper">
             <img src="assets/img/diagrams/architecture.svg" alt="BitChat Hybrid Layered Architecture" style="width: 100%; height: auto; display: block;" />
             <div class="diagram-caption">Hybrid Python/Rust Architecture &amp; Physical Transport Separation</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Terminal Interface Showcase -->
+    <section class="section" id="screens">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Interface Showcase</span>
+          <h2 class="section-title">Verified Textual Terminal Interface</h2>
+          <p class="section-description">
+            Direct vector screen captures generated from running BitChat instances. High-contrast typography, reactive sidebars, and real-time telemetry.
+          </p>
+        </div>
+
+        <div class="screenshot-grid">
+          <div class="screenshot-card">
+            <div class="screenshot-card-img-wrap">
+              <img src="assets/img/screenshots/06_lan_active_chat.svg" alt="Active Chat View in Terminal" loading="lazy" />
+            </div>
+            <div class="screenshot-card-content">
+              <div class="screenshot-card-title">Active Mesh Chat &amp; Message Dispatch</div>
+              <div class="screenshot-card-desc">Channel broadcasting (#public), timestamped logging, peer fingerprints, and isolated slash command input field.</div>
+            </div>
+          </div>
+
+          <div class="screenshot-card">
+            <div class="screenshot-card-img-wrap">
+              <img src="assets/img/screenshots/04_peers_screen.svg" alt="Discovered Peer Grid in Terminal" loading="lazy" />
+            </div>
+            <div class="screenshot-card-content">
+              <div class="screenshot-card-title">Reactive Peer Grid &amp; Routing Telemetry</div>
+              <div class="screenshot-card-desc">Shows nearby nodes, radio transports (BLE/LAN), peer IDs, Ed25519 fingerprints, and live signal quality.</div>
+            </div>
+          </div>
+
+          <div class="screenshot-card">
+            <div class="screenshot-card-img-wrap">
+              <img src="assets/img/screenshots/21_commands_help.svg" alt="Command Help and Keybindings in Terminal" loading="lazy" />
+            </div>
+            <div class="screenshot-card-content">
+              <div class="screenshot-card-title">Command Reference &amp; Keybindings (/help)</div>
+              <div class="screenshot-card-desc">Integrated help modal with strict token boundary validation, keyboard shortcuts, and transport management options.</div>
+            </div>
+          </div>
+
+          <div class="screenshot-card">
+            <div class="screenshot-card-img-wrap">
+              <img src="assets/img/screenshots/22_telemetry_screen.svg" alt="Subsystem Telemetry and Diagnostic Report in Terminal" loading="lazy" />
+            </div>
+            <div class="screenshot-card-content">
+              <div class="screenshot-card-title">Hardware Telemetry &amp; Diagnostics (/configure)</div>
+              <div class="screenshot-card-desc">Real-time status of host adapter, BlueZ/WinRT peripheral and central roles, and UDP/TCP socket bindings.</div>
+            </div>
           </div>
         </div>
       </div>
