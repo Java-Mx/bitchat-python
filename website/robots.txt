@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://java-mx.github.io/bitchat-python/sitemap.xml

@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documentation &amp; Technical Manual — BitChat</title>
+  <meta name="description" content="Technical documentation for BitChat: architecture, installation guides, command reference, protocol specifications, security model, and developer setup." />
+  
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Documentation &amp; Technical Manual — BitChat" />
+  <meta property="og:description" content="Architecture, commands, protocol specifications, platform guides, and security invariants for BitChat Python." />
+  <meta property="og:url" content="https://java-mx.github.io/bitchat-python/docs.html" />
+
+  <link rel="icon" type="image/svg+xml" href="assets/img/brand/Bitchat-Icon-Framed.svg" />
+  <link rel="alternate icon" type="image/x-icon" href="assets/img/brand/bitchat.ico" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+  <!-- Site Header -->
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand-link" aria-label="BitChat Home">
+        <img src="assets/img/brand/bitchat-icon-32.svg" alt="" class="brand-icon" />
+        <span class="brand-title">BitChat</span>
+        <span class="brand-badge">v0.3.1</span>
+      </a>
+
+      <nav aria-label="Main Navigation">
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="downloads.html">Downloads</a></li>
+          <li><a href="docs.html" class="active">Documentation</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="roadmap.html">Roadmap</a></li>
+          <li><a href="about.html">About</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer" class="btn-github">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <button class="mobile-menu-btn" aria-label="Open navigation menu" aria-expanded="false">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-nav">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="downloads.html">Downloads</a></li>
+        <li><a href="docs.html" class="active">Documentation</a></li>
+        <li><a href="security.html">Security &amp; Cryptography</a></li>
+        <li><a href="roadmap.html">Roadmap</a></li>
+        <li><a href="about.html">About Architecture</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms of Use</a></li>
+        <li>
+          <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer">View on GitHub &rarr;</a>
+        </li>
+      </ul>
+    </div>
+  </header>
+
+  <main class="container" style="padding-top: 3.5rem; padding-bottom: 5rem;">
+    <!-- Header -->
+    <div class="section-header">
+      <span class="section-tag">Documentation Hub</span>
+      <h1 class="section-title">Technical Documentation</h1>
+      <p class="section-description">
+        Comprehensive guides, protocol specifications, configuration manuals, and architecture documentation for BitChat Python.
+      </p>
+    </div>
+
+    <!-- Quickstart Banner -->
+    <div class="download-hero-card" id="quickstart" style="margin-bottom: 3rem;">
+      <h2 style="font-size: 1.35rem; margin-bottom: 0.75rem; color: #ffffff;">Quickstart &amp; First Run</h2>
+      <p style="margin-bottom: 1.25rem;">
+        Launch BitChat from your terminal. If hardware or adapter issues occur, run the diagnostic evaluation to inspect BlueZ, WinRT, and network socket bindings:
+      </p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div class="cli-install-box">
+          <div class="cli-label">
+            <span>Launch BitChat TUI</span>
+            <button class="btn-copy" data-copy="bitchat">Copy</button>
+          </div>
+          <code class="cli-cmd">bitchat</code>
+        </div>
+        <div class="cli-install-box">
+          <div class="cli-label">
+            <span>Inspect System &amp; Transports</span>
+            <button class="btn-copy" data-copy="bitchat --configure">Copy</button>
+          </div>
+          <code class="cli-cmd">bitchat --configure</code>
+        </div>
+      </div>
+    </div>
+
+    <!-- Documentation Sections Grid -->
+    <div class="docs-grid" style="margin-bottom: 3.5rem;">
+      <!-- Group 1: Getting Started & Installation -->
+      <div class="doc-group-card">
+        <h3 class="doc-group-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Installation &amp; Platform Guides
+        </h3>
+        <p class="doc-group-desc">System prerequisites, setup procedures, and platform integration.</p>
+
+        <ul class="doc-links-list">
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/platform/WINDOWS.md" target="_blank" rel="noopener noreferrer">
+              <span>Windows Platform Guide (Inno Setup &amp; WinRT BLE)</span>
+              <span class="doc-path">WINDOWS.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/platform/LINUX.md" target="_blank" rel="noopener noreferrer">
+              <span>Linux Platform Guide (BlueZ D-Bus &amp; .deb / AppImage)</span>
+              <span class="doc-path">LINUX.md &rarr;</span>
+            </a>
+          </li>
+          <li id="macos">
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/platform/MACOS.md" target="_blank" rel="noopener noreferrer">
+              <span>macOS Source &amp; Development Guide</span>
+              <span class="doc-path">MACOS.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/REQUIREMENTS.md" target="_blank" rel="noopener noreferrer">
+              <span>Hardware &amp; Software Requirements Specification</span>
+              <span class="doc-path">REQUIREMENTS.md &rarr;</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Group 2: Architecture & Rust Core -->
+      <div class="doc-group-card" id="architecture">
+        <h3 class="doc-group-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+          Architecture &amp; Rust Engine
+        </h3>
+        <p class="doc-group-desc">Core design, native PyO3 integration, and component boundaries.</p>
+
+        <ul class="doc-links-list">
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">
+              <span>System Architecture &amp; Rust Migration Assessment</span>
+              <span class="doc-path">ARCHITECTURE.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/DEVELOPMENT.md" target="_blank" rel="noopener noreferrer">
+              <span>Development Guide (Cargo, Maturin, Ruff, Pyright)</span>
+              <span class="doc-path">DEVELOPMENT.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/INDEX.md" target="_blank" rel="noopener noreferrer">
+              <span>Repository Documentation Directory Index</span>
+              <span class="doc-path">INDEX.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="roadmap.html">
+              <span>Development Roadmap &amp; Milestones</span>
+              <span class="doc-path">ROADMAP.md &rarr;</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Group 3: Protocol & Wire Format -->
+      <div class="doc-group-card">
+        <h3 class="doc-group-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+          </svg>
+          Protocol &amp; Wire Format
+        </h3>
+        <p class="doc-group-desc">BitChat v1 protocol framing, store-and-forward mesh routing, and MTU limits.</p>
+
+        <ul class="doc-links-list">
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/protocol/OVERVIEW.md" target="_blank" rel="noopener noreferrer">
+              <span>Wire Protocol Overview &amp; State Machine</span>
+              <span class="doc-path">protocol/OVERVIEW.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/protocol/PACKET_FORMAT.md" target="_blank" rel="noopener noreferrer">
+              <span>Packet Header (BC\x01\x00) &amp; Binary Structure</span>
+              <span class="doc-path">protocol/PACKET_FORMAT.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/protocol/ROUTING.md" target="_blank" rel="noopener noreferrer">
+              <span>Store-and-Forward Mesh Routing &amp; TTL Model</span>
+              <span class="doc-path">protocol/ROUTING.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/protocol/COMPATIBILITY.md" target="_blank" rel="noopener noreferrer">
+              <span>Protocol Compatibility &amp; Backward Interoperability</span>
+              <span class="doc-path">protocol/COMPATIBILITY.md &rarr;</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Group 4: Security & Privacy -->
+      <div class="doc-group-card">
+        <h3 class="doc-group-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          Security, Crypto &amp; Storage
+        </h3>
+        <p class="doc-group-desc">Cryptographic foundations, Noise XX specification, and local filesystem data.</p>
+
+        <ul class="doc-links-list">
+          <li>
+            <a href="security.html#cryptography">
+              <span>Cryptographic Architecture &amp; Key Lifecycle</span>
+              <span class="doc-path">security/CRYPTOGRAPHY.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="security.html#noise">
+              <span>Noise XX Protocol Specification &amp; Rekeying</span>
+              <span class="doc-path">security/NOISE.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/security/DATA_HANDLING.md" target="_blank" rel="noopener noreferrer">
+              <span>Local Data Inventory (~/.bitchat/) &amp; Ephemeral RAM Policy</span>
+              <span class="doc-path">security/DATA_HANDLING.md &rarr;</span>
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/Java-Mx/bitchat-python/blob/main/docs/security/THREAT_MODEL.md" target="_blank" rel="noopener noreferrer">
+              <span>Threat Model &amp; Non-Guarantees</span>
+              <span class="doc-path">security/THREAT_MODEL.md &rarr;</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Slash Command Reference -->
+    <div class="section-header" id="commands">
+      <span class="section-tag">Interactive Controls</span>
+      <h2 class="section-title">Terminal Slash Commands</h2>
+      <p class="section-description">
+        BitChat includes an isolated slash command interpreter with strict word boundary token matching. Sentences containing command words are broadcast as normal chat messages.
+      </p>
+    </div>
+
+    <div class="package-table-wrapper" style="margin-bottom: 3.5rem;">
+      <table class="package-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Arguments</th>
+            <th>Description &amp; Behavior</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/help</code></td>
+            <td><em>none</em></td>
+            <td>Displays interactive command help overlay with keybindings and usage syntax.</td>
+          </tr>
+          <tr>
+            <td><code>/peers</code></td>
+            <td><em>none</em></td>
+            <td>Lists all discovered active peers, their transport types (BLE/LAN), and RSSI/ping status.</td>
+          </tr>
+          <tr>
+            <td><code>/transport</code></td>
+            <td><code>[ble|lan|both]</code></td>
+            <td>Queries or sets the active physical transport layer.</td>
+          </tr>
+          <tr>
+            <td><code>/channels</code></td>
+            <td><em>none</em></td>
+            <td>Lists joined chat channels and unread message indicators.</td>
+          </tr>
+          <tr>
+            <td><code>/configure</code></td>
+            <td><em>none</em></td>
+            <td>Runs real-time hardware diagnostics against BlueZ, WinRT, and local network socket listeners.</td>
+          </tr>
+          <tr>
+            <td><code>/status</code></td>
+            <td><em>none</em></td>
+            <td>Prints local peer fingerprint, active Noise sessions, and packet routing metrics.</td>
+          </tr>
+          <tr>
+            <td><code>/theme</code></td>
+            <td><code>[cyber_cyan|midnight_blue|terminal_emerald]</code></td>
+            <td>Toggles TUI theme color scheme and persists preference in <code>config.json</code>.</td>
+          </tr>
+          <tr>
+            <td><code>/quit</code></td>
+            <td><em>none</em></td>
+            <td>Gracefully terminates active sessions, scrubs ephemeral RAM keys, and exits cleanly.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Uninstallation Guide Section -->
+    <div class="section-header" id="uninstallation">
+      <span class="section-tag">Lifecycle</span>
+      <h2 class="section-title">Clean Uninstallation Procedures</h2>
+      <p class="section-description">
+        How to cleanly remove BitChat and optionally scrub all local cryptographic identities.
+      </p>
+    </div>
+
+    <div class="docs-grid">
+      <div class="doc-group-card">
+        <h3 class="doc-group-title">Standard Uninstallation</h3>
+        <p class="doc-group-desc">
+          Removes application binaries, shortcuts, and start menu entries while preserving your cryptographic identity in <code>~/.bitchat/identity.json</code> for future reinstallation.
+        </p>
+        <div class="cli-install-box">
+          <div class="cli-label"><span>Standard CLI Uninstall</span></div>
+          <code class="cli-cmd">bitchat --uninstall</code>
+        </div>
+      </div>
+
+      <div class="doc-group-card">
+        <h3 class="doc-group-title">Complete Scrub (--remove-user-data)</h3>
+        <p class="doc-group-desc">
+          Removes all application binaries AND permanently purges the entire <code>~/.bitchat/</code> folder, including identity keys, logs, and configuration files.
+        </p>
+        <div class="cli-install-box">
+          <div class="cli-label"><span>Full Purge Uninstall</span></div>
+          <code class="cli-cmd">bitchat --uninstall --remove-user-data</code>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand-col">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <img src="assets/img/brand/bitchat-icon-32.svg" alt="" width="22" height="22" />
+            <span style="font-weight: 700; color: #ffffff;">BitChat Python</span>
+          </div>
+          <p>
+            An independent, open-source encrypted peer-to-peer mesh chat application. Published under the MIT License.
+          </p>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Downloads</div>
+          <ul class="footer-links">
+            <li><a href="downloads.html#windows">Windows Installer (.exe)</a></li>
+            <li><a href="downloads.html#linux">Linux Packages (.deb, AppImage)</a></li>
+            <li><a href="downloads.html#wheels">Python Wheels</a></li>
+            <li><a href="downloads.html#source">Source Tarball</a></li>
+            <li><a href="https://github.com/Java-Mx/bitchat-python/releases" target="_blank" rel="noopener noreferrer">All GitHub Releases</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Documentation</div>
+          <ul class="footer-links">
+            <li><a href="docs.html#quickstart">Getting Started</a></li>
+            <li><a href="docs.html#architecture">System Architecture</a></li>
+            <li><a href="docs.html#commands">Command Reference</a></li>
+            <li><a href="docs.html#uninstallation">Uninstallation Guide</a></li>
+            <li><a href="roadmap.html">Development Roadmap</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Security &amp; Legal</div>
+          <ul class="footer-links">
+            <li><a href="security.html">Security Policy</a></li>
+            <li><a href="security.html#cryptography">Cryptographic Invariants</a></li>
+            <li><a href="privacy.html">Privacy Policy (Draft)</a></li>
+            <li><a href="terms.html">Terms of Use (Draft)</a></li>
+            <li><a href="https://github.com/Java-Mx/bitchat-python/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="footer-status-indicator">
+          <span class="status-dot"></span>
+          <span>BitChat v0.3.1 Documentation &bull; MIT License</span>
+        </div>
+        <div>
+          &copy; 2026 Java-Mx &amp; BitChat Contributors.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <button class="back-to-top" aria-label="Back to top">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script src="assets/js/main.js"></script>
+</body>
+</html>

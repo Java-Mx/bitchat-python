@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" width="100%" height="auto" style="background:#090d14; border-radius:8px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">
+  <defs>
+    <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#0891b2" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="rustGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ea580c" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#9a3412" stop-opacity="0.05"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowMuted" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- Background Grid lines -->
+  <g stroke="#161e2e" stroke-width="1">
+    <line x1="40" y1="40" x2="920" y2="40" />
+    <line x1="40" y1="120" x2="920" y2="120" />
+    <line x1="40" y1="200" x2="920" y2="200" />
+    <line x1="40" y1="280" x2="920" y2="280" />
+    <line x1="40" y1="360" x2="920" y2="360" />
+    <line x1="40" y1="440" x2="920" y2="440" />
+  </g>
+
+  <!-- Layer 1: Terminal UI Layer -->
+  <rect x="50" y="50" width="860" height="70" rx="6" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+  <text x="70" y="80" fill="#38bdf8" font-size="12" font-weight="bold" letter-spacing="1">LAYER 1: USER INTERACTION</text>
+  <text x="70" y="102" fill="#f8fafc" font-size="14" font-weight="600">Textual Terminal UI (TUI)</text>
+  <text x="310" y="102" fill="#94a3b8" font-size="12">Asyncio Event Loop  *  Reactive Sidebar  *  Multi-Channel ChatView  *  Slash Command Parser</text>
+
+  <!-- Arrow L1 to L2 -->
+  <path d="M 480 120 L 480 145" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Layer 2: Hybrid Engine Layer -->
+  <rect x="50" y="150" width="860" height="150" rx="6" fill="#0b1120" stroke="#1e293b" stroke-width="1.5"/>
+  <text x="70" y="178" fill="#38bdf8" font-size="12" font-weight="bold" letter-spacing="1">LAYER 2: PROTOCOL ENGINE &amp; SECURITY CORE</text>
+
+  <!-- Python Coordinator -->
+  <rect x="70" y="195" width="280" height="85" rx="4" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text x="85" y="218" fill="#e2e8f0" font-size="13" font-weight="600">Python Coordinator Layer</text>
+  <text x="85" y="238" fill="#94a3b8" font-size="11">Peer Discovery State Machine</text>
+  <text x="85" y="254" fill="#94a3b8" font-size="11">Identity Lifecycle (~/.bitchat/)</text>
+  <text x="85" y="270" fill="#94a3b8" font-size="11">Noise XX Session Orchestration</text>
+
+  <!-- PyO3 Bridge -->
+  <rect x="365" y="215" width="70" height="45" rx="4" fill="#1e293b" stroke="#0ea5e9" stroke-width="1"/>
+  <text x="375" y="242" fill="#38bdf8" font-size="11" font-weight="bold">PyO3 ABI</text>
+
+  <!-- Rust Native Core -->
+  <rect x="450" y="195" width="440" height="85" rx="4" fill="url(#rustGlow)" stroke="#f97316" stroke-width="1.2"/>
+  <text x="465" y="218" fill="#fdba74" font-size="13" font-weight="bold">_bitchat_core (Native Rust Crate)</text>
+  <g fill="#cbd5e1" font-size="11">
+    <text x="465" y="238">* NativeStreamFramer: 8-byte framing + CRC32 verification</text>
+    <text x="465" y="254">* NativePacketDeduplicator: Replay protection &amp; memory-bounded ID cache</text>
+    <text x="465" y="270">* NativePacketRouter: Store-and-forward mesh routing + TTL enforcement</text>
+  </g>
+
+  <!-- Arrow L2 to L3 -->
+  <path d="M 280 300 L 280 330" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M 680 300 L 680 330" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Layer 3: Physical Transports Layer -->
+  <rect x="50" y="335" width="860" height="105" rx="6" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+  <text x="70" y="362" fill="#38bdf8" font-size="12" font-weight="bold" letter-spacing="1">LAYER 3: DUAL DECENTRALIZED TRANSPORTS</text>
+
+  <!-- BLE Transport Box -->
+  <rect x="70" y="375" width="390" height="50" rx="4" fill="#090d14" stroke="#1e293b" stroke-width="1"/>
+  <text x="85" y="396" fill="#f8fafc" font-size="12" font-weight="600">Bluetooth Low Energy (BLE GATT)</text>
+  <text x="85" y="414" fill="#94a3b8" font-size="11">Linux BlueZ D-Bus / Windows WinRT  *  Simultaneous Central + Peripheral</text>
+
+  <!-- LAN Transport Box -->
+  <rect x="500" y="375" width="390" height="50" rx="4" fill="#090d14" stroke="#1e293b" stroke-width="1"/>
+  <text x="515" y="396" fill="#f8fafc" font-size="12" font-weight="600">Local Area Network (LAN TCP / UDP)</text>
+  <text x="515" y="414" fill="#94a3b8" font-size="11">UDP Discovery (Port 41234)  *  Framed TCP Stream (Port 41235)</text>
+
+  <!-- Decentralized Mesh Footer Note -->
+  <circle cx="80" cy="460" r="4" fill="#22c55e" />
+  <text x="92" y="464" fill="#64748b" font-size="11">Zero Central Servers  *  Zero Cloud Relays  *  Zero Telemetry  *  RAM-Only Ephemeral Session Keys</text>
+</svg>

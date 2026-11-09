@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>404 — Node Not Found in Mesh | BitChat</title>
+  <meta name="description" content="The requested page or resource could not be found in the BitChat mesh." />
+
+  <link rel="icon" type="image/svg+xml" href="assets/img/brand/Bitchat-Icon-Framed.svg" />
+  <link rel="alternate icon" type="image/x-icon" href="assets/img/brand/bitchat.ico" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+  <!-- Site Header -->
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand-link" aria-label="BitChat Home">
+        <img src="assets/img/brand/bitchat-icon-32.svg" alt="" class="brand-icon" />
+        <span class="brand-title">BitChat</span>
+        <span class="brand-badge">v0.3.1</span>
+      </a>
+
+      <nav aria-label="Main Navigation">
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="downloads.html">Downloads</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="roadmap.html">Roadmap</a></li>
+          <li><a href="about.html">About</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer" class="btn-github">
+          <span>GitHub</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" style="padding: 6rem 1.5rem; text-align: center; max-width: 680px; margin: 0 auto;">
+    <div style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--rust-color); margin-bottom: 1rem; letter-spacing: 0.1em;">
+      ERROR CODE: HTTP 404 / ERR_PEER_NOT_FOUND
+    </div>
+
+    <h1 style="font-size: 2.5rem; color: #ffffff; margin-bottom: 1rem; font-family: var(--font-mono);">
+      404: Node Not Found
+    </h1>
+
+    <p style="font-size: 1.05rem; color: var(--text-secondary); margin-bottom: 2.5rem; line-height: 1.6;">
+      The requested resource, documentation page, or route could not be discovered on this mesh node. It may have moved or the route may have expired.
+    </p>
+
+    <div class="cli-install-box" style="text-align: left; margin-bottom: 2.5rem;">
+      <div class="cli-label"><span>Routing Telemetry</span></div>
+      <code class="cli-cmd">bitchat --trace-route 404.html: TTL=0 &bull; Packet dropped &bull; No route to host</code>
+    </div>
+
+    <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+      <a href="index.html" class="btn-primary">
+        <span>Return to Homepage</span>
+      </a>
+      <a href="downloads.html" class="btn-secondary">
+        <span>Download Center</span>
+      </a>
+      <a href="docs.html" class="btn-secondary">
+        <span>Documentation Index</span>
+      </a>
+    </div>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom" style="border-top: none; padding-top: 0;">
+        <div class="footer-status-indicator">
+          <span class="status-dot"></span>
+          <span>BitChat v0.3.1 &bull; Autonomous Mesh Communication</span>
+        </div>
+        <div>
+          &copy; 2026 Java-Mx &amp; BitChat Contributors.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+{
+  "version": "0.3.1",
+  "release_tag": "v0.3.1",
+  "release_date": "2026-11-09",
+  "repository": "https://github.com/Java-Mx/bitchat-python",
+  "releases_url": "https://github.com/Java-Mx/bitchat-python/releases",
+  "release_notes_url": "https://github.com/Java-Mx/bitchat-python/releases/tag/v0.3.1",
+  "publisher": "Java-Mx",
+  "packages": [
+    {
+      "id": "win-exe",
+      "platform": "windows",
+      "os_display": "Windows",
+      "format": "Inno Setup Installer (.exe)",
+      "filename": "BitChat-0.3.1-windows-x64.exe",
+      "arch": "x64 (64-bit)",
+      "min_version": "Windows 10 (1809+) / Windows 11",
+      "size_human": "17.32 MB",
+      "size_bytes": 18165765,
+      "sha256": "2A2D68F5B7B975620AF7197030A6DD068C8A0D096AEEECFC69F5DBB3FA84A75A",
+      "signature": "NotSigned (Self-built / Open Source)",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/BitChat-0.3.1-windows-x64.exe",
+      "primary": true,
+      "install_command": "winget install Java-Mx.BitChat",
+      "description": "Standalone Windows installer with bundled Python runtime, precompiled Rust core (_bitchat_core), Textual UI, and Windows Start Menu / uninstaller integration."
+    },
+    {
+      "id": "linux-deb",
+      "platform": "linux",
+      "os_display": "Linux (Debian / Ubuntu)",
+      "format": "Debian Package (.deb)",
+      "filename": "bitchat_0.3.1_amd64.deb",
+      "arch": "amd64 (x86_64)",
+      "min_version": "Debian 12+ / Ubuntu 22.04+",
+      "size_human": "N/A (GitHub Release)",
+      "sha256": "78102FE305DFC09FFCC2B125C2E3F415800673BEFE5BA8712224B96AFD7C466F",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/bitchat_0.3.1_amd64.deb",
+      "primary": true,
+      "install_command": "sudo apt install ./bitchat_0.3.1_amd64.deb",
+      "description": "Native Debian/Ubuntu package integrating with standard system binaries, BlueZ D-Bus permissions, and system PATH."
+    },
+    {
+      "id": "linux-appimage",
+      "platform": "linux",
+      "os_display": "Linux (Universal AppImage)",
+      "format": "AppImage (.AppImage)",
+      "filename": "BitChat-0.3.1-x86_64.AppImage",
+      "arch": "x86_64",
+      "min_version": "glibc 2.31+ compatible",
+      "size_human": "N/A (GitHub Release)",
+      "sha256": "3DE90657D6383DC11A753CA008B9162BC74C46AD8F5158F4B956F96393773152",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/BitChat-0.3.1-x86_64.AppImage",
+      "primary": false,
+      "install_command": "chmod +x BitChat-0.3.1-x86_64.AppImage && ./BitChat-0.3.1-x86_64.AppImage",
+      "description": "Standalone self-contained executable for Linux desktops with no installation required."
+    },
+    {
+      "id": "linux-flatpak",
+      "platform": "linux",
+      "os_display": "Linux (Flatpak)",
+      "format": "Flatpak Bundle (.flatpak)",
+      "filename": "BitChat-0.3.1-x86_64.flatpak",
+      "arch": "x86_64",
+      "min_version": "Flatpak runtime",
+      "size_human": "N/A (GitHub Release)",
+      "sha256": "DBCFDBB8456A5D68BA87003A328B1D53C00AA0B400B104DB0D353A31C114FA95",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/BitChat-0.3.1-x86_64.flatpak",
+      "primary": false,
+      "install_command": "flatpak install BitChat-0.3.1-x86_64.flatpak",
+      "description": "Sandboxed Flatpak package with explicit permissions for Bluetooth D-Bus and local network sockets."
+    },
+    {
+      "id": "wheel-win",
+      "platform": "python",
+      "os_display": "Python Wheel (Windows x64)",
+      "format": "Binary Wheel (.whl)",
+      "filename": "bitchat_python-0.3.1-cp312-cp312-win_amd64.whl",
+      "arch": "cp312-win_amd64",
+      "min_version": "Python 3.12+",
+      "size_human": "N/A (GitHub Release)",
+      "sha256": "303C0AE1D97D0C5594A222EC74FC142158DF9D45BBF37FCBC00AE3766DC3CA08",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/bitchat_python-0.3.1-cp312-cp312-win_amd64.whl",
+      "primary": false,
+      "install_command": "pip install bitchat_python-0.3.1-cp312-cp312-win_amd64.whl",
+      "description": "Compiled Python wheel with native Rust extension (_bitchat_core.pyd) for Python 3.12 environments."
+    },
+    {
+      "id": "wheel-linux",
+      "platform": "python",
+      "os_display": "Python Wheel (Linux x86_64)",
+      "format": "Binary Wheel (.whl)",
+      "filename": "bitchat_python-0.3.1-cp312-cp312-linux_x86_64.whl",
+      "arch": "cp312-linux_x86_64",
+      "min_version": "Python 3.12+",
+      "size_human": "N/A (GitHub Release)",
+      "sha256": "BB13B8C8469ED15EC0AA1E176D84F3EDB37010903DE3C9A3B76B6F0C08B230E3",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/bitchat_python-0.3.1-cp312-cp312-linux_x86_64.whl",
+      "primary": false,
+      "install_command": "pip install bitchat_python-0.3.1-cp312-cp312-linux_x86_64.whl",
+      "description": "Compiled Python wheel with native Rust extension (_bitchat_core.so) for Python 3.12 environments."
+    },
+    {
+      "id": "sdist",
+      "platform": "source",
+      "os_display": "Source Tarball",
+      "format": "Source Archive (.tar.gz)",
+      "filename": "bitchat_python-0.3.1.tar.gz",
+      "arch": "Universal Source",
+      "min_version": "Rust 1.80+ & Python 3.12+",
+      "size_human": "N/A (GitHub Release)",
+      "sha256": "8AD4DC5DCDA52E2A027E2EB6D12A13E7FAEF5F350B972F94093EB4A7B80684E9",
+      "download_url": "https://github.com/Java-Mx/bitchat-python/releases/download/v0.3.1/bitchat_python-0.3.1.tar.gz",
+      "primary": false,
+      "install_command": "pip install bitchat_python-0.3.1.tar.gz",
+      "description": "Complete source distribution archive. Requires Maturin, PyO3, Cargo, and Rust compiler to build native core."
+    }
+  ],
+  "platform_support": {
+    "windows": {
+      "status": "Official Package Available",
+      "tier": "Tier 1",
+      "verified": true,
+      "recommended_format": "Inno Setup Installer (.exe)",
+      "notes": "BLE Central & Peripheral via WinRT, LAN sockets, silent CLI flags, and full multi-stage uninstaller."
+    },
+    "linux": {
+      "status": "Official Packages Available",
+      "tier": "Tier 1",
+      "verified": true,
+      "recommended_format": "Debian Package (.deb) or AppImage",
+      "notes": "BLE Central & Peripheral via BlueZ D-Bus, LAN sockets, systemd/desktop integration."
+    },
+    "macos": {
+      "status": "Source Build Supported (No native installer yet)",
+      "tier": "Tier 2",
+      "verified": true,
+      "recommended_format": "Source build via uv / git",
+      "notes": "Runs via Python 3.12+ with LAN support. Native BLE is subject to macOS terminal Bluetooth permission prompts."
+    }
+  }
+}

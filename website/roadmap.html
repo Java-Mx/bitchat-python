@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Development Roadmap — BitChat</title>
+  <meta name="description" content="Development roadmap for BitChat Python: completed milestones, in-progress architecture tasks, and the path to a fully native Rust application." />
+  
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Development Roadmap — BitChat" />
+  <meta property="og:description" content="Verified development status, Phase 1 deliverables, Phase 2 in-progress work, and Phase 3 native Rust milestones." />
+  <meta property="og:url" content="https://java-mx.github.io/bitchat-python/roadmap.html" />
+
+  <link rel="icon" type="image/svg+xml" href="assets/img/brand/Bitchat-Icon-Framed.svg" />
+  <link rel="alternate icon" type="image/x-icon" href="assets/img/brand/bitchat.ico" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+  <!-- Site Header -->
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand-link" aria-label="BitChat Home">
+        <img src="assets/img/brand/bitchat-icon-32.svg" alt="" class="brand-icon" />
+        <span class="brand-title">BitChat</span>
+        <span class="brand-badge">v0.3.1</span>
+      </a>
+
+      <nav aria-label="Main Navigation">
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="downloads.html">Downloads</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="roadmap.html" class="active">Roadmap</a></li>
+          <li><a href="about.html">About</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer" class="btn-github">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <button class="mobile-menu-btn" aria-label="Open navigation menu" aria-expanded="false">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-nav">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="downloads.html">Downloads</a></li>
+        <li><a href="docs.html">Documentation</a></li>
+        <li><a href="security.html">Security &amp; Cryptography</a></li>
+        <li><a href="roadmap.html" class="active">Roadmap</a></li>
+        <li><a href="about.html">About Architecture</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms of Use</a></li>
+        <li>
+          <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer">View on GitHub &rarr;</a>
+        </li>
+      </ul>
+    </div>
+  </header>
+
+  <main class="container" style="padding-top: 3.5rem; padding-bottom: 5rem;">
+    <!-- Header -->
+    <div class="section-header">
+      <span class="section-tag">Engineering Trajectory</span>
+      <h1 class="section-title">Development Roadmap</h1>
+      <p class="section-description">
+        Our multi-phase engineering trajectory: from a hybrid Python/Rust application to an autonomous, standalone native Rust mesh communication tool.
+      </p>
+    </div>
+
+    <!-- Timeline Phases -->
+    <div class="roadmap-timeline">
+      <!-- Phase 1: Completed -->
+      <div class="roadmap-phase-card">
+        <div class="phase-header">
+          <div>
+            <span class="phase-badge phase-completed">PHASE 1: COMPLETED (v0.3.1)</span>
+            <h2 style="font-size: 1.35rem; color: #ffffff; margin-top: 0.4rem;">Rust Core Migration, Performance &amp; Lifecycle Overhaul</h2>
+          </div>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--status-ok);">November 2026</span>
+        </div>
+        <p style="font-size: 0.925rem; color: var(--text-secondary);">
+          Established the foundational Rust/Python hybrid architecture using PyO3 and Maturin. Eliminated UI jitter, event loop blocking, and redundant serialization overhead while implementing an atomic uninstallation system.
+        </p>
+
+        <div class="phase-items-grid">
+          <div class="phase-item">
+            <div class="phase-item-title">&check; Native Rust Extension (_bitchat_core)</div>
+            <div class="phase-item-desc">Maturin &amp; PyO3 workspace crate providing wire-speed CRC32, framing, and routing.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&check; NativeStreamFramer &amp; Packet Router</div>
+            <div class="phase-item-desc">8-byte binary framing (BC\x01\x00) with memory-bounded replay deduplication.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&check; Dual Transport (BLE + LAN)</div>
+            <div class="phase-item-desc">Linux BlueZ D-Bus and Windows WinRT peripheral/central plus LAN UDP/TCP sockets.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&check; Complete Uninstaller System</div>
+            <div class="phase-item-desc">CLI uninstallation via <code>bitchat --uninstall</code> with optional <code>--remove-user-data</code>.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&check; Inno Setup &amp; WinGet Distribution</div>
+            <div class="phase-item-desc">Windows standalone installer and automated package manager submission manifest.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&check; Comprehensive Documentation Overhaul</div>
+            <div class="phase-item-desc">Audited legal, security, architecture, and protocol documentation with unit test suite.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 2: In Progress -->
+      <div class="roadmap-phase-card active-phase">
+        <div class="phase-header">
+          <div>
+            <span class="phase-badge phase-progress">PHASE 2: IN PROGRESS (v0.4.x)</span>
+            <h2 style="font-size: 1.35rem; color: #ffffff; margin-top: 0.4rem;">Intermediate Migration: ~60% Rust Core Ownership</h2>
+          </div>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent);">Q1 2027</span>
+        </div>
+        <p style="font-size: 0.925rem; color: var(--text-secondary);">
+          Transitioning core networking, socket state machines, and session lifecycle management directly into asynchronous Rust (Tokio), minimizing crossing overhead between Python and Rust.
+        </p>
+
+        <div class="phase-items-grid">
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; Tokio-Powered Async Network Engine</div>
+            <div class="phase-item-desc">Move UDP discovery and TCP peer streams into native Tokio runtime threads.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; Zero-Copy PyO3 Buffer Sharing</div>
+            <div class="phase-item-desc">Direct buffer views passing payloads between Rust core and Python UI without allocation.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; Adaptive MTU &amp; BLE Reconnect Logic</div>
+            <div class="phase-item-desc">Automatic MTU negotiation and exponential backoff retry state machine in Rust.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; Flathub &amp; Debian PPA Distribution</div>
+            <div class="phase-item-desc">Official Linux package repository presence for automated system package updates.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 3: Planned -->
+      <div class="roadmap-phase-card">
+        <div class="phase-header">
+          <div>
+            <span class="phase-badge phase-planned">PHASE 3: PLANNED (v1.0.0)</span>
+            <h2 style="font-size: 1.35rem; color: #ffffff; margin-top: 0.4rem;">Fully Native Rust Application</h2>
+          </div>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">Future Objective</span>
+        </div>
+        <p style="font-size: 0.925rem; color: var(--text-secondary);">
+          The ultimate architectural goal: complete retirement of the Python runtime, PyO3, and Maturin. BitChat will compile as a single, ultra-lightweight native Rust binary.
+        </p>
+
+        <div class="phase-items-grid">
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; 100% Native Rust TUI (Ratatui)</div>
+            <div class="phase-item-desc">Replace Textual with a memory-safe, ultra-fast terminal UI engine written in pure Rust.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; Elimination of Python Runtime</div>
+            <div class="phase-item-desc">Single standalone static binary with instantaneous sub-10ms startup and minimal RAM footprint.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; macOS Native CoreBluetooth Integration</div>
+            <div class="phase-item-desc">Direct Rust bindings to Apple's CoreBluetooth frameworks without third-party CLI shims.</div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-item-title">&bull; Independent Third-Party Security Audit</div>
+            <div class="phase-item-desc">Formal cryptographic review of the completed native Rust implementation by an accredited firm.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand-col">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <img src="assets/img/brand/bitchat-icon-32.svg" alt="" width="22" height="22" />
+            <span style="font-weight: 700; color: #ffffff;">BitChat Python</span>
+          </div>
+          <p>
+            An independent, open-source encrypted peer-to-peer mesh chat application. Published under the MIT License.
+          </p>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Downloads</div>
+          <ul class="footer-links">
+            <li><a href="downloads.html#windows">Windows Installer (.exe)</a></li>
+            <li><a href="downloads.html#linux">Linux Packages (.deb, AppImage)</a></li>
+            <li><a href="downloads.html#wheels">Python Wheels</a></li>
+            <li><a href="downloads.html#source">Source Tarball</a></li>
+            <li><a href="https://github.com/Java-Mx/bitchat-python/releases" target="_blank" rel="noopener noreferrer">All GitHub Releases</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Documentation</div>
+          <ul class="footer-links">
+            <li><a href="docs.html#quickstart">Getting Started</a></li>
+            <li><a href="docs.html#architecture">System Architecture</a></li>
+            <li><a href="docs.html#commands">Command Reference</a></li>
+            <li><a href="docs.html#uninstallation">Uninstallation Guide</a></li>
+            <li><a href="roadmap.html">Development Roadmap</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Security &amp; Legal</div>
+          <ul class="footer-links">
+            <li><a href="security.html">Security Policy</a></li>
+            <li><a href="security.html#cryptography">Cryptographic Invariants</a></li>
+            <li><a href="privacy.html">Privacy Policy (Draft)</a></li>
+            <li><a href="terms.html">Terms of Use (Draft)</a></li>
+            <li><a href="https://github.com/Java-Mx/bitchat-python/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="footer-status-indicator">
+          <span class="status-dot"></span>
+          <span>Roadmap v0.3.1 &bull; Open-Source Engineering Milestone Tracking</span>
+        </div>
+        <div>
+          &copy; 2026 Java-Mx &amp; BitChat Contributors.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <button class="back-to-top" aria-label="Back to top">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script src="assets/js/main.js"></script>
+</body>
+</html>

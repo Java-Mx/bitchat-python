@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BitChat — Encrypted Peer-to-Peer Mesh Chat for Terminals</title>
+  <meta name="description" content="Decentralized peer-to-peer mesh chat application operating over Bluetooth Low Energy and LAN. Mutual Noise XX encryption, zero central servers, zero telemetry, and native Rust core." />
+  
+  <!-- Open Graph / Meta -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="BitChat — Encrypted Peer-to-Peer Mesh Chat for Terminals" />
+  <meta property="og:description" content="Decentralized mesh chat over Bluetooth Low Energy and LAN. Noise XX encryption, zero servers, zero telemetry, Rust-accelerated core." />
+  <meta property="og:url" content="https://java-mx.github.io/bitchat-python/" />
+  <meta property="og:image" content="assets/img/screenshots/chat-interface.png" />
+
+  <link rel="icon" type="image/svg+xml" href="assets/img/brand/Bitchat-Icon-Framed.svg" />
+  <link rel="alternate icon" type="image/x-icon" href="assets/img/brand/bitchat.ico" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+  <!-- Site Header -->
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a href="index.html" class="brand-link" aria-label="BitChat Home">
+        <img src="assets/img/brand/bitchat-icon-32.svg" alt="" class="brand-icon" />
+        <span class="brand-title">BitChat</span>
+        <span class="brand-badge">v0.3.1</span>
+      </a>
+
+      <nav aria-label="Main Navigation">
+        <ul class="nav-links">
+          <li><a href="index.html" class="active">Home</a></li>
+          <li><a href="downloads.html">Downloads</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="roadmap.html">Roadmap</a></li>
+          <li><a href="about.html">About</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer" class="btn-github">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <button class="mobile-menu-btn" aria-label="Open navigation menu" aria-expanded="false">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-nav" id="mobile-nav">
+      <ul>
+        <li><a href="index.html" class="active">Home</a></li>
+        <li><a href="downloads.html">Downloads</a></li>
+        <li><a href="docs.html">Documentation</a></li>
+        <li><a href="security.html">Security &amp; Cryptography</a></li>
+        <li><a href="roadmap.html">Roadmap</a></li>
+        <li><a href="about.html">About Architecture</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms of Use</a></li>
+        <li>
+          <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer">View on GitHub &rarr;</a>
+        </li>
+      </ul>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main>
+    <section class="hero-section">
+      <div class="container hero-grid">
+        <div class="hero-content">
+          <div class="hero-meta">
+            <span class="version-pill">Release v0.3.1</span>
+            <span class="arch-pill">Rust _bitchat_core</span>
+            <span class="version-pill">MIT License</span>
+          </div>
+
+          <h1 class="hero-headline">
+            Encrypted mesh chat for <span class="highlight">terminal environments</span>.
+          </h1>
+
+          <p class="hero-subhead">
+            BitChat Python connects peer nodes directly over Bluetooth Low Energy and Local Area Networks. Operates with mutual Noise XX encryption, zero central servers, zero accounts, and zero telemetry.
+          </p>
+
+          <div class="hero-actions">
+            <a href="downloads.html" class="btn-primary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download BitChat</span>
+            </a>
+
+            <a href="https://github.com/Java-Mx/bitchat-python" target="_blank" rel="noopener noreferrer" class="btn-secondary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+              <span>View Repository</span>
+            </a>
+          </div>
+
+          <div class="cli-install-box">
+            <div class="cli-label">
+              <span>Quick Install on Windows (WinGet)</span>
+              <button class="btn-copy" data-copy="winget install Java-Mx.BitChat" aria-label="Copy WinGet command">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <code class="cli-cmd">winget install Java-Mx.BitChat</code>
+          </div>
+        </div>
+
+        <!-- Terminal Screenshot Showcase -->
+        <div class="hero-terminal-preview">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+            </div>
+            <div>
+              <button class="terminal-tab-btn active" data-img="assets/img/screenshots/chat-interface.png" data-caption="Verified BitChat ChatView &amp; Broadcast Dispatch in Terminal UI">Chat</button>
+              <button class="terminal-tab-btn" data-img="assets/img/screenshots/transport-status.png" data-caption="Diagnostic System &amp; Transport Capability Evaluation (/configure)">Diagnostics</button>
+              <button class="terminal-tab-btn" data-img="assets/img/screenshots/main-interface.png" data-caption="Main TUI Layout with Reactive Peer Sidebar &amp; Telemetry">Interface</button>
+            </div>
+          </div>
+          <div class="terminal-screenshot-container">
+            <img src="assets/img/screenshots/chat-interface.png" alt="BitChat Chat View in Terminal" class="terminal-screenshot" />
+          </div>
+          <div class="terminal-caption">
+            <span class="screenshot-caption-text">Verified BitChat ChatView &amp; Broadcast Dispatch in Terminal UI</span>
+            <span>Ubuntu Linux / Windows WinRT</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Invariants Strip -->
+    <section class="trust-strip">
+      <div class="container trust-grid">
+        <div class="trust-item">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="trust-icon">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+          </svg>
+          <div>
+            <div class="trust-title">Zero Central Servers</div>
+            <div class="trust-desc">Direct peer-to-peer radio and local subnet links. No cloud intermediary.</div>
+          </div>
+        </div>
+
+        <div class="trust-item">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="trust-icon">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <div>
+            <div class="trust-title">Noise XX Handshake</div>
+            <div class="trust-desc">Mutual authentication and forward-secret session keys in volatile RAM.</div>
+          </div>
+        </div>
+
+        <div class="trust-item">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="trust-icon">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <div>
+            <div class="trust-title">Rust Native Acceleration</div>
+            <div class="trust-desc">High-throughput framing, CRC32, routing, and deduplication via PyO3.</div>
+          </div>
+        </div>
+
+        <div class="trust-item">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="trust-icon">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <div>
+            <div class="trust-title">Zero Telemetry</div>
+            <div class="trust-desc">Audited local-only storage. No analytics, tracking, or marketing pings.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Verified Capabilities Section -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Core Capabilities</span>
+          <h2 class="section-title">Engineered for autonomous local communication</h2>
+          <p class="section-description">
+            Every feature listed here is grounded in the verified codebase of release v0.3.1. We clearly distinguish implemented capabilities from roadmap goals.
+          </p>
+        </div>
+
+        <div class="features-grid">
+          <!-- Feature 1 -->
+          <div class="feature-box">
+            <div class="feature-top">
+              <div class="feature-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"></path>
+                </svg>
+              </div>
+              <span class="feature-badge badge-verified">VERIFIED v0.3.1</span>
+            </div>
+            <h3 class="feature-title">Bluetooth Low Energy (BLE)</h3>
+            <p class="feature-desc">
+              Full peripheral advertising and central scanning. Connects nodes within radio range without requiring existing network infrastructure or internet connectivity.
+            </p>
+            <div class="feature-meta">
+              Linux BlueZ D-Bus &bull; Windows WinRT API
+            </div>
+          </div>
+
+          <!-- Feature 2 -->
+          <div class="feature-box">
+            <div class="feature-top">
+              <div class="feature-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                  <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                  <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                  <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                </svg>
+              </div>
+              <span class="feature-badge badge-verified">VERIFIED v0.3.1</span>
+            </div>
+            <h3 class="feature-title">Local Area Network (LAN)</h3>
+            <p class="feature-desc">
+              Automatic subnet peer discovery via UDP broadcast sockets and high-throughput length-prefixed TCP streaming channels across local Wi-Fi or Ethernet.
+            </p>
+            <div class="feature-meta">
+              UDP Port 41234 &bull; TCP Port 41235
+            </div>
+          </div>
+
+          <!-- Feature 3 -->
+          <div class="feature-box">
+            <div class="feature-top">
+              <div class="feature-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+              </div>
+              <span class="feature-badge badge-verified">VERIFIED v0.3.1</span>
+            </div>
+            <h3 class="feature-title">Noise XX Cryptography</h3>
+            <p class="feature-desc">
+              Mutual peer authentication with ephemeral X25519 key exchange, ChaCha20-Poly1305 authenticated encryption, and BLAKE2s hashing. Session keys exist only in RAM.
+            </p>
+            <div class="feature-meta">
+              Forward Secrecy &bull; Replay Protected
+            </div>
+          </div>
+
+          <!-- Feature 4 -->
+          <div class="feature-box">
+            <div class="feature-top">
+              <div class="feature-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polyline points="2 17 12 22 22 17"></polyline>
+                  <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+              </div>
+              <span class="feature-badge badge-verified">VERIFIED v0.3.1</span>
+            </div>
+            <h3 class="feature-title">Rust Extension Core</h3>
+            <p class="feature-desc">
+              Compiled native Rust module (<code>_bitchat_core</code>) providing wire-speed packet framing, CRC32 verification, store-and-forward routing, and bounded replay caches.
+            </p>
+            <div class="feature-meta">
+              PyO3 ABI &bull; Maturin Build Pipeline
+            </div>
+          </div>
+
+          <!-- Feature 5 -->
+          <div class="feature-box">
+            <div class="feature-top">
+              <div class="feature-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="4 17 10 11 4 5"></polyline>
+                  <line x1="12" y1="19" x2="20" y2="19"></line>
+                </svg>
+              </div>
+              <span class="feature-badge badge-verified">VERIFIED v0.3.1</span>
+            </div>
+            <h3 class="feature-title">Textual Terminal TUI</h3>
+            <p class="feature-desc">
+              Terminal-native interface featuring reactive peer sidebars, multi-channel tabs, command execution with prefix boundaries, and real-time radio telemetry.
+            </p>
+            <div class="feature-meta">
+              Keyboard Accessible &bull; Low Resource
+            </div>
+          </div>
+
+          <!-- Feature 6 -->
+          <div class="feature-box">
+            <div class="feature-top">
+              <div class="feature-icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+              </div>
+              <span class="feature-badge badge-verified">VERIFIED v0.3.1</span>
+            </div>
+            <h3 class="feature-title">Reliable Lifecycle Management</h3>
+            <p class="feature-desc">
+              Comprehensive multi-stage uninstallation system via <code>bitchat --uninstall</code>, Windows Add/Remove integration, and optional user data scrubbing.
+            </p>
+            <div class="feature-meta">
+              Atomic Inno Uninstaller &bull; Zero Lingering Traces
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture & How It Works -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Architecture</span>
+          <h2 class="section-title">How BitChat operates without central infrastructure</h2>
+          <p class="section-description">
+            BitChat integrates asynchronous Python networking with native compiled Rust primitives to establish resilient, encrypted local mesh networks.
+          </p>
+        </div>
+
+        <div class="how-it-works-grid">
+          <div class="step-list">
+            <div class="step-card">
+              <div class="step-header">
+                <span class="step-index">STEP 01</span>
+                <span class="step-title">Autonomous Peer Discovery</span>
+              </div>
+              <p class="step-body">
+                Nodes continuously advertise and listen across dual channels: BLE GATT service UUID <code>F47B5E2D...</code> and UDP port <code>41234</code> on the local network. No external directory server or STUN/TURN server is ever queried.
+              </p>
+            </div>
+
+            <div class="step-card">
+              <div class="step-header">
+                <span class="step-index">STEP 02</span>
+                <span class="step-title">Mutual Noise XX Handshake</span>
+              </div>
+              <p class="step-body">
+                When two nodes establish a transport connection, they perform a 3-way mutual authentication handshake. Ephemeral keys generate symmetric session keys that remain strictly in volatile RAM and are destroyed upon disconnect.
+              </p>
+            </div>
+
+            <div class="step-card">
+              <div class="step-header">
+                <span class="step-index">STEP 03</span>
+                <span class="step-title">Framing &amp; CRC32 Verification</span>
+              </div>
+              <p class="step-body">
+                All packets pass through the Rust <code>NativeStreamFramer</code> with magic byte prefix <code>BC\x01\x00</code>, strict length boundaries, and CRC32 payload verification, eliminating malformed frames before Python processing.
+              </p>
+            </div>
+
+            <div class="step-card">
+              <div class="step-header">
+                <span class="step-index">STEP 04</span>
+                <span class="step-title">Mesh Routing &amp; Replay Mitigation</span>
+              </div>
+              <p class="step-body">
+                Multi-hop packets are routed through <code>NativePacketRouter</code> with configurable TTL decrements. A memory-bounded LRU deduplication cache discards replayed packets and prevents routing loops.
+              </p>
+            </div>
+          </div>
+
+          <div class="diagram-wrapper">
+            <img src="assets/img/diagrams/architecture.svg" alt="BitChat Hybrid Layered Architecture" style="width: 100%; height: auto; display: block;" />
+            <div class="diagram-caption">Hybrid Python/Rust Architecture &amp; Physical Transport Separation</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Platform Availability Table Summary -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Platform Matrix</span>
+          <h2 class="section-title">Verified release packages &amp; support tiers</h2>
+          <p class="section-description">
+            We provide official release binaries for verified platforms. We do not advertise packages that do not exist.
+          </p>
+        </div>
+
+        <div class="package-table-wrapper">
+          <table class="package-table">
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th>Package Format</th>
+                <th>Architecture</th>
+                <th>Release Version</th>
+                <th>Distribution Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <span class="pkg-title">Windows 10 / 11</span>
+                  <span class="pkg-format">Native Desktop Installer</span>
+                </td>
+                <td>Inno Setup (<code>.exe</code>)</td>
+                <td>x64</td>
+                <td>0.3.1</td>
+                <td><span class="feature-badge badge-verified">Official Release Asset</span></td>
+                <td><a href="downloads.html#windows" class="btn-table-dl">Download &rarr;</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="pkg-title">Linux (Debian / Ubuntu)</span>
+                  <span class="pkg-format">System Package</span>
+                </td>
+                <td>Debian (<code>.deb</code>)</td>
+                <td>amd64 (x86_64)</td>
+                <td>0.3.1</td>
+                <td><span class="feature-badge badge-verified">Official Release Asset</span></td>
+                <td><a href="downloads.html#linux" class="btn-table-dl">Download &rarr;</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="pkg-title">Linux Universal</span>
+                  <span class="pkg-format">Self-Contained Executable</span>
+                </td>
+                <td>AppImage (<code>.AppImage</code>)</td>
+                <td>x86_64</td>
+                <td>0.3.1</td>
+                <td><span class="feature-badge badge-verified">Official Release Asset</span></td>
+                <td><a href="downloads.html#linux" class="btn-table-dl">Download &rarr;</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="pkg-title">Linux Sandboxed</span>
+                  <span class="pkg-format">Flatpak Bundle</span>
+                </td>
+                <td>Flatpak (<code>.flatpak</code>)</td>
+                <td>x86_64</td>
+                <td>0.3.1</td>
+                <td><span class="feature-badge badge-verified">Official Release Asset</span></td>
+                <td><a href="downloads.html#linux" class="btn-table-dl">Download &rarr;</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="pkg-title">macOS</span>
+                  <span class="pkg-format">Source Distribution</span>
+                </td>
+                <td>Source / <code>uv</code> tool</td>
+                <td>Universal</td>
+                <td>0.3.1</td>
+                <td><span class="feature-badge badge-planned">Source Build Supported</span></td>
+                <td><a href="docs.html#macos" class="btn-table-dl">View Guide &rarr;</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom CTA -->
+    <section class="section" style="border-bottom: none; background: radial-gradient(circle at 50% 100%, rgba(0, 210, 255, 0.05) 0%, transparent 70%);">
+      <div class="container" style="text-align: center; max-width: 640px; margin: 0 auto;">
+        <h2 class="section-title" style="font-size: 2rem; margin-bottom: 1rem;">Ready to communicate without intermediaries?</h2>
+        <p style="margin-bottom: 2rem; font-size: 1.05rem;">
+          Download BitChat v0.3.1 or inspect the open-source code on GitHub.
+        </p>
+        <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+          <a href="downloads.html" class="btn-primary" style="padding: 0.85rem 1.75rem;">
+            <span>Get BitChat 0.3.1</span>
+          </a>
+          <a href="docs.html" class="btn-secondary" style="padding: 0.85rem 1.5rem;">
+            <span>Read Documentation</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand-col">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <img src="assets/img/brand/bitchat-icon-32.svg" alt="" width="22" height="22" />
+            <span style="font-weight: 700; color: #ffffff;">BitChat Python</span>
+          </div>
+          <p>
+            An independent, open-source encrypted peer-to-peer mesh chat application. Published under the MIT License.
+          </p>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Downloads</div>
+          <ul class="footer-links">
+            <li><a href="downloads.html#windows">Windows Installer (.exe)</a></li>
+            <li><a href="downloads.html#linux">Linux Packages (.deb, AppImage)</a></li>
+            <li><a href="downloads.html#wheels">Python Wheels</a></li>
+            <li><a href="downloads.html#source">Source Tarball</a></li>
+            <li><a href="https://github.com/Java-Mx/bitchat-python/releases" target="_blank" rel="noopener noreferrer">All GitHub Releases</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Documentation</div>
+          <ul class="footer-links">
+            <li><a href="docs.html#quickstart">Getting Started</a></li>
+            <li><a href="docs.html#architecture">System Architecture</a></li>
+            <li><a href="docs.html#commands">Command Reference</a></li>
+            <li><a href="docs.html#uninstallation">Uninstallation Guide</a></li>
+            <li><a href="roadmap.html">Development Roadmap</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-col-title">Security &amp; Legal</div>
+          <ul class="footer-links">
+            <li><a href="security.html">Security Policy</a></li>
+            <li><a href="security.html#cryptography">Cryptographic Invariants</a></li>
+            <li><a href="privacy.html">Privacy Policy (Draft)</a></li>
+            <li><a href="terms.html">Terms of Use (Draft)</a></li>
+            <li><a href="https://github.com/Java-Mx/bitchat-python/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="footer-status-indicator">
+          <span class="status-dot"></span>
+          <span>BitChat v0.3.1 &bull; Zero Central Servers &bull; Zero Telemetry</span>
+        </div>
+        <div>
+          &copy; 2026 Java-Mx &amp; BitChat Contributors. Open Source Software under MIT License.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <button class="back-to-top" aria-label="Back to top">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+
+  <script src="assets/js/main.js"></script>
+</body>
+</html>
