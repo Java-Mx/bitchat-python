@@ -386,7 +386,7 @@ def generate_download_experience(
         <li><strong>Transports:</strong> Bluetooth 4.0+ BLE adapter with Windows WinRT support, and/or Wi-Fi / Ethernet Local Area Network (LAN).</li>
         <li><strong>Disk Space:</strong> ~80 MB free disk space.</li>
         <li><strong>Privileges:</strong> Standard user account (installs to <code>%LOCALAPPDATA%\\Programs\\BitChat</code> by default; no Administrator rights required).</li>
-        <li><strong>Runtime:</strong> Self-contained (Python, Textual, Bleak, WinRT, and Cryptography are bundled).</li>
+        <li><strong>Runtime:</strong> Self-contained (Python 3, Rust <code>bitchat._bitchat_core</code> native extension, Textual, Bleak, WinRT, and Cryptography are bundled).</li>
       </ul>
     </section>
 
@@ -407,7 +407,8 @@ winget install Java-Mx.BitChat</pre>
       <pre>bitchat
 bitchat --version
 bitchat --help
-bitchat --configure</pre>
+bitchat --configure
+bitchat --uninstall --dry-run</pre>
     </section>
 
     <section>
@@ -422,7 +423,7 @@ bitchat --configure</pre>
     <section>
       <h2>Changelog &amp; Troubleshooting</h2>
       <ul>
-        <li><strong>v{version} Highlights:</strong> Self-contained Windows x64 installer 2.0 with official BitChat branding, Terms of Use &amp; Privacy Policy wizard screens, user-scope default installation, safe PATH management, optional per-user Windows sign-in startup, and identity-preserving upgrades/uninstallation. Full history in <a href="{changelog_url}">CHANGELOG.md</a>.</li>
+        <li><strong>v{version} Highlights:</strong> Hybrid Python + Rust (<code>bitchat._bitchat_core</code>) core architecture, self-contained Windows x64 installer, Terms of Use &amp; Privacy Policy wizard screens, user-scope default installation, safe PATH management, optional per-user Windows sign-in startup, and built-in cross-platform uninstaller (<code>bitchat --uninstall</code>). Full history in <a href="{changelog_url}">CHANGELOG.md</a>.</li>
         <li><strong><code>bitchat</code> not recognized after install:</strong> Close and reopen your PowerShell or Command Prompt window so the updated user <code>PATH</code> takes effect.</li>
         <li><strong>Manage Windows Startup at any time:</strong> Run <code>bitchat --startup status</code>, <code>bitchat --startup enable</code>, or <code>bitchat --startup disable</code>, or re-run the installer.</li>
         <li><strong>BLE GATT Status 3 on Windows:</strong> Some Windows Bluetooth drivers restrict GATT peripheral hosting; BitChat keeps BLE Central scanning active and offers one-click fallback to LAN transport.</li>
@@ -498,7 +499,23 @@ Before downloading or installing BitChat, please review:
 - **Hardware / Network:** Bluetooth 4.0+ Low Energy (BLE) adapter with Windows WinRT support, and/or Wi-Fi or Ethernet Local Area Network (LAN).
 - **Disk Space:** At least 80 MB of free disk space.
 - **Permissions:** Standard user account (installs to `%LOCALAPPDATA%\\Programs\\BitChat` by default; no Administrator privileges required).
-- **Dependencies:** None (Python 3 runtime, Textual TUI, Bleak WinRT stack, and Cryptography are fully bundled).
+- **Dependencies:** None (Python 3 runtime, Rust `bitchat._bitchat_core` native extension, Textual TUI, Bleak WinRT stack, and Cryptography are fully bundled).
+
+---
+
+## All Official `v{version}` Release Assets & SHA-256 Checksums
+
+All 13 release artifacts are available on the [Official GitHub Release (`v{version}`)](https://github.com/Java-Mx/bitchat-python/releases/tag/v{version}):
+
+| Platform / Format | Asset Filename | SHA-256 Checksum |
+|---|---|---|
+| **Windows x64 Installer** | `{installer_filename}` | `{installer_sha256}` |
+| **Linux Debian/Ubuntu (`amd64`)** | `bitchat_{version}_amd64.deb` | `78102FE305DFC09FFCC2B125C2E3F415800673BEFE5BA8712224B96AFD7C466F` |
+| **Linux AppImage (`x86_64`)** | `BitChat-{version}-x86_64.AppImage` | `3DE90657D6383DC11A753CA008B9162BC74C46AD8F5158F4B956F96393773152` |
+| **Linux Flatpak (`x86_64`)** | `BitChat-{version}-x86_64.flatpak` | `DBCFDBB8456A5D68BA87003A328B1D53C00AA0B400B104DB0D353A31C114FA95` |
+| **Windows Wheel (`cp312`)** | `bitchat_python-{version}-cp312-cp312-win_amd64.whl` | `303C0AE1D97D0C5594A222EC74FC142158DF9D45BBF37FCBC00AE3766DC3CA08` |
+| **Linux Wheel (`cp312`)** | `bitchat_python-{version}-cp312-cp312-linux_x86_64.whl` | `BB13B8C8469ED15EC0AA1E176D84F3EDB37010903DE3C9A3B76B6F0C08B230E3` |
+| **Source Archive (`sdist`)** | `bitchat_python-{version}.tar.gz` | `8AD4DC5DCDA52E2A027E2EB6D12A13E7FAEF5F350B972F94093EB4A7B80684E9` |
 
 ---
 
@@ -546,10 +563,16 @@ bitchat --configure
 bitchat --startup status
 bitchat --startup enable
 bitchat --startup disable
+
+# Preview or run uninstallation (see docs/UNINSTALLATION.md)
+bitchat --uninstall --dry-run
+bitchat --uninstall
+bitchat --uninstall --remove-user-data --yes
 ```
 
 ### Troubleshooting
 - **`bitchat` command not recognized:** Reopen your PowerShell or Command Prompt window after installation so the updated user `PATH` environment variable is loaded.
+- **Uninstalling completely:** See [`docs/UNINSTALLATION.md`](UNINSTALLATION.md) for normal vs. complete removal (`--remove-user-data`).
 - **Windows Defender SmartScreen:** See [`docs/platform/WINDOWS.md`](platform/WINDOWS.md) for the distinction between Authenticode signature validity, publisher identity, and SmartScreen download reputation. Never disable Windows Defender or SmartScreen; always verify the SHA-256 checksum above.
 """
     md_path.write_text(md_content, encoding="utf-8")

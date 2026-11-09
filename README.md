@@ -173,7 +173,7 @@ bitchat
 
 ## Linux
 
-BitChat provides native, sandboxed, and portable Linux distributables that bundle all runtime dependencies (CPython runtime, Textual TUI, Bleak BLE stack, and Cryptography). Manual Python or pip installation is not required.
+BitChat provides native, sandboxed, and portable Linux distributables that bundle all runtime dependencies (CPython runtime, Rust `bitchat._bitchat_core` native extension, Textual TUI, Bleak BLE stack, and Cryptography). Manual Python, Rust, or pip installation is not required.
 
 ### Recommended
 
@@ -186,7 +186,7 @@ BitChat provides native, sandboxed, and portable Linux distributables that bundl
 
 Flatpak delivers a secure, containerized sandbox adhering strictly to the principle of least privilege:
 - BlueZ system D-Bus access (`--system-talk-name=org.bluez`) for BLE mesh communication.
-- Network access (`--share=network`) for LAN discovery (UDP port 24024) and TCP messaging (port 24025).
+- Network access (`--share=network`) for LAN discovery (UDP port `41234`, plus diagnostic probe port `24024`) and TCP messaging (port `41235`, plus diagnostic probe port `24025`).
 - No unconfined host filesystem access (`--filesystem=host` is not requested).
 
 To build and run the Flatpak locally:
@@ -333,17 +333,22 @@ BitChat communicates with Bluetooth adapters via BlueZ over D-Bus:
 ### Linux LAN Requirements & Firewall
 
 LAN mesh transport requires local subnet communication:
-- **UDP Discovery:** Port `24024` (peer discovery announcements)
-- **TCP Transport:** Port `24025` (Noise XX direct messaging)
+- **UDP Discovery (Runtime Default):** Port `41234` (peer discovery announcements; configurable via `lan_discovery_port`)
+- **TCP Transport (Runtime Default):** Port `41235` (Noise XX direct messaging; configurable via `lan_tcp_port`)
+- **Diagnostic Probe Ports (`bitchat --configure`):** UDP `24024` and TCP `24025`
 
 If using `ufw`:
 ```bash
-sudo ufw allow 24024/udp comment 'BitChat LAN discovery'
-sudo ufw allow 24025/tcp comment 'BitChat LAN transport'
+sudo ufw allow 41234/udp comment 'BitChat LAN discovery'
+sudo ufw allow 41235/tcp comment 'BitChat LAN transport'
+sudo ufw allow 24024/udp comment 'BitChat diagnostic probe'
+sudo ufw allow 24025/tcp comment 'BitChat diagnostic probe'
 ```
 
 If using `firewalld`:
 ```bash
+sudo firewall-cmd --add-port=41234/udp --permanent
+sudo firewall-cmd --add-port=41235/tcp --permanent
 sudo firewall-cmd --add-port=24024/udp --permanent
 sudo firewall-cmd --add-port=24025/tcp --permanent
 sudo firewall-cmd --reload
@@ -435,10 +440,10 @@ Verify that BitChat is discoverable on your PATH and outputs the version:
 
 ```bash
 bitchat --version
-# Expected: bitchat 0.1.0
+# Expected: bitchat 0.3.1
 
 bitchat --help
-# Displays command-line options (--cli, --tui)
+# Displays command-line options (--cli, --tui, --configure, --startup, --uninstall)
 ```
 
 To test running in headless/scripted CLI mode:
@@ -460,7 +465,7 @@ bitchat --cli
   - Fallback 1: Download `BitChat-<version>-windows-x64.exe` from [GitHub Releases](https://github.com/Java-Mx/bitchat-python/releases) and run setup.
   - Fallback 2: Install directly from the local repository manifest:
     ```powershell
-    winget install --manifest manifests/j/Java-Mx/BitChat/0.1.0/
+    winget install --manifest manifests/j/Java-Mx/BitChat/0.3.1/
     ```
 
 ### 3. Installation failed
@@ -506,7 +511,7 @@ bitchat --cli
 | Command | Usage | Description |
 |---|---|---|
 | `/name` | `/name <nick>` | Set nickname and announce to peers |
-| `/transport` | `/transport bluetooth\|lan` | Switch transport and generate fresh identity |
+| `/transport` | `/transport bluetooth\|lan\|offline` | Switch active transport while preserving persistent device identity |
 | `/scan` | `/scan` | Trigger active peer discovery |
 | `/connect` | `/connect [addr\|nick]` | Connect to a peer, or list discovered peers |
 | `/disconnect` | `/disconnect [addr]` | Disconnect peer(s) |
@@ -557,8 +562,10 @@ bitchat --cli
 | Multi-hop mesh routing (TTL 7) | ✓ |
 | Packet deduplication | ✓ |
 | Store-and-forward queue | ✓ |
-| Persistent identity storage | ✓ |
-| Ephemeral transport identity switching | ✓ |
+| Persistent identity storage (`~/.bitchat/identity.json`) | ✓ |
+| Persistent device identity across transport switches | ✓ |
+| Rust native hot-path extension (`bitchat._bitchat_core`) | ✓ |
+| Built-in cross-platform uninstaller (`bitchat --uninstall`) | ✓ |
 | Terminal UI (Textual) | ✓ |
 | Dynamic keybindings | ✓ |
 | Theme / density / accent customization | ✓ |
@@ -585,10 +592,12 @@ graph TD
 |---|---|
 | Terminal UI | `tui/` — Textual app, widgets, modals, autocomplete |
 | Orchestration | `app/` — `SessionCoordinator`, `Application`, config |
+| Native Rust Core | `rust/bitchat-core/` (`bitchat._bitchat_core`) — PyO3/Maturin packet codec, padding, fragmentation, reassembly, TCP stream framing, deduplication, and rate limiting |
 | Mesh routing | `mesh/` — `MeshRouter`, deduplication, store-and-forward |
 | Cryptography | `crypto/` — Noise XX, Ed25519, X25519, AES-GCM, HKDF, PBKDF2 |
 | Protocol | `protocol/` — packet encoding/decoding, fragmentation, reassembly |
-| Transport | `transport/` + `ble/` + `network/` — BLE and LAN backends |
+| Transport | `transport/` + `ble/` + `network/` — BLE, LAN, and Offline backends |
+| Platform & Lifecycle | `platform/` — OS detection, hardware diagnostics (`--configure`), Windows startup (`--startup`), and cross-platform uninstaller (`--uninstall`) |
 
 ---
 
@@ -596,21 +605,21 @@ graph TD
 
 ### Bluetooth Low Energy
 
-- **Central** — scans for peers advertising the BitChat GATT service UUID
-- **Peripheral / GATT server** — advertises and accepts inbound connections
+- **Central** — scans for peers advertising the BitChat GATT service UUID (`F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C`)
+- **Peripheral / GATT server** — advertises and accepts inbound connections on Characteristic UUID (`A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D`)
 - Automatic MTU fragmentation: packets > 500 B split into ≤ 150 B fragments, paced at 20 ms intervals
 - Platform note: GATT peripheral advertising requires hardware and driver support. On some Windows configurations the radio supports Central scanning but GATT peripheral hosting is not available to third-party applications. BitChat detects this and offers a LAN fallback — Central scanning continues regardless.
 
 ### LAN / Wi-Fi
 
-- **UDP discovery** (port 41234) — zero-config broadcast beacons (`BC_DISCOVER_V1`), 10 pkts/s rate limit, 30 s peer TTL
-- **Framed TCP** (port 41235) — 8-byte length-prefix framing (`BC\x01\x00` magic + 4-byte big-endian length), 64 KB frame limit
+- **UDP discovery** (default port `41234`) — zero-config JSON broadcast beacons (`DiscoveryPacket`), 10 pkts/s rate limit, 30 s peer TTL
+- **Framed TCP** (default port `41235`) — 8-byte length-prefix framing (`BC\x01\x00` magic + 4-byte big-endian length), 64 KB frame limit
 - Supports up to 32 concurrent peer connections
 
 ### Runtime switching
 
-Switch transport at any time: `/transport lan` or `/transport bluetooth` (also via Settings `F3`).
-Switching generates a fresh ephemeral identity and tears down all active sessions — previous sessions are not linkable to the new transport identity.
+Switch transport at any time: `/transport lan`, `/transport bluetooth`, or `/transport offline` (also via the Connection Modal or Settings `F3`).
+Switching tears down active transport connections and ephemeral `NoiseSession` handshakes while **preserving your persistent device identity** (`peer_id` and 64-character SHA-256 fingerprint in `~/.bitchat/identity.json`).
 
 ---
 
@@ -1002,67 +1011,109 @@ Peers are pruned from the discovery table after 30 seconds of no beacons. The re
 ## Project Structure
 
 ```
+rust/bitchat-core/
+└── src/            Rust PyO3 extension (_bitchat_core): protocol, fragmentation, framing, mesh
+
 src/bitchat/
-├── app/        session coordinator, application bootstrap, config
-├── ble/        Bluetooth transport — adapter, scanner, GATT server, connection
-├── network/    LAN transport — UDP discovery, TCP framing, server, adapter
-├── transport/  abstract BaseTransport, BluetoothTransport, type definitions
-├── protocol/   packet encoding/decoding, fragmentation, reassembly, constants
-├── crypto/     Ed25519, X25519, Noise XX, AES-GCM, HKDF, PBKDF2, sessions
-├── mesh/       MeshRouter, PacketDeduplicator, StoreAndForwardQueue
-├── commands/   command registry and parser
-├── storage/    AppConfig, FileConfigStorage, identity persistence
-└── tui/        Textual app, screens (modals), widgets, styles
+├── _native.py      Rust extension loader and tagged exception mapper
+├── app/            session coordinator, application bootstrap, config
+├── ble/            Bluetooth transport — adapter, scanner, GATT server, connection
+├── network/        LAN transport — UDP discovery, TCP framing, server, adapter
+├── transport/      abstract BaseTransport, BluetoothTransport, OfflineTransport
+├── protocol/       packet encoding/decoding, fragmentation, reassembly, constants
+├── crypto/         Ed25519, X25519, Noise XX, AES-GCM, HKDF, PBKDF2, sessions
+├── mesh/           MeshRouter, PacketDeduplicator, StoreAndForwardQueue
+├── platform/       OS detection, hardware capabilities, Windows startup, uninstaller
+├── commands/       command registry and parser
+├── logging/        rotating file logger and SensitiveDataFilter redaction
+├── storage/        AppConfig, FileConfigStorage, identity persistence & locking
+└── tui/            Textual app, screens (modals), widgets, styles
 
 tests/
-├── ble/        BLE mock backends, adapter, scanner, server, transport tests
-├── crypto/     Ed25519, X25519, Noise XX, AES-GCM, HKDF, PBKDF2, sessions
-├── network/    LAN framing, discovery, connection, adapter tests
-├── protocol/   packet, encoder, decoder, fragmentation, reassembly, security
-├── unit/       TUI, session coordinator, mesh, commands, transport switch
-├── integration/  end-to-end BLE and LAN two-node tests
-└── interoperability/  Nim/Rust protocol vector tests
+├── ble/            BLE mock backends, adapter, scanner, server, transport tests
+├── crypto/         Ed25519, X25519, Noise XX, AES-GCM, HKDF, PBKDF2, sessions
+├── network/        LAN framing, discovery, connection, adapter tests
+├── protocol/       packet, encoder, decoder, fragmentation, reassembly, security
+├── mesh/           mesh router, deduplication, and rate-limiter tests
+├── unit/           TUI, session coordinator, native core parity, uninstaller, docs
+├── integration/    end-to-end BLE and LAN two-node tests
+├── interoperability/  protocol vector and equivalence tests
+├── e2e/            tiered end-to-end and boundary verification suites
+└── stress/         adversarial high-concurrency stress tests
 
 docs/
-├── protocol/   packet format, message types, routing, fragmentation, compatibility
-├── security/   cryptography, Noise protocol, threat model
-└── platform/   Windows, Linux, macOS setup guides
+├── INDEX.md        central documentation index
+├── ROADMAP.md      7-stage Python-to-Rust architectural migration roadmap
+├── UNINSTALLATION.md  complete Windows, Linux, and Python uninstallation guide
+├── RELEASE_PROCESS.md release engineering and CI/CD packaging guide
+├── protocol/       packet format, message types, routing, fragmentation, compatibility
+├── security/       cryptography, Noise protocol, threat model, data handling
+└── platform/       Windows, Linux, macOS setup guides
 ```
+
+---
+
+## Uninstallation
+
+BitChat includes a built-in uninstaller that cleans up standalone installs, console-script launchers (`Python3XX\Scripts\bitchat.exe`), shortcuts, and BitChat-owned `PATH` entries:
+
+```bash
+# Preview what will be removed without modifying the system
+bitchat --uninstall --dry-run
+
+# Uninstall application binaries & launchers (preserves ~/.bitchat identity & config)
+bitchat --uninstall
+
+# Complete removal: uninstall application AND delete ~/.bitchat user data & keys
+bitchat --uninstall --remove-user-data --yes
+```
+
+See [`docs/UNINSTALLATION.md`](docs/UNINSTALLATION.md) for full Windows, Linux (`.deb`, `AppImage`, `Flatpak`), and Python (`pip`, `uv`, `pipx`) removal instructions.
 
 ---
 
 ## Development
 
 ```bash
-# Install all dependencies including dev/test tools
+# Install all Python dependencies and build the editable package
 uv sync --all-groups
 
-# Run the test suite
-uv run pytest
+# Build the optimized Rust native extension (bitchat._bitchat_core)
+uv run --no-sync maturin develop --release
 
-# Type checking
-uv run pyright
+# Run Rust formatting, clippy, and unit tests
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+cargo test --workspace --no-default-features
 
-# Linting and format check
-uv run ruff check .
-uv run ruff format --check .
+# Run Python lint, format, type check, and test suite
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
+uv run --no-sync pyright
+uv run --no-sync pytest -q
 ```
 
-**658 tests** covering protocol, crypto, BLE mocks, LAN, mesh routing, TUI lifecycle, and integration scenarios. CI runs on Python 3.12 and 3.13 via GitHub Actions on every push and pull request.
+**1,250+ Python tests, 22 Python/Rust differential equivalence tests, and 4 Rust unit tests** covering protocol, Rust/Python differential equivalence, crypto, BLE mocks, LAN, mesh routing, TUI lifecycle, uninstallation, and documentation consistency.
 
 ---
 
-## Security
+## Documentation, Support & Legal
 
-This project has not undergone a formal third-party security audit. Do not use for high-risk communications.
+- **Documentation Index:** [`docs/INDEX.md`](docs/INDEX.md)
+- **Support & Troubleshooting:** [`SUPPORT.md`](SUPPORT.md)
+- **Rust Migration Roadmap:** [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- **Security Policy & Vulnerability Reporting:** [`SECURITY.md`](SECURITY.md) and [`docs/security/THREAT_MODEL.md`](docs/security/THREAT_MODEL.md)
+- **Privacy Policy & Data Handling:** [`PRIVACY_POLICY.md`](PRIVACY_POLICY.md) *(Draft)* and [`docs/security/DATA_HANDLING.md`](docs/security/DATA_HANDLING.md)
+- **Terms of Use:** [`TERMS_OF_USE.md`](TERMS_OF_USE.md) *(Draft)*
+- **Contributing & Code of Conduct:** [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 
-See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy and [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md) for the threat model.
+> **Security Notice:** This project has not undergone a formal independent third-party security audit. Do not use for life-safety or critical high-threat communications.
 
 ---
 
-## Reference implementation
+## Architecture & Reference Lineage
 
-Protocol reference: [bitchat-tui](https://github.com/vaibhav-mattoo/bitchat-tui) (Rust). This repository targets protocol compatibility but does not use Rust code or the Rust runtime.
+BitChat `v0.3.1` uses a hybrid **Python + Rust (`rust/bitchat-core` / `bitchat._bitchat_core`)** architecture built with PyO3 and Maturin, following a 7-stage engineering roadmap toward ~60% Rust architectural ownership and ultimately a 100% native Rust application (see [`docs/ROADMAP.md`](docs/ROADMAP.md)). Its binary wire framing and Noise XX handshake design originated from the BitChat v1 protocol specification ([`docs/protocol/COMPATIBILITY.md`](docs/protocol/COMPATIBILITY.md)).
 
 ---
 

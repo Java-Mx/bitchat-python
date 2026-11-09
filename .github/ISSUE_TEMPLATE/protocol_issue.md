@@ -6,6 +6,8 @@ labels: ["protocol", "bug"]
 assignees: []
 ---
 
+> **Security Notice:** Do **NOT** report exploitable parser, framing, or cryptographic vulnerabilities in public issues. Use [GitHub Security Advisories](https://github.com/Java-Mx/bitchat-python/security/advisories/new) as described in [`SECURITY.md`](../../SECURITY.md).
+
 ## Protocol Component
 <!-- Specify which protocol layer or component is involved:
 - BLE Advertising / Discovery (GATT service UUIDs, manufacturer data)

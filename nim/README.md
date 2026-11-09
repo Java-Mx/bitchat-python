@@ -1,9 +1,8 @@
-# Nim Performance Prototype & FFI Evaluation
+# Nim Performance Prototype & FFI Evaluation (Archived Historical Reference)
 
-This directory contains the experimental Nim prototype and Foreign Function Interface (FFI) evaluation for the BitChat protocol.
-
-> [!IMPORTANT]
-> **Authoritative Implementation**: The Python implementation under `src/bitchat/` remains authoritative for all protocol, cryptographic, fragmentation, and session behavior. This directory is strictly an isolated technical evaluation and is **not** a runtime or packaging dependency of `bitchat`.
+> [!WARNING]
+> **Archived Pre-`v0.3.1` Prototype — Superseded by Rust (`rust/bitchat-core`):**
+> This directory contains an early `ctypes` C-ABI prototype written in Nim prior to the `v0.3.1` Rust migration. In **BitChat `v0.3.1`**, production native acceleration is implemented in **Rust using PyO3 and Maturin** (`rust/bitchat-core` → `bitchat._bitchat_core`), with pure-Python reference fallbacks in `src/bitchat/`. The files in `nim/` are preserved solely as historical benchmarking notes and are **never** compiled, packaged, or loaded by BitChat at runtime. See [`docs/ROADMAP.md`](../docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the current Rust architecture.
 
 ---
 
@@ -97,7 +96,7 @@ The Foreign Function Interface is designed to prevent cross-allocator bugs, buff
 
 ## 5. Protocol Equivalence & Interoperability Results
 
-The test suite in [`tests/interoperability/test_nim_equivalence.py`](file:///d:/bitchat-python/tests/interoperability/test_nim_equivalence.py) verifies 100% byte-for-byte fidelity:
+The test suite in [`tests/interoperability/test_nim_equivalence.py`](../tests/interoperability/test_nim_equivalence.py) verifies 100% byte-for-byte fidelity:
 - **Encoding Equivalence**: `encode_packet` (Python) and `nim_encode_packet` (Nim) produce bit-identical wire bytes.
 - **Decoding Cross-Compatibility**: Packets encoded in Python decode without error in Nim; packets encoded in Nim decode without error in Python.
 - **Header Packing**: The 13-byte fragment metadata header is identical chunk-for-chunk.

@@ -1,69 +1,128 @@
-========================================================================
 BITCHAT PRIVACY POLICY
-DRAFT — PENDING PUBLISHER AND LEGAL REVIEW BEFORE PUBLIC RELEASE
-========================================================================
+======================
 
-Application: BitChat (Java-Mx.BitChat)
-Publisher:   Java-Mx
-Repository:  https://github.com/Java-Mx/bitchat-python
-Effective:   October 2026
+DRAFT — LEGAL REVIEW REQUIRED:
+This document is a technical privacy disclosure draft prepared for the open-source
+BitChat project (v0.3.1). It describes the actual data-handling behavior of the
+software as implemented in the repository and must be reviewed by the project
+publisher or qualified legal counsel before any commercial, enterprise, or
+regulated deployment.
 
-IMPORTANT NOTICE: This Privacy Policy draft is based on a technical
-audit of the bitchat-python codebase and is pending publisher/legal
-review before formal public release.
+Effective Date: November 9, 2026
+Applicable Release: BitChat v0.3.1
+Repository: https://github.com/Java-Mx/bitchat-python
 
-1. ZERO TELEMETRY, NO ACCOUNTS, NO CENTRAL SERVERS
-BitChat is a local-first, peer-to-peer terminal messaging application:
-- No Personal Data Collection: BitChat does NOT collect your name, email
-  address, phone number, IP address, or personal identity.
-- No Analytics or Telemetry: BitChat contains NO analytics SDKs, crash
-  reporters, usage tracking, or telemetry transmission code. It makes
-  zero outbound connections to publisher or third-party servers.
-- No Accounts or Registration: No account or sign-up is required to
-  download, install, or use BitChat.
-- No Marketing or Tracking Consent: Acknowledging this Privacy Policy
-  during setup is informational only and is NEVER treated as consent to
-  analytics, tracking, or marketing.
-  (Note: internal methods named get_telemetry() in the codebase return
-  strictly local, in-memory hardware/transport status for your own TUI
-  status bar and /status command; nothing ever leaves your device.)
 
-2. DATA STORED LOCALLY ON YOUR DEVICE
-BitChat stores local data in %USERPROFILE%\.bitchat\:
-- identity.json: Your locally generated Ed25519 and X25519 private keys,
-  fingerprint, and peer ID, restricted to your Windows user account via
-  protected Windows file ACLs.
-- config.json: Your local display nickname (default "Anonymous"), UI
-  theme/density/accent, active transport ("bluetooth" or "lan"), mesh
-  hop limit, fragment delay, and keybindings.
-- Installer Metadata: Standard per-user uninstall entries under HKCU and
-  an optional per-user Startup shortcut (%APPDATA%\Microsoft\Windows\
-  Start Menu\Programs\Startup\BitChat.lnk) only if you explicitly enable
-  "Start BitChat automatically when Windows starts".
+1. OVERVIEW & ARCHITECTURE PHILOSOPHY
+-------------------------------------
+BitChat is a local-first, peer-to-peer (P2P) terminal messenger operating over
+Bluetooth Low Energy (BLE) and Local Area Network (LAN) transports.
 
-Upgrades and Uninstallation:
-- Upgrades preserve %USERPROFILE%\.bitchat\ automatically.
-- Uninstallation preserves %USERPROFILE%\.bitchat\ by default so you do
-  not lose your private identity keys, while offering an explicit,
-  separate option if you wish to permanently delete local user data.
+- No Central Servers: BitChat operates without central messaging servers, cloud
+  relays, or developer-operated backend infrastructure.
+- No Accounts or Registration: BitChat does not collect names, email addresses,
+  phone numbers, or account credentials.
+- No Telemetry or Analytics: The application contains no analytics SDKs,
+  crash-reporting beacons, usage trackers, advertising identifiers, or
+  automatic update checks that phone home.
 
-3. DATA SHARED OVER PEER-TO-PEER TRANSPORTS (BLE & LAN)
-When you run BitChat with Bluetooth or LAN transport enabled:
-- BLE Transport: Broadcasts and scans for the BitChat GATT service UUID
-  (6E400001-B5A3-F393-E0A9-E50E24DCCA9E). Nearby BLE peers can observe
-  your node's BLE advertisement, nickname, peer ID, and public keys.
-- LAN Transport: Broadcasts UDP discovery beacons (port 24024 / 41234)
-  and accepts framed TCP connections (port 24025 / 41235) on your local
-  subnet. Peers on the same subnet can observe your local IP address,
-  nickname, peer ID, and public keys.
-- Messages: #public messages are broadcast to reachable mesh nodes.
-  Direct messages (/dm) are end-to-end encrypted with Noise XX
-  (Noise_XX_25519_ChaChaPoly_SHA256) or AES-256-GCM.
 
-4. FUTURE OPTIONAL FEATURES
-If optional diagnostics or network features are ever introduced in a
-future release, they will require separate, informed opt-in consent.
+2. INFORMATION WE DO NOT COLLECT
+--------------------------------
+The BitChat developers and maintainers do NOT collect, receive, store, or process:
+1. Your IP address, Bluetooth MAC address, or Wi-Fi SSID on any remote server.
+2. Your cryptographic keys, peer ID, fingerprint, or chosen nickname.
+3. The contents, metadata, or timing of your messages.
+4. Diagnostic logs, crash dumps, or system hardware reports (unless you
+   voluntarily attach them to a public GitHub issue).
 
-5. COMPLETE PRIVACY POLICY & LINKS
-- Privacy Policy: https://github.com/Java-Mx/bitchat-python/blob/main/PRIVACY_POLICY.md
-- Terms of Use:   https://github.com/Java-Mx/bitchat-python/blob/main/TERMS_OF_USE.md
+
+3. INFORMATION STORED LOCALLY ON YOUR DEVICE
+--------------------------------------------
+By default, BitChat stores local state inside the .bitchat directory in your
+user home folder:
+- Windows: %USERPROFILE%\.bitchat\ (e.g., C:\Users\<username>\.bitchat\)
+- Linux & macOS: ~/.bitchat/ (e.g., /home/<username>/.bitchat/)
+
+3.1 Local Files Created and Used by BitChat:
+- identity.json: Stores your persistent local cryptographic identity (32-byte
+  X25519 private key, 32-byte Ed25519 signing seed, 64-character SHA-256
+  fingerprint, and 16-character hex peer_id). Protected with 0600 permissions
+  on POSIX and a current-user-only DACL on Windows. Keys are stored as hex
+  strings on disk and are NOT encrypted with a user passphrase at rest.
+- identity.json.lock: Cross-process advisory lock file preventing concurrent
+  processes from generating conflicting identities on first launch.
+- identity.json.corrupt.<timestamp>: Automatic backup created only if an
+  existing identity.json is unreadable or corrupted.
+- config.json: Stores non-sensitive user preferences (nickname, debug, density,
+  show_timestamps, accent, transport, security_mode, max_hops,
+  inter_fragment_delay_ms, lan_discovery_port [default 41234], lan_tcp_port
+  [default 41235], keybindings, and TOFU trusted contact fingerprints).
+- bitchat.log (and .1 through .5): Rotating local diagnostic log files (up to
+  10 MB each, max 5 backups) with SensitiveDataFilter redaction for hex keys
+  and secret tokens.
+
+3.2 Ephemeral In-Memory Data (Not Written to Disk):
+- Chat message history displayed in the terminal UI is held in RAM only during
+  the active session and is discarded when BitChat exits.
+- Active Noise XX session cipher states, packet deduplication caches, fragment
+  reassembly buffers, and Store-and-Forward queues exist only in RAM.
+
+
+4. INFORMATION SHARED OVER PEER-TO-PEER NETWORKS
+------------------------------------------------
+When BitChat is not in Offline Mode, your device transmits protocol packets
+directly to nearby devices over the active transport. Anyone within radio range
+(BLE) or connected to the same local network (LAN) can observe these network
+transmissions.
+
+4.1 Bluetooth Low Energy (BLE) Transport:
+- GATT Identifiers: Uses BitChat BLE Service UUID
+  F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C and Characteristic UUID
+  A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D.
+- Nearby Bluetooth scanners can observe BLE advertisements, adapter addresses,
+  signal strength (RSSI), and outer BitChat packet headers.
+
+4.2 Local Area Network (LAN) Transport:
+- UDP Discovery Beacons: Broadcasts JSON UDP discovery packets (default port
+  41234, every 3.0 seconds) containing protocol ("bitchat"), version (1),
+  transport ("lan"), peer_id, nickname, inbound TCP port (default 41235),
+  per-process instance_id, and detected Wi-Fi SSID to the local subnet.
+- TCP Transport: Exchanges framed packets over direct TCP connections (default
+  port 41235). Other hosts on the local network can observe your IPv4 address,
+  ports, and UDP beacons.
+
+4.3 Packet Headers, Broadcasts, and Multi-Hop Mesh Routing:
+- Outer binary packet headers (version, message_type, ttl, timestamp, flags,
+  payload_len, sender_id, and optional recipient_id) are sent unencrypted for
+  routing and deduplication.
+- Direct peer-to-peer messages inside an established Noise XX session
+  (Noise_XX_25519_ChaChaPoly_SHA256) encrypt the payload with ChaCha20-Poly1305,
+  while outer headers remain visible to relays.
+- Broadcast messages addressed to ffffffffffffffff are readable by any
+  connected peer receiving the broadcast.
+- Connected peers may relay packets across multiple hops (default TTL 3, max 7).
+- Switching between BLE and LAN preserves your persistent LocalIdentity
+  (peer_id and fingerprint) unless you reset or delete identity.json.
+
+
+5. DATA RETENTION, UNINSTALLATION, AND COMPLETE REMOVAL
+-------------------------------------------------------
+1. Upgrades: Installing a newer version preserves ~/.bitchat/.
+2. Standard Uninstallation: Running "bitchat --uninstall" removes binaries,
+   launchers, shortcuts, startup entries, and BitChat-owned PATH entries while
+   preserving ~/.bitchat/ by default.
+3. Complete Removal: Run "bitchat --uninstall --remove-user-data --yes" (or
+   select Yes when prompted by the Windows uninstaller to delete user data) to
+   permanently delete ~/.bitchat/ including identity.json, config.json, and
+   local logs.
+
+
+6. THIRD-PARTY SERVICES & CONTACT
+---------------------------------
+BitChat makes no runtime requests to third-party servers. Software download
+hosts (GitHub Releases, PyPI, WinGet, Flathub) process download requests under
+their own privacy policies.
+
+- Repository & Issues: https://github.com/Java-Mx/bitchat-python/issues
+- Security Reports: https://github.com/Java-Mx/bitchat-python/security/advisories/new

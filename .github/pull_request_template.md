@@ -28,11 +28,13 @@
 <!-- Note any updates to README, docs, inline docstrings, or specifications. -->
 
 ## Checklist
-- [ ] Tests pass (`uv run pytest`)
-- [ ] Code is formatted (`uv run ruff format .`)
-- [ ] Linting passes (`uv run ruff check .`)
-- [ ] Type checking passes (`uv run pyright`)
-- [ ] Documentation updated (if applicable)
+- [ ] Python tests pass (`uv run --no-sync pytest`)
+- [ ] Rust tests pass (`cargo test --workspace --no-default-features`)
+- [ ] Rust formatting & clippy pass (`cargo fmt --all -- --check` & `cargo clippy --workspace --all-targets --no-default-features -- -D warnings`)
+- [ ] Python/Rust differential equivalence tests pass (`uv run --no-sync pytest tests/unit/test_native_core.py`)
+- [ ] Python formatting & linting pass (`uv run --no-sync ruff format --check .` & `uv run --no-sync ruff check .`)
+- [ ] Static type checking passes (`uv run --no-sync pyright`)
+- [ ] Documentation updated and documentation checks pass (`uv run --no-sync pytest tests/unit/test_documentation.py`)
 - [ ] Security implications reviewed (if applicable)
 - [ ] Protocol compatibility verified (if applicable)
-- [ ] CHANGELOG.md updated
+- [ ] `CHANGELOG.md` updated (if applicable)

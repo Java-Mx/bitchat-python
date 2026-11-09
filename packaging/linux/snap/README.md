@@ -18,7 +18,7 @@ For BitChat, two architectural constraints were evaluated:
 - Automated connection in the public Snap Store requires a formal interface auto-connection grant request on the Snapcraft forum.
 
 ### 2. Peer-to-Peer LAN Discovery (`network-bind` & `network` plugs)
-- BitChat requires listening on UDP port `24024` for LAN peer discovery broadcasts and listening on TCP port `24025` for incoming peer sessions.
+- BitChat requires listening on UDP port `41234` (and diagnostic probe port `24024`) for LAN peer discovery broadcasts and listening on TCP port `41235` (and diagnostic probe port `24025`) for incoming peer sessions.
 - These operations require the standard `network` and `network-bind` interfaces.
 
 ## Current Support Matrix
@@ -37,7 +37,7 @@ cd packaging/linux/snap
 snapcraft
 
 # Install locally
-sudo snap install bitchat_0.2.1_amd64.snap --dangerous
+sudo snap install bitchat_0.3.1_amd64.snap --dangerous
 
 # Connect required BlueZ interface
 sudo snap connect bitchat:bluez

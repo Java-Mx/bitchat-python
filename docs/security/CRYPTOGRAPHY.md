@@ -22,14 +22,14 @@ The BitChat protocol utilizes modern, high-assurance cryptographic primitives:
 
 Every cryptographic operation in BitChat follows a deterministic transformation pipeline:
 
-### 2.1 Identity Fingerprint Generation
-Generates a human-verifiable 32-character hexadecimal fingerprint for a peer:
+### 2.1 Identity Fingerprint & Peer ID Generation
+Generates a canonical 64-character hexadecimal fingerprint and 8-byte Peer ID for a peer (`src/bitchat/crypto/identity.py`):
 ```text
 X25519 Static Public Key (32 bytes)
   ↓ SHA-256 Hashing
 Digest (32 bytes)
-  ↓ Take First 16 Bytes & Hexadecimal Encoding
-Hex Fingerprint String (32 lowercase hex characters)
+  ├── Full Hex Encoding → 64 lowercase hex characters (Identity Fingerprint)
+  └── First 8 Bytes     → 8-byte Peer ID (16 lowercase hex characters)
 ```
 
 ### 2.2 Ephemeral Message Signing (Ed25519)
@@ -85,15 +85,10 @@ Channel Password String (UTF-8 bytes) + Channel Name String (UTF-8 bytes as Salt
 Channel Symmetric Key (32 bytes, for AES-256-GCM)
 ```
 
-### 2.8 Local Stored State Password Encryption
-Encrypts saved channel passwords inside `~/.bitchat/state.json`:
-```text
-Raw Channel Password String (UTF-8 bytes) + Identity Key Bytes (32 bytes)
-  ↓ Derive Key: SHA-256(b"bitchat-password-encryption" || IdentityKeyBytes)
-AES Key (32 bytes) + Random Nonce (12 bytes)
-  ↓ AES-256-GCM Authenticated Encryption
-JSON Object: { "nonce": [u8; 12], "ciphertext": [u8; N] }
-```
+### 2.8 Local Identity & Configuration Storage (`~/.bitchat/`)
+In `bitchat-python` `v0.3.1`, persistent cryptographic identity keys are stored in `~/.bitchat/identity.json` (`%USERPROFILE%\.bitchat\identity.json` on Windows):
+- `identity.json` stores `x25519_private`, `ed25519_private`, `fingerprint`, and `peer_id` as hexadecimal strings, protected by POSIX `0600` permissions on Linux/macOS and a current-user-only DACL (`SetNamedSecurityInfoW`) on Windows, guarded by an advisory file lock (`identity.json.lock`).
+- `config.json` stores non-sensitive settings and the Trust-On-First-Use (TOFU) `contacts` map (`peer_id` → 64-char `fingerprint`). Plaintext passwords are never stored in `config.json`.
 
 ### 2.9 Noise Handshake Key Exchange (Noise XX Pattern)
 During the Noise XX handshake, ephemeral and static Diffie-Hellman operations are mixed into a chaining key:
@@ -116,15 +111,15 @@ Plaintext Message (with 0x04 prefix) + Send Cipher Key (32 bytes) + 64-bit Nonce
 
 ## 3. Key Formats and Storage
 
-### 3.1 Persistent Identity Key (Ed25519)
-- **Generation:** 32 bytes of secure random entropy (`OsRng`).
-- **Storage:** Persisted in `~/.bitchat/state.json` as a 32-byte JSON byte array under the key `"identity_key"`.
-- **Purpose:** Represents the long-term cryptographic identity of the peer across sessions.
+### 3.1 Persistent Signing Key (Ed25519)
+- **Generation:** 32 bytes of secure random entropy (`os.urandom` via `cryptography`).
+- **Storage:** Persisted in `~/.bitchat/identity.json` as a 64-character hex string under `"ed25519_private"` (`0600` permissions on POSIX; current-user DACL on Windows).
+- **Purpose:** Used for Ed25519 message signing and combined public key exchange.
 
 ### 3.2 Persistent Noise Static Key (X25519)
-- **Generation:** 32 bytes of secure random entropy (`OsRng`).
-- **Storage:** Persisted in `~/.bitchat/state.json` as a 32-byte JSON byte array under the key `"noise_static_key"`.
-- **Purpose:** Represents the peer's static Curve25519 key used for mutual authentication in the Noise XX handshake.
+- **Generation:** 32 bytes of secure random entropy (`os.urandom` via `cryptography`).
+- **Storage:** Persisted in `~/.bitchat/identity.json` as a 64-character hex string under `"x25519_private"`.
+- **Purpose:** Represents the peer's static Curve25519 key used for mutual authentication in the Noise XX handshake and for deriving the 64-char SHA-256 `fingerprint` and 8-byte `peer_id`.
 
 ### 3.3 Ephemeral Keys
 - **Ephemeral X25519 Key Pair:** Generated anew each time a session starts.

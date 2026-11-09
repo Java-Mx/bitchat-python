@@ -19,7 +19,7 @@ BitChat operates primarily over Bluetooth Low Energy (BLE) and ad-hoc wireless m
 ### 2.1 Adversarial / Malformed Wire Inputs
 - **Threat:** An attacker transmits truncated, corrupt, or maliciously crafted binary payloads designed to crash the client, trigger unhandled exceptions, or cause denial of service.
 - **Defenses Implemented (Phase 3 Hardened):**
-  - **Exhaustive Pre-Slice Bounds Checking:** `decode_packet()` computes exact minimum header lengths (13 bytes basic, 21 with recipient, 77 with signature, 85 with both) and checks `len(data)` before attempting any slicing or decoding.
+  - **Exhaustive Pre-Slice Bounds Checking:** `decode_packet()` (and `rust/bitchat-core` `decode_packet_raw`) computes exact minimum header lengths (`14` bytes fixed header, `22` bytes minimum with `sender_id`, `30` with `recipient_id`, `86` with `signature`, `94` with both) and checks `len(data)` before attempting any slicing or decoding.
   - **Strict Integer Validation:** Header fields (`version`, `ttl`, `flags`, `timestamp`, `payload_len`) are validated strictly against their permissible ranges. Python `bool` types are explicitly rejected from integer fields.
   - **Bounded Memory Allocation:** Payload bytes are extracted only up to the declared payload length after validating that sufficient bytes exist. The decoder never allocates unbounded memory based on untrusted length headers.
   - **Defensive Exception Hierarchy:** The decoder never leaks internal Python exceptions (`IndexError`, `KeyError`, `struct.error`, `ValueError`, `TypeError`). All parsing failures are cleanly mapped to `PacketDecodingError` or its subclasses (`InsufficientPacketBytesError`, `InvalidPacketError`, `CorruptPaddingError`).

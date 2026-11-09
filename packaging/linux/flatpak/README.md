@@ -13,13 +13,13 @@ BitChat employs a strictly scoped permission model adhering to the principle of 
 
 | Permission | Technical Requirement | Justification |
 | :--- | :--- | :--- |
-| `--share=network` | LAN Discovery & TCP Messaging | Required for UDP broadcast/multicast peer discovery on port `24024` and direct peer-to-peer TCP messaging connections on port `24025`. |
+| `--share=network` | LAN Discovery & TCP Messaging | Required for UDP broadcast peer discovery on default port `41234` (plus diagnostic probe port `24024`) and direct peer-to-peer framed TCP messaging connections on default port `41235` (plus diagnostic probe port `24025`). |
 | `--system-talk-name=org.bluez` | Bluetooth Low Energy Mesh | Required for the application to communicate with the host BlueZ system daemon over the D-Bus system bus to discover adapters, scan for BLE peers, host peripheral advertisements, and manage GATT services. |
 
 ### Filesystem Permissions
 
-BitChat does **not** request `--filesystem=host` or `--filesystem=home`. 
-The application strictly stores user preferences in `$XDG_CONFIG_HOME/bitchat` and identity keys in `$XDG_DATA_HOME/bitchat`. Flatpak isolates these within the per-application sandbox container (`~/.var/app/io.github.java_mx.bitchat/`), guaranteeing cryptographic and privacy isolation.
+BitChat does **not** request `--filesystem=host` or `--filesystem=home`.
+The application stores user preferences (`config.json`), identity keys (`identity.json` with `0600` mode), and rotating logs (`bitchat.log`) in `~/.bitchat/` inside its confined environment (`~/.var/app/io.github.java_mx.bitchat/`), guaranteeing cryptographic and privacy isolation.
 
 ## Building Locally
 

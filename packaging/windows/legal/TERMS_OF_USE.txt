@@ -1,77 +1,98 @@
-========================================================================
-BITCHAT TERMS OF USE
-DRAFT — PENDING PUBLISHER AND LEGAL REVIEW BEFORE PUBLIC RELEASE
-========================================================================
+BITCHAT TERMS OF USE & OPERATIONAL NOTICE
+=========================================
 
-Application: BitChat (Java-Mx.BitChat)
-Publisher:   Java-Mx
-Repository:  https://github.com/Java-Mx/bitchat-python
-License:     MIT License
-Effective:   October 2026
+DRAFT — LEGAL REVIEW REQUIRED:
+This document is a draft operational notice and terms disclosure for the
+open-source BitChat project (v0.3.1). It supplements — and does not restrict,
+replace, or override — the permissions granted under the MIT License. Before
+distributing BitChat in a commercial, enterprise, or regulated environment,
+this notice should be reviewed by the project publisher or qualified legal
+counsel.
 
-IMPORTANT NOTICE: This document is a draft prepared for the BitChat
-Windows Installer 2.0 distribution and must be reviewed and approved by
-the publisher (Java-Mx) and legal counsel prior to formal legal reliance.
+Effective Date: November 9, 2026
+Applicable Release: BitChat v0.3.1
+Repository: https://github.com/Java-Mx/bitchat-python
 
-1. ACCEPTANCE OF TERMS
-By downloading, installing, or using the BitChat Windows installer or
-the BitChat application ("the Software"), you acknowledge that you have
-read, understood, and agree to these Terms of Use. If you do not agree
-to these Terms of Use, do not install or use the Software.
 
-2. OPEN-SOURCE LICENSE RELATIONSHIP
-BitChat is free and open-source software distributed under the MIT
-License (included as LICENSE in the installation directory). Permission
-is granted, free of charge, to any person obtaining a copy of this
-Software and associated documentation files to deal in the Software
-without restriction, including without limitation the rights to use,
-copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, subject to the conditions of the MIT License. Nothing
-in these Terms of Use restricts or limits the permissions granted to you
-under the MIT License.
+1. RELATIONSHIP TO THE MIT LICENSE
+----------------------------------
+BitChat is free and open-source software licensed under the MIT License.
+- Nothing in this document restricts or diminishes your rights under the MIT
+  License to use, copy, modify, merge, publish, distribute, sublicense, or sell
+  copies of the software.
+- In the event of any conflict between this document and the MIT License, the
+  MIT License governs.
+- Displaying this document in the repository or inside an installer
+  acknowledgment step provides transparent operational and security
+  disclosures; whether an installer checkbox or use of the software forms a
+  binding contract beyond the MIT License depends on applicable local law.
 
-3. DESCRIPTION OF SOFTWARE & PEER-TO-PEER OPERATION
-BitChat is a decentralized, peer-to-peer terminal messaging application
-operating over Bluetooth Low Energy (BLE) and Local Area Networks (LAN).
-- BitChat operates without central servers, user accounts, or cloud
-  relays.
-- When Bluetooth or LAN transport is active, BitChat discovers and
-  communicates directly with nearby peers within radio range or on your
-  local network subnet.
-- The Windows installer allows you to configure your installation path,
-  user PATH integration, shortcuts, and optional Windows sign-in
-  startup. BitChat does not install hidden background services.
 
-4. SECURITY NOTICE & HIGH-RISK USE DISCLAIMER
-WARNING: No formal third-party cryptographic or security audit has been
-performed on bitchat-python. While BitChat implements Noise XX
-handshakes (X25519, ChaCha20-Poly1305, SHA-256), Ed25519 signatures, and
-AES-256-GCM, software defects may exist. Do not rely on BitChat for
-life-safety, emergency response, critical infrastructure, or high-risk
-communications.
+2. PERMITTED USE & ATTRIBUTION
+------------------------------
+Subject to the conditions of the MIT License:
+1. You may install, run, inspect, modify, and redistribute BitChat in source or
+   binary form for personal, academic, research, or commercial purposes.
+2. All copies or substantial portions of the software must retain the copyright
+   notice and permission notice specified in LICENSE.
+3. You may not use the names of the project authors, maintainers, or
+   contributors to endorse or promote derived products without prior written
+   permission.
 
-5. USER RESPONSIBILITIES & KEY MANAGEMENT
-- Local Cryptographic Identity: Your private keys are generated and
-  stored locally in %USERPROFILE%\.bitchat\identity.json (protected by
-  current-user Windows ACLs). There is no central key escrow or recovery
-  service. If you delete your identity keys, your cryptographic identity
-  cannot be recovered.
-- Lawful Use: You are solely responsible for your transmissions and for
-  complying with applicable local laws and network regulations.
 
-6. DISCLAIMER OF WARRANTIES ("AS IS")
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+3. USER RESPONSIBILITIES & LAWFUL OPERATION
+-------------------------------------------
+Because BitChat operates directly between user-controlled devices without
+central moderation or intermediary servers, you are solely responsible for how
+you configure and operate the software:
+- Lawful Communications: Ensure all messages and payloads you transmit comply
+  with applicable laws.
+- Radio & Spectrum Compliance: Comply with local wireless and Bluetooth
+  regulations when enabling the BLE transport.
+- Network Authorization: Comply with local network and firewall policies when
+  enabling the LAN transport (UDP port 41234, TCP port 41235).
 
-7. LIMITATION OF LIABILITY
-IN NO EVENT SHALL THE AUTHORS, PUBLISHER (Java-Mx), OR COPYRIGHT HOLDERS
-BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+
+4. PEER-TO-PEER & MULTI-HOP MESH BEHAVIOR
+-----------------------------------------
+1. Direct Broadcast & Discovery: Your device broadcasts BLE advertisements
+   (Service UUID F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C) or LAN UDP discovery
+   beacons (default port 41234, including peer_id, nickname, TCP port, and
+   detected Wi-Fi SSID) when not in Offline Mode.
+2. Multi-Hop Packet Relaying: When max_hops / TTL > 1 (default 3, max 7), your
+   node may automatically deduplicate, buffer in memory, and relay packets on
+   behalf of nearby peers.
+3. Untrusted Remote Peers: Nearby devices can read unencrypted outer packet
+   headers and public broadcast messages (0x04 Message). Transmitted messages
+   cannot be recalled from remote devices.
+
+
+5. IDENTITY, KEY MANAGEMENT & SECURITY LIMITATIONS
+--------------------------------------------------
+- Local Key Ownership: Private keys are stored locally in
+  ~/.bitchat/identity.json (%USERPROFILE%\.bitchat\identity.json on Windows)
+  without central recovery or passphrase encryption at rest.
+- No Independent Security Audit: While BitChat uses established primitives
+  (Noise_XX_25519_ChaChaPoly_SHA256, X25519, Ed25519, ChaCha20-Poly1305,
+  AES-256-GCM, HKDF-SHA256, PBKDF2-HMAC-SHA256), it has NOT undergone an
+  independent third-party cryptographic or security audit. Do not rely on
+  BitChat for life-safety, emergency, or critical high-threat operations.
+- Ephemeral Chat History: Chat messages are held in RAM only during the active
+  session and are not saved to disk in v0.3.1.
+
+
+6. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY
+---------------------------------------------------
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-8. COMPLETE TERMS & OFFICIAL LINKS
-- Terms of Use:   https://github.com/Java-Mx/bitchat-python/blob/main/TERMS_OF_USE.md
-- Privacy Policy: https://github.com/Java-Mx/bitchat-python/blob/main/PRIVACY_POLICY.md
-- Security:       https://github.com/Java-Mx/bitchat-python/blob/main/SECURITY.md
+
+7. CONTACT & REPORTING
+----------------------
+- General Support & Issues: https://github.com/Java-Mx/bitchat-python/issues
+- Private Security Advisories: https://github.com/Java-Mx/bitchat-python/security/advisories/new

@@ -6,11 +6,11 @@ This document details BitChat's Linux runtime architecture, D-Bus/BlueZ subsyste
 
 ## 1. Runtime Architecture
 
-BitChat operates across two independent local transport stacks on Linux:
-1. **Bluetooth Low Energy (BLE) Mesh:** Powered by the `bleak` library interfacing directly with the Linux kernel's BlueZ daemon via the system D-Bus bus.
-2. **Local Area Network (LAN) Mesh:** Direct peer discovery using UDP broadcast/multicast (port `24024`) and direct point-to-point TCP streaming connections (port `24025`).
+BitChat operates across two independent local transport stacks on Linux, accelerated by the native Rust core (`bitchat._bitchat_core`):
+1. **Bluetooth Low Energy (BLE) Mesh:** Powered by `bleak` and `dbus-fast` interfacing directly with the Linux kernel's BlueZ daemon via the system D-Bus bus.
+2. **Local Area Network (LAN) Mesh:** Direct peer discovery using UDP broadcast (default runtime port `41234`, configurable via `lan_discovery_port` in `~/.bitchat/config.json`) and direct framed TCP streaming connections (default runtime port `41235`, configurable via `lan_tcp_port`; diagnostic probe ports `24024` UDP / `24025` TCP).
 
-All user data transferred over both transports is secured end-to-end using the Noise Protocol Framework (Noise XX handshake with Curve25519, ChaCha20-Poly1305 / AES-GCM, and BLAKE2s / SHA-256).
+All private unicast user data transferred over both transports is secured end-to-end using the Noise Protocol Framework (`Noise_XX_25519_ChaChaPoly_SHA256` handshake with Curve25519, ChaCha20-Poly1305, and SHA-256).
 
 ---
 
@@ -53,17 +53,22 @@ sudo usermod -aG bluetooth $USER
 ## 3. LAN Subsystem & Firewall Rules
 
 LAN transport operates directly over local subnets (Wi-Fi and Ethernet):
-- **Peer Discovery:** UDP broadcasts sent to `255.255.255.255` on port `24024`.
-- **Peer Messaging:** TCP server bound to port `24025`.
+- **Peer Discovery (Runtime Default):** UDP broadcasts sent to `255.255.255.255` and directed subnet broadcast on port `41234` (configurable via `lan_discovery_port`).
+- **Peer Messaging (Runtime Default):** Framed TCP server bound to port `41235` (configurable via `lan_tcp_port`).
+- **Diagnostic Probe Ports (`bitchat --configure`):** Probes UDP `24024` and TCP `24025`.
 
 ### Firewall Ports
 Ensure local firewall rules permit traffic on these ports:
 ```bash
 # UFW
-sudo ufw allow 24024/udp comment 'BitChat Discovery'
-sudo ufw allow 24025/tcp comment 'BitChat Transport'
+sudo ufw allow 41234/udp comment 'BitChat LAN Discovery'
+sudo ufw allow 41235/tcp comment 'BitChat LAN Transport'
+sudo ufw allow 24024/udp comment 'BitChat Diagnostic Probe'
+sudo ufw allow 24025/tcp comment 'BitChat Diagnostic Probe'
 
 # Firewalld
+sudo firewall-cmd --add-port=41234/udp --permanent
+sudo firewall-cmd --add-port=41235/tcp --permanent
 sudo firewall-cmd --add-port=24024/udp --permanent
 sudo firewall-cmd --add-port=24025/tcp --permanent
 sudo firewall-cmd --reload

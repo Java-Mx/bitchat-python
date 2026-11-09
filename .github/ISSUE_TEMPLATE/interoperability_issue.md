@@ -1,14 +1,17 @@
 ---
 name: Interoperability Issue
-description: Report an interoperability problem between bitchat-python and another BitChat implementation
+description: Report an interoperability problem between BitChat and another BitChat implementation
 title: "[INTEROP] "
 labels: ["interoperability", "bug"]
 assignees: []
 ---
 
+> **Security Notice:** Do **NOT** report exploitable protocol or cryptographic vulnerabilities in public issues. Report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/Java-Mx/bitchat-python/security/advisories/new) (`SECURITY.md`).
+
 ## Environment & Versions
-- **Python version**: <!-- e.g., 3.12.3, 3.13.0 -->
-- **Rust / Reference client version**: <!-- e.g., bitchat-rust v0.2.1, bitchat iOS commit 4a2b1c -->
+- **BitChat version**: <!-- e.g., 0.3.1 (run `bitchat --version`) -->
+- **Python version**: <!-- e.g., 3.12.3 -->
+- **External / Reference client version**: <!-- e.g., bitchat-tui, bitchat iOS/Android commit SHA -->
 - **Operating systems**:
   - Python host OS: <!-- e.g., Windows 11 23H2, Ubuntu 24.04, macOS 14.5 -->
   - Peer host OS: <!-- e.g., Linux 6.8, iOS 17.5, Android 14 -->

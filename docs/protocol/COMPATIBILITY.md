@@ -1,10 +1,14 @@
-# Rust ↔ Python Compatibility Checklist
+# BitChat Protocol Interoperability & Compatibility (`v0.3.1`)
 
-This document provides a concrete compatibility verification checklist and test vector specification between the Rust reference implementation (`bitchat-tui`) and the future Python implementation.
+This document specifies the wire-level compatibility between BitChat (`bitchat-python` `v0.3.1`, including its embedded `rust/bitchat-core` native extension) and external BitChat v1 reference implementations, including intentional security hardening differences.
 
 ---
 
-## 1. Binary Packet Encoding Checklist
+## 1. Internal Python ↔ Rust Core Differential Parity (`v0.3.1`)
+
+Within this repository, `rust/bitchat-core` (`bitchat._bitchat_core`) and the pure-Python reference modules (`src/bitchat/protocol/`, `src/bitchat/network/framing.py`, `src/bitchat/mesh/dedup.py`) are 100% byte-for-byte compatible and continuously verified by `tests/unit/test_native_core.py`.
+
+## 2. Binary Packet Encoding Checklist (`v1`)
 
 - [x] **Protocol Version:** Exactly byte `0x01` (`1`)
 - [x] **Message Type:** Byte matches `MessageType` enum value (`0x01`–`0x25`)
@@ -29,7 +33,9 @@ This document provides a concrete compatibility verification checklist and test 
 | Property | Rust Reference (`bitchat-tui`) | Python Implementation (`bitchat-python`) | Rationale |
 |---|---|---|---|
 | **Padding Removal** | Permissive: strips `data[-1]` bytes without verifying against expected packet length | Strict: verifies `len(data) - expected_unpadded_size == data[-1]` | Rejects corrupted, truncated, or ambiguous trailing bytes |
-| **Packet Immutability** | Rust move/borrow semantics | Python frozen dataclass with byte normalization | Prevents external `bytearray` modification of packet data |
+| **Post-Handshake Peer ID Binding** | Permissive: generates random 8-byte peer ID independent of static Noise key | Strict: verifies `peer_id == SHA-256(remote_x25519_public)[:8]` after Noise XX handshake | Prevents an authenticated Noise peer from claiming an arbitrary routing `peer_id` |
+| **Handshake Payload Decryption Failure** | Logs debug warning and continues handshake | Raises `AuthenticationError` and aborts handshake immediately | Rejects tampered handshake ciphertexts |
+| **Packet Immutability** | Rust move/borrow semantics | Python frozen dataclass with byte normalization + Rust native codec | Prevents external `bytearray` modification of packet data |
 | **Reserved Flags** | Preserved | Preserved | Forward compatibility with future protocol revisions |
 | **Header Pre-Sender Size** | 14 bytes (arithmetic sum; code comment casually noted 13 bytes) | 14 bytes (`FIXED_HEADER_SIZE`) | Exact match with runtime wire bytes |
 | **Minimum Unpadded Packet** | 22 bytes (`14 + 8`) | 22 bytes (`MINIMUM_PACKET_SIZE`) | Fixed header + SenderID |
@@ -80,14 +86,14 @@ This document provides a concrete compatibility verification checklist and test 
 
 - [x] **Fragment Threshold:** Fragment only if packet wire size strictly > 500 bytes (`MAX_FRAGMENT_SIZE` / `FRAGMENTATION_THRESHOLD`)
 - [x] **Chunk Size:** Maximum 150 bytes payload per fragment (`FRAGMENT_CHUNK_SIZE`)
-- [ ] **Inter-fragment Timing:** 20ms sleep between consecutive BLE packet transmissions (Phase 6 BLE transport)
+- [x] **Inter-fragment Timing:** 20ms default sleep (`inter_fragment_delay_ms = 20`) between consecutive BLE packet transmissions
 - [x] **13-Byte Header:**
   - [x] 8 bytes random `fragment_id`
   - [x] 2 bytes Big-Endian `u16` `index`
   - [x] 2 bytes Big-Endian `u16` `total`
   - [x] 1 byte `u8` `original_type`
-- [x] **Reassembly:** Out-of-order index insertion into collector; reassemble when all `0..total-1` arrive with sender isolation & bounds validation
-- [ ] **Relay:** Relay individual fragments independently if `TTL > 1` (Phase 7 mesh routing)
+- [x] **Reassembly:** Out-of-order index insertion into collector (`NativeFragmentReassembler` / `FragmentReassembler`); reassemble when all `0..total-1` arrive with sender isolation & bounds validation
+- [x] **Relay:** Relay individual fragments independently if `TTL > 1` (`MeshRouter`)
 
 ---
 

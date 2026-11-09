@@ -5,7 +5,7 @@
 </p>
 
 > **BLE LOGIC VERIFIED VIA MOCKS — PHYSICAL TWO-MACHINE HARDWARE TESTING PENDING**
-> **WINDOWS INSTALLER 2.0 (`BitChat-0.2.0-windows-x64.exe`) — VERIFIED ON WINDOWS 11 x64**
+> **WINDOWS INSTALLER 2.0 (`BitChat-0.3.1-windows-x64.exe`) — VERIFIED ON WINDOWS 11 x64**
 
 ---
 
@@ -30,10 +30,10 @@
 - **Operating System:** Windows 10 (version 1809 / build 17763+) or Windows 11 (`x64`).
 - **Bluetooth / Network:**
   - Bluetooth 4.0+ BLE-capable adapter with Windows WinRT support, **and/or**
-  - Wi-Fi or Ethernet Local Area Network (LAN) for UDP discovery (`24024`/`41234`) and framed TCP (`24025`/`41235`).
+  - Wi-Fi or Ethernet Local Area Network (LAN) for runtime UDP discovery (default port `41234`) and framed TCP transport (default port `41235`), plus diagnostic probe ports (`24024`/`24025`).
 - **Disk Space:** Minimum 80 MB free disk space.
 - **Privileges:** Standard user account (default user-scope installation into `%LOCALAPPDATA%\Programs\BitChat` requires no Administrator privileges).
-- **Bundled Runtime:** Self-contained executable bundle (Python 3 runtime, Textual TUI, Bleak WinRT backend, and Cryptography are bundled; no manual Python, Git, or pip installation is required).
+- **Bundled Runtime:** Self-contained executable bundle (Python 3 runtime, Rust `bitchat._bitchat_core` native extension, Textual TUI, Bleak WinRT backend, and Cryptography are bundled; no manual Python, Rust, Git, or pip installation is required).
 
 ---
 
@@ -43,13 +43,13 @@ Official Windows installers are distributed through [GitHub Releases](https://gi
 
 - **Package Identifier:** `Java-Mx.BitChat`
 - **Publisher:** `Java-Mx`
-- **Current Installer:** `BitChat-0.2.0-windows-x64.exe`
+- **Current Installer:** `BitChat-0.3.1-windows-x64.exe`
 
-Before running the installer, verify its cryptographic SHA-256 checksum in PowerShell against the published `BitChat-0.2.0-windows-x64.exe.sha256` release asset:
+Before running the installer, verify its cryptographic SHA-256 checksum in PowerShell against the published `BitChat-0.3.1-windows-x64.exe.sha256` release asset:
 
 ```powershell
-Get-FileHash .\BitChat-0.2.0-windows-x64.exe -Algorithm SHA256
-Get-Content .\BitChat-0.2.0-windows-x64.exe.sha256
+Get-FileHash .\BitChat-0.3.1-windows-x64.exe -Algorithm SHA256
+Get-Content .\BitChat-0.3.1-windows-x64.exe.sha256
 ```
 
 ---
@@ -62,7 +62,7 @@ It is critical to distinguish between four separate Windows security concepts:
 
 | Mechanism | What It Proves | How It Is Verified |
 |---|---|---|
-| **1. Authenticode Signature Validity** | The binary has not been modified or tampered with since it was signed, and the signing certificate chain is valid (plus an RFC3161 timestamp proving when it was signed). | `Get-AuthenticodeSignature .\BitChat-0.2.0-windows-x64.exe` (`Status: Valid`, `TimeStamperCertificate` present). |
+| **1. Authenticode Signature Validity** | The binary has not been modified or tampered with since it was signed, and the signing certificate chain is valid (plus an RFC3161 timestamp proving when it was signed). | `Get-AuthenticodeSignature .\BitChat-0.3.1-windows-x64.exe` (`Status: Valid`, `TimeStamperCertificate` present). |
 | **2. Publisher Identity** | Identifies the legal entity or developer (`SignerCertificate.Subject`) holding the code-signing certificate issued by a trusted Certificate Authority (CA). | Inspecting `SignerCertificate.Subject` and `SignerCertificate.Issuer` in `Get-AuthenticodeSignature` or File Properties → Digital Signatures. |
 | **3. Windows Defender SmartScreen Reputation** | Microsoft's cloud reputation scoring for downloaded executables based on aggregate download volume, certificate history, and telemetry across Windows devices. | A valid Authenticode signature provides publisher identity and integrity, **not** immediate SmartScreen reputation. Newly signed certificates (and unsigned open-source binaries) may still display a SmartScreen prompt until download reputation is established. |
 | **4. WinGet / Microsoft Store Distribution Trust** | Package manifest validation and automated malware scanning performed by Microsoft's `winget-pkgs` pipeline or Microsoft Store certification. | `winget validate` and upstream PR review in [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs). |
@@ -82,7 +82,7 @@ It is critical to distinguish between four separate Windows security concepts:
 ### Verifying a Signed Installer
 
 ```powershell
-$sig = Get-AuthenticodeSignature .\BitChat-0.2.0-windows-x64.exe
+$sig = Get-AuthenticodeSignature .\BitChat-0.3.1-windows-x64.exe
 $sig | Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 ```
 
@@ -92,9 +92,9 @@ $sig | Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertific
 
 ### Interactive Setup Wizard (7 Screens)
 
-Running `BitChat-0.2.0-windows-x64.exe` launches the BitChat Setup Wizard:
+Running `BitChat-0.3.1-windows-x64.exe` launches the BitChat Setup Wizard:
 
-1. **Screen 1 — Welcome:** Displays official BitChat branding, version (`0.2.0`), publisher (`Java-Mx`), application summary, and official repository links.
+1. **Screen 1 — Welcome:** Displays official BitChat branding, version (`0.3.1`), publisher (`Java-Mx`), application summary, and official repository links.
 2. **Screen 2 — Terms of Use:** Displays the [`TERMS_OF_USE.md`](../../TERMS_OF_USE.md) draft with a clickable link to the online document and a required, initially unchecked checkbox (`I have read and agree to the BitChat Terms of Use.`). The **Next** button stays disabled until checked.
 3. **Screen 3 — Privacy Policy:** Displays the [`PRIVACY_POLICY.md`](../../PRIVACY_POLICY.md) draft with a clickable link and required acknowledgment checkbox (`I have read the BitChat Privacy Policy.`). Clarifies that BitChat collects zero telemetry or account data and that acknowledgment is never consent to tracking or marketing.
 4. **Screen 4 — Installation Location:** Defaults to `%LOCALAPPDATA%\Programs\BitChat` (user scope, no admin elevation required). Validates write permissions, free disk space (≥ 80 MB), existing installations, and blocks conflicting paths (drive roots, Windows system folders, or `~/.bitchat` user data directory).
@@ -115,21 +115,21 @@ Running `BitChat-0.2.0-windows-x64.exe` launches the BitChat Setup Wizard:
 ### WinGet Installation
 
 ```powershell
-# Once upstream PR (microsoft/winget-pkgs#443445) is merged:
+# Once upstream PR (microsoft/winget-pkgs) is merged:
 winget install Java-Mx.BitChat
 
 # Or install directly using the local manifest in this repository:
-winget install --manifest manifests/j/Java-Mx/BitChat/0.2.0/
+winget install --manifest manifests/j/Java-Mx/BitChat/0.3.1/
 ```
 
 ### Unattended / Silent CLI Installation
 
 ```powershell
 # Silent install to default user directory (%LOCALAPPDATA%\Programs\BitChat):
-.\BitChat-0.2.0-windows-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\BitChat-0.3.1-windows-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Silent install to a custom directory with Windows sign-in startup enabled:
-.\BitChat-0.2.0-windows-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="D:\Apps\BitChat" /TASKS="desktopicon,startmenuicon,envPath,startupicon,uninstallentry,!launchapp"
+.\BitChat-0.3.1-windows-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="D:\Apps\BitChat" /TASKS="desktopicon,startmenuicon,envPath,startupicon,uninstallentry,!launchapp"
 ```
 
 ---
@@ -167,7 +167,7 @@ bitchat --configure
      bitchat --startup enable
      bitchat --startup disable
      ```
-  2. **From Installer Maintenance Mode:** Re-run `BitChat-0.2.0-windows-x64.exe` and check or uncheck **Start BitChat automatically when Windows starts**.
+  2. **From Installer Maintenance Mode:** Re-run `BitChat-0.3.1-windows-x64.exe` and check or uncheck **Start BitChat automatically when Windows starts**.
   3. **From Windows Settings:** Toggle or remove `BitChat.lnk` in `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
 
 ---
@@ -187,21 +187,26 @@ When you run a newer BitChat installer over an existing installation:
 
 ## 8. Uninstallation & User Data Management
 
-You can uninstall BitChat from **Windows Settings → Apps → Installed apps**, the Start Menu **Uninstall BitChat** shortcut, `winget uninstall Java-Mx.BitChat`, or by running `{app}\unins000.exe`.
+You can uninstall BitChat from **Windows Settings → Apps → Installed apps**, the Start Menu **Uninstall BitChat** shortcut, `winget uninstall Java-Mx.BitChat`, `{app}\unins000.exe`, or directly from the command line using `bitchat --uninstall` (see [`docs/UNINSTALLATION.md`](../UNINSTALLATION.md)).
 
 The uninstaller removes:
 - Application binaries (`{app}\bitchat.exe`, `{app}\_internal\`, `{app}\assets\`, legal docs).
+- Console-script launchers (`bitchat.exe`, `bitchat-script.py`) installed inside non-checkout Python `Scripts` directories across all discovered Python versions on the machine.
 - Desktop and Start Menu shortcuts created by BitChat.
 - The per-user Windows Startup shortcut (`%APPDATA%\...\Startup\BitChat.lnk`) if enabled.
-- The user `PATH` entry if it was added by the BitChat installer.
+- The user `PATH` entry if it was added by the BitChat installer (never removing shared directories like `Python3XX\Scripts`).
 - The `HKCU\Software\Java-Mx\BitChat` and Windows Uninstall registry keys.
 
 ### Preserving vs. Deleting User Data (`%USERPROFILE%\.bitchat\`)
 
-- **Default Behavior (Preserved):** Both interactive and silent uninstallations preserve `%USERPROFILE%\.bitchat\` by default so you do not accidentally lose your cryptographic identity (`identity.json`) or configuration (`config.json`).
+- **Default Behavior (Preserved):** Both interactive and silent uninstallations (`bitchat --uninstall` or `unins000.exe`) preserve `%USERPROFILE%\.bitchat\` by default so you do not accidentally lose your cryptographic identity (`identity.json`) or configuration (`config.json`).
 - **Interactive Option to Delete User Data:** During interactive uninstallation, Setup displays a clear warning explaining that deleting `%USERPROFILE%\.bitchat\` permanently destroys your cryptographic private keys (`identity.json`) and cannot be undone, with **No (Keep data)** selected as the default button.
-- **Explicit CLI Option to Delete User Data:** For automated cleanup or scripts, pass `/REMOVEUSERDATA`:
+- **Explicit CLI Option to Delete User Data:**
   ```powershell
+  # Via built-in CLI uninstaller:
+  bitchat --uninstall --remove-user-data --yes
+
+  # Or via Inno Setup uninstaller:
   & "$env:LOCALAPPDATA\Programs\BitChat\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /REMOVEUSERDATA
   ```
 
@@ -234,7 +239,7 @@ The uninstaller removes:
 
 1. **Windows SmartScreen Warning ("Windows protected your PC"):**
    - Because community builds are compiled without a commercial EV/OV certificate (`Status: NotSigned`), Windows Defender SmartScreen displays an unknown publisher prompt.
-   - Verify the SHA-256 hash using `Get-FileHash .\BitChat-0.2.0-windows-x64.exe -Algorithm SHA256` against `BitChat-0.2.0-windows-x64.exe.sha256`. If it matches, click **More info → Run anyway**. Never disable SmartScreen or Microsoft Defender system-wide.
+   - Verify the SHA-256 hash using `Get-FileHash .\BitChat-0.3.1-windows-x64.exe -Algorithm SHA256` against `BitChat-0.3.1-windows-x64.exe.sha256`. If it matches, click **More info → Run anyway**. Never disable SmartScreen or Microsoft Defender system-wide.
 2. **`bitchat` is not recognized in PowerShell:**
    - Close and reopen your terminal window so the updated user `PATH` is loaded, or refresh it in your current session:
      ```powershell
@@ -244,5 +249,5 @@ The uninstaller removes:
    - Ensure you selected a user-writable directory such as `%LOCALAPPDATA%\Programs\BitChat`, or run the installer as Administrator if installing to `C:\Program Files\BitChat`.
    - Generate a diagnostic setup log with:
      ```powershell
-     .\BitChat-0.2.0-windows-x64.exe /LOG="bitchat-install.log"
+     .\BitChat-0.3.1-windows-x64.exe /LOG="bitchat-install.log"
      ```

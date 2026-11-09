@@ -22,10 +22,10 @@ This document provides a comprehensive technical specification of the Noise Prot
 - **`Responder`:** The peer receiving the initial handshake request. Receives Message 1 and replies with Handshake Message 2 (`NoiseHandshakeResp`, `0x11`).
 
 ### Key Material:
-- **Local Static Key:** 32-byte X25519 private scalar (`StaticSecret`), persisted across sessions in `~/.bitchat/state.json`.
-- **Local Static Public Key:** 32-byte X25519 public key derived from the static secret.
+- **Local Static Key:** 32-byte X25519 private key (`x25519_private`), persisted across sessions in `~/.bitchat/identity.json` (`0600` on POSIX, current-user DACL on Windows).
+- **Local Static Public Key:** 32-byte X25519 public key derived from the static private key.
 - **Local Ephemeral Key Pair:** Fresh X25519 key pair generated anew for every single handshake attempt.
-- **Remote Static Public Key:** 32-byte X25519 public key learned and authenticated during the handshake.
+- **Remote Static Public Key:** 32-byte X25519 public key learned and authenticated during the handshake (and bound to the peer's 8-byte routing `peer_id` via `SHA-256(remote_x25519_public)[:8]`).
 - **Remote Ephemeral Public Key:** 32-byte X25519 public key received in the handshake exchange.
 
 ---
