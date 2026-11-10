@@ -23,10 +23,13 @@
 
 <br /><br />
 
-<video src="https://github.com/Java-Mx/bitchat-python/raw/main/docs/assets/videos/bitchat-demo.mp4" poster="screenshots/chat-interface.png" controls="controls" muted="muted" autoplay="autoplay" loop="loop" width="100%" style="max-width: 840px; border-radius: 8px;">
-  <source src="docs/assets/videos/bitchat-demo.mp4" type="video/mp4">
-  <p>Your browser does not support the video tag. Watch or download the <a href="docs/assets/videos/bitchat-demo.mp4">BitChat demonstration video</a>.</p>
-</video>
+<a href="https://github.com/Java-Mx/bitchat-python/raw/main/docs/assets/videos/bitchat-demo.mp4" title="Click to stream or download full-resolution MP4 video">
+  <img src="docs/assets/videos/bitchat-demo.gif" alt="BitChat Python Terminal Demonstration" width="840" />
+</a>
+
+<p align="center">
+  <sub><b>Live Application Demonstration</b> &bull; Peer-to-peer encrypted terminal mesh chat &bull; <a href="https://github.com/Java-Mx/bitchat-python/raw/main/docs/assets/videos/bitchat-demo.mp4"><b>Watch / Download Full HD 1440p MP4</b></a></sub>
+</p>
 
 </div>
 

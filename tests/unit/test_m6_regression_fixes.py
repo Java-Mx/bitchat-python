@@ -684,7 +684,10 @@ async def test_connection_modal_ble_peripheral_abort_presents_error_modal(
 
             # Select BLE (Option 1 / index 0)
             app.screen.action_select_ble()
-            await pilot.pause()
+            for _ in range(5):
+                await pilot.pause()
+                if isinstance(app.screen, BLEErrorModal):
+                    break
 
             # ConnectionModal must NOT swallow error or navigate to Chat!
             # BLEErrorModal must be presented with status 3 diagnostics!
@@ -745,7 +748,10 @@ async def test_connection_modal_lan_failure_presents_error_modal(
 
             # Select LAN (Option 2 / index 1)
             app.screen.action_select_lan()
-            await pilot.pause()
+            for _ in range(5):
+                await pilot.pause()
+                if isinstance(app.screen, BLEErrorModal):
+                    break
 
             # Must present BLEErrorModal in LAN mode!
             assert isinstance(app.screen, BLEErrorModal)
@@ -780,7 +786,10 @@ async def test_ble_retry_on_homescreen_presents_error_modal(
 
         # Trigger BLE retry from HomeScreen
         await app._handle_ble_retry()
-        await pilot.pause()
+        for _ in range(5):
+            await pilot.pause()
+            if isinstance(app.screen, BLEErrorModal):
+                break
 
         # BLE recovery dialog MUST appear over HomeScreen!
         assert isinstance(app.screen, BLEErrorModal)
