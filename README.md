@@ -21,6 +21,13 @@
 [![Stars](https://img.shields.io/github/stars/Java-Mx/bitchat-python?style=flat)](https://github.com/Java-Mx/bitchat-python/stargazers)
 [![Forks](https://img.shields.io/github/forks/Java-Mx/bitchat-python?style=flat)](https://github.com/Java-Mx/bitchat-python/network/members)
 
+<br /><br />
+
+<video src="https://github.com/Java-Mx/bitchat-python/raw/main/docs/assets/videos/bitchat-demo.mp4" poster="screenshots/chat-interface.png" controls="controls" muted="muted" autoplay="autoplay" loop="loop" width="100%" style="max-width: 840px; border-radius: 8px;">
+  <source src="docs/assets/videos/bitchat-demo.mp4" type="video/mp4">
+  <p>Your browser does not support the video tag. Watch or download the <a href="docs/assets/videos/bitchat-demo.mp4">BitChat demonstration video</a>.</p>
+</video>
+
 </div>
 
 BitChat Python is an asynchronous terminal client implementing the [BitChat](https://github.com/vaibhav-mattoo/bitchat-tui) protocol. Nodes discover each other over Bluetooth Low Energy or local Wi-Fi, negotiate authenticated Noise XX sessions, and exchange end-to-end encrypted messages across a self-forming multi-hop mesh — no infrastructure required.
