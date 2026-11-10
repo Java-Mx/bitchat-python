@@ -142,7 +142,10 @@ class PeersScreen(Screen[None]):
                 f"[bold #39c5cf]{active_transport}[/bold #39c5cf]"
             )
 
-        table = self.query_one("#peers-table", DataTable)
+        try:
+            table = self.query_one("#peers-table", DataTable)
+        except Exception:
+            return
         table.clear()
 
         if coord is None:

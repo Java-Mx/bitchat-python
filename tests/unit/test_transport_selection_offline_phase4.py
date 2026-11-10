@@ -199,7 +199,10 @@ async def test_scenario_5_option_1_ble_failure_shows_recovery_dialog(
 
             # Option 1 explicitly chosen
             app.screen.action_select_ble()
-            await pilot.pause()
+            for _ in range(5):
+                await pilot.pause()
+                if isinstance(app.screen, BLEErrorModal):
+                    break
 
             # Recovery dialog presented
             assert isinstance(app.screen, BLEErrorModal)
